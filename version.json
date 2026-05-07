@@ -1,0 +1,5 @@
+{
+  "version": "2026.05.04.5",
+  "released": "2026-05-04",
+  "notes": "Custom in-app numeric keyboard with math operators (+ − × ÷ % parens). Suppresses OS keyboard on focus, supports calculator-style expressions everywhere. Toggle in Settings (auto/on/off)."
+}
