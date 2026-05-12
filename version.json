@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.6",
+  "version": "2026.05.04.7",
   "released": "2026-05-04",
-  "notes": "Investment redemption transaction type (+ Redeem button in journal) for partial cash-outs. Per-instrument 'Compounds monthly' toggle in Edit Inputs - off by default (annual May credit). All existing investments default to annual; flip the toggle on for MFs/stocks/etc. to restore monthly compounding."
+  "notes": "Redemptions now flow into Cash Balance correctly (fixed double-count bug). New 'Redemptions' row in Surplus & Allocation section on the projection sheet showing total redemptions per month. Overflow row now includes redemptions as positive cash inflow."
 }
