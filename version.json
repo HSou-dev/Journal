@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.5",
+  "version": "2026.05.04.6",
   "released": "2026-05-04",
-  "notes": "Custom in-app numeric keyboard with math operators (+ − × ÷ % parens). Suppresses OS keyboard on focus, supports calculator-style expressions everywhere. Toggle in Settings (auto/on/off)."
+  "notes": "Investment redemption transaction type (+ Redeem button in journal) for partial cash-outs. Per-instrument 'Compounds monthly' toggle in Edit Inputs - off by default (annual May credit). All existing investments default to annual; flip the toggle on for MFs/stocks/etc. to restore monthly compounding."
 }
