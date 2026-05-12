@@ -1210,7 +1210,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.6';
+const APP_VERSION = '2026.05.04.7';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -4419,18 +4419,38 @@ function renderBudget() {
     }
   }
 
-  // ---- Unplanned overflow = surplus − investments − planned-savings ----
+  // ---- Redemptions row ----
+  // Combined total of all investment_redemption transactions per month. Shown as a separate
+  // inflow alongside Net Surplus (it's new cash entering the spending pool from outside the
+  // engine's normal projection, e.g. selling MFs to fund expenses or rebalancing).
+  // Always visible for consistency with contribution rows.
+  const redemptionsRow = { numeric: new Array(n).fill(0), display: new Array(n).fill('') };
+  for (let i = 0; i < n; i++) {
+    const ym = isos[i];
+    let total = 0;
+    (state.transactions || []).forEach(tx => {
+      if (tx.type !== 'investment_redemption') return;
+      if (!tx.date || tx.date.slice(0, 7) !== ym) return;
+      total += Number(tx.amount) || 0;
+    });
+    redemptionsRow.numeric[i] = total;
+    redemptionsRow.display[i] = fmtMoney(total);
+  }
+
+  // ---- Unplanned overflow = surplus − investments − planned-savings + redemptions ----
   // What's left after: living costs, EMIs, scheduled investments, and your planned savings transfer.
   // Positive = leftover you can sweep to savings or invest. Negative = shortfall (overspending or
   // your planned transfer was too aggressive given the month's actual flows).
+  // Redemptions add to the overflow pool — they're new cash from outside the engine.
   const overflowRow = new Array(n).fill(0);
   for (let i = 0; i < n; i++) {
-    overflowRow[i] = (cashContribRow[i] || 0) - plannedSavingsRow.numeric[i];
+    overflowRow[i] = (cashContribRow[i] || 0) - plannedSavingsRow.numeric[i] + (redemptionsRow.numeric[i] || 0);
   }
 
   document.getElementById('budgetSavings').innerHTML =
     `<tr class="section-head"><th colspan="${colspan}">Surplus &amp; Allocation</th></tr>` +
     `<tr class="surplus-row"><th>Net Surplus</th>${cells(surplus)}</tr>` +
+    `<tr><th>Redemptions <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— investments sold to cash</span></th>${cellsOverlay(redemptionsRow)}</tr>` +
     contribRows.map(r => `<tr><th>${escapeHtml(r.label)}</th>${cellsOverlay(r.overlay)}</tr>`).join('') +
     ((plannedSavingsAmt > 0 || plannedSavingsRow.numeric.some(v => v !== 0))
       ? `<tr><th>Planned to Savings</th>${cellsOverlay(plannedSavingsRow)}</tr>`
@@ -4472,7 +4492,10 @@ function renderBudget() {
       else if (tx.type === 'income' && tx.accountId === 'savings') total += amt;
       else if (tx.type === 'expense' && tx.accountId === 'savings') total -= amt;
       else if (tx.type === 'investment_contrib' && tx.accountId === 'savings') total -= amt;
-      else if (tx.type === 'investment_redemption' && tx.accountId === 'savings') total += amt;
+      // NOTE: investment_redemption is intentionally NOT in this list. Redemptions are new
+      // cash entering from outside the engine's flow model (engine doesn't project redemptions).
+      // The engine sees the post-redemption opening balance and projects the FULL residual on top,
+      // which is correct — that's actual new cash, not double-counted budgeted flow.
       else if (tx.type === 'adjustment' && tx.accountId === 'savings') {
         const dir = tx.direction === 'subtract' ? -1 : 1;
         total += dir * amt;
