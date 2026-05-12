@@ -881,6 +881,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
         <button class="btn ghost" id="addIncomeBtn" style="flex:1; min-width:140px;">+ Income</button>
         <button class="btn ghost" id="addTransferBtn" style="flex:1; min-width:140px;">+ Transfer</button>
         <button class="btn ghost" id="addInvestBtn" style="flex:1; min-width:140px;">+ Invest</button>
+        <button class="btn ghost" id="addRedeemBtn" style="flex:1; min-width:140px;">− Redeem</button>
         <button class="btn ghost" id="addAdjustmentBtn" style="flex:1; min-width:140px;">± Adjust</button>
       </div>
       <div class="card" style="padding:0;">
@@ -1209,7 +1210,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.5';
+const APP_VERSION = '2026.05.04.6';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -1260,6 +1261,14 @@ function migrateState(s) {
   if (!Array.isArray(s.transactions)) s.transactions = [];
   // Default planned savings transfer to 0 for legacy state without this field.
   if (typeof s.plannedSavingsTransfer !== 'number') s.plannedSavingsTransfer = 0;
+  // Per-instrument compounding rule: default to ANNUAL (compoundsMonthly=false) for every
+  // existing investment. User opts back into monthly via the toggle in Edit Inputs.
+  // Per user decision: change applies to all existing investments immediately.
+  if (Array.isArray(s.investments)) {
+    s.investments.forEach(inv => {
+      if (inv && typeof inv.compoundsMonthly !== 'boolean') inv.compoundsMonthly = false;
+    });
+  }
 
   // Backfill EMI ids: legacy state may have EMIs without ids. Generate stable ids
   // so journal entries can reference specific EMIs by id (tx.emiId).
@@ -1570,6 +1579,7 @@ function _salaryBalanceAtEndOfMonth(monthYM) {
     else if (tx.type === 'transfer' && tx.fromAccountId === 'salary') bal += amt;
     else if (tx.type === 'transfer' && tx.toAccountId === 'salary') bal -= amt;
     else if (tx.type === 'investment_contrib' && tx.accountId === 'salary') bal += amt;
+    else if (tx.type === 'investment_redemption' && tx.accountId === 'salary') bal -= amt;
     else if (tx.type === 'adjustment' && tx.accountId === 'salary') {
       const dir = tx.direction === 'subtract' ? -1 : 1;
       bal -= dir * amt;
@@ -2320,7 +2330,8 @@ function addInvestmentRow(data={}) {
   const opts = INSTRUMENT_TEMPLATES.map(t => `<option value="${t.id}" ${t.id===invId?'selected':''}>${t.name}</option>`).join('');
   const rate = data.rate !== undefined ? (data.rate * 100).toFixed(2) : (INSTRUMENT_TEMPLATES.find(t=>t.id===invId)?.defaultRate * 100).toFixed(2);
   const liquid = data.liquid !== undefined ? data.liquid : (INSTRUMENT_TEMPLATES.find(t=>t.id===invId)?.defaultLiquid ?? false);
-  row.innerHTML = `<div class="field"><label>Instrument</label><select data-field="type">${opts}</select></div><div class="field"><label>Label</label><input type="text" data-field="name" placeholder="e.g. HDFC Savings" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Current balance</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="balance" min="0" step="any" value="${data.balance||0}" /></div></div><div class="field"><label>Monthly contribution</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="monthly" min="0" step="any" value="${data.monthlyContribution||0}" /></div></div><div class="field" style="grid-column:1 / -1;"><div class="toggle ${liquid?'on':''}" data-field="liquid"><div class="toggle-info"><div class="name">Treat as liquid</div><div class="desc">Can be converted to cash quickly, without material loss.</div></div><div class="switch"></div></div></div><input type="hidden" data-field="rate" value="${rate||0}" />`;
+  const cm = data.compoundsMonthly === true; // default annual
+  row.innerHTML = `<div class="field"><label>Instrument</label><select data-field="type">${opts}</select></div><div class="field"><label>Label</label><input type="text" data-field="name" placeholder="e.g. HDFC Savings" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Current balance</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="balance" min="0" step="any" value="${data.balance||0}" /></div></div><div class="field"><label>Monthly contribution</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="monthly" min="0" step="any" value="${data.monthlyContribution||0}" /></div></div><div class="field" style="grid-column:1 / -1;"><div class="toggle ${liquid?'on':''}" data-field="liquid"><div class="toggle-info"><div class="name">Treat as liquid</div><div class="desc">Can be converted to cash quickly, without material loss.</div></div><div class="switch"></div></div></div><div class="field" style="grid-column:1 / -1;"><div class="toggle ${cm?'on':''}" data-field="compoundsMonthly"><div class="toggle-info"><div class="name">Compounds monthly</div><div class="desc">Off (default) = interest credited once a year on the May anniversary, like FD/PPF. On = compounds every month, more realistic for equities (MFs, stocks, etc.).</div></div><div class="switch"></div></div></div><input type="hidden" data-field="rate" value="${rate||0}" />`;
   row.style.gridTemplateColumns = '2fr 2fr 1.5fr 1.5fr auto';
   const select = row.querySelector('select[data-field="type"]');
   const nameInput = row.querySelector('input[data-field="name"]');
@@ -2333,6 +2344,8 @@ function addInvestmentRow(data={}) {
     row.querySelector('input[data-field="rate"]').value = (tmpl.defaultRate * 100).toFixed(2);
   });
   liquidToggle.querySelector('.switch').addEventListener('click', () => liquidToggle.classList.toggle('on'));
+  const cmToggle = row.querySelector('.toggle[data-field="compoundsMonthly"]');
+  if (cmToggle) cmToggle.querySelector('.switch').addEventListener('click', () => cmToggle.classList.toggle('on'));
   if (!nameInput.value.trim()) nameInput.value = INSTRUMENT_TEMPLATES.find(t=>t.id===invId)?.name || '';
   const del = document.createElement('button');
   del.className = 'del-btn'; del.innerHTML = '×'; del.title = 'Remove';
@@ -2424,8 +2437,9 @@ function readInvestments() {
     const rateInput = row.querySelector('[data-field="rate"]');
     const rate = (Number((rateInput||{}).value) || 0) / 100;
     const liquid = (row.querySelector('.toggle[data-field="liquid"]')||{}).classList?.contains('on') || false;
+    const compoundsMonthly = (row.querySelector('.toggle[data-field="compoundsMonthly"]')||{}).classList?.contains('on') || false;
     const tmpl = INSTRUMENT_TEMPLATES.find(t => t.id === id) || INSTRUMENT_TEMPLATES[0];
-    if (name) result.push({ id, name, balance, monthlyContribution, rate, liquid, color: tmpl.color });
+    if (name) result.push({ id, name, balance, monthlyContribution, rate, liquid, compoundsMonthly, color: tmpl.color });
   });
   return result;
 }
@@ -3112,10 +3126,15 @@ function runProjection(overrides={}) {
   const _origRunProjection = runProjection;
 
   // Instruments that pay interest ANNUALLY (credited once per year on anniversary), not monthly.
-  // FD: paid at maturity; Bonds: typically annual coupons; PPF: credited Mar 31 (Indian fiscal year-end).
-  // Savings account: per user preference, treated annual for cleaner yearly bumps.
-  // Everything else (MF, Stocks, Crypto, Gold, Real Estate, RD, Other) keeps monthly compounding.
-  const ANNUAL_INTEREST_INV_IDS = new Set(['fd', 'bonds', 'ppf']);
+  // Per-investment compounding rule.
+  // - Annual (default): credited once a year on the May anniversary, like FD/Bond/PPF/RD/Savings.
+  // - Monthly: compounds every month, like MFs/Stocks/Crypto/etc. tend to.
+  // User-toggleable per-investment via `inv.compoundsMonthly` (set in Edit Inputs → Investments).
+  // For legacy data without the flag, default to ANNUAL (matches user's recent decision).
+  function _invCompoundsMonthly(inv) {
+    return inv && inv.compoundsMonthly === true;
+  }
+  const ANNUAL_INTEREST_INV_IDS = null; // deprecated — now per-investment via _invCompoundsMonthly
 
   window.runProjection = runProjection = function(overrides={}) {
     const result = _origRunProjection(overrides);
@@ -3150,7 +3169,7 @@ function runProjection(overrides={}) {
     // for the first year). This matches how real FDs/Bonds work — interest accrues on
     // the principal you held through the year, not on contributions you added mid-year.
     (result.investments || []).forEach(inv => {
-      if (!ANNUAL_INTEREST_INV_IDS.has(inv.id)) return;
+      if (_invCompoundsMonthly(inv)) return; // monthly-compounding instruments use engine's default math
       const k = inv.id + '_' + inv.name;
       const contribs = result.contribPerMonth[k] || [];
       const annualRate = Math.max(0, inv.rate);
@@ -3299,7 +3318,7 @@ function runProjection(overrides={}) {
     // Per-investment monthly rate (annual-interest instruments don't compound monthly).
     const invMonthlyRate = {};
     (result.investments || []).forEach(inv => {
-      const isAnnual = ['fd', 'bonds', 'ppf', 'rd'].includes(inv.id);
+      const isAnnual = !_invCompoundsMonthly(inv);  // patched-IIFE scope
       invMonthlyRate[inv.id + '_' + inv.name] = isAnnual ? 0 : (Math.pow(1 + Math.max(0, inv.rate), 1/12) - 1);
     });
 
@@ -4023,6 +4042,9 @@ function renderBudget() {
       } else if (tx.type === 'investment_contrib') {
         const acc = (state.accounts || []).find(a => a.id === tx.accountId);
         if (acc && acc.id === 'savings') bal += amt;
+      } else if (tx.type === 'investment_redemption') {
+        // Cash arrived at the destination account. If that was savings, reverse-walk subtracts.
+        if (tx.accountId === 'savings') bal -= amt;
       }
     });
     return bal;
@@ -4050,6 +4072,9 @@ function renderBudget() {
         bal += dir * amt;
       } else if (tx.type === 'investment_contrib' && tx.accountId === accId) {
         bal += amt;
+      } else if (tx.type === 'investment_redemption' && tx.accountId === accId) {
+        // Cash arrived at this liability (= debt paid down). Reverse-walk subtracts.
+        bal -= amt;
       }
     });
     return bal;
@@ -4069,6 +4094,15 @@ function renderBudget() {
       if (tx.investmentId !== inv.id) return;
       if (!tx.date || !_afterEndOfMonth(tx.date, monthYM)) return;
       postContribs += Number(tx.amount) || 0;
+    });
+    // Sum redemptions logged AFTER end of monthYM — these reduced today's balance,
+    // so at end of monthYM the balance was HIGHER by this amount.
+    let postRedemptions = 0;
+    (state.transactions || []).forEach(tx => {
+      if (tx.type !== 'investment_redemption') return;
+      if (tx.investmentId !== inv.id) return;
+      if (!tx.date || !_afterEndOfMonth(tx.date, monthYM)) return;
+      postRedemptions += Number(tx.amount) || 0;
     });
     // Also need to add scheduled contributions that the engine projected for months strictly between
     // monthYM and now. The engine's contribPerMonth already accounts for these for past months.
@@ -4092,7 +4126,7 @@ function renderBudget() {
     const totalContribsSinceMonthYM = postContribs + scheduledContribsBetween;
     // Undo growth: balance at end-of-monthYM such that compounding forward + adding contribs gives todayBal.
     // Simplification: subtract total contribs first, then divide by growth factor.
-    const isAnnual = ['fd', 'bonds', 'ppf', 'rd'].includes(inv.id);
+    const isAnnual = !(inv && inv.compoundsMonthly === true);
     const annualRate = Math.max(0, inv.rate || 0);
     // Count months between monthYM and today
     const [my, mm] = _ymToYearMonth(monthYM);
@@ -4116,7 +4150,10 @@ function renderBudget() {
       growthFactor = Math.pow(1 + monthlyRate, monthsAhead);
     }
     if (growthFactor <= 0) growthFactor = 1;
-    const balAfterContribsRemoved = todayBal - totalContribsSinceMonthYM;
+    // Reverse-walk formula:
+    //   end-of-monthYM balance × growth_factor + contribs_added_since − redemptions_taken_since = today_balance
+    //   end-of-monthYM balance = (today_balance + redemptions_taken_since − contribs_added_since) / growth_factor
+    const balAfterContribsRemoved = todayBal + postRedemptions - totalContribsSinceMonthYM;
     const reconstructed = balAfterContribsRemoved / growthFactor;
     return Math.max(0, reconstructed);
   }
@@ -4435,6 +4472,7 @@ function renderBudget() {
       else if (tx.type === 'income' && tx.accountId === 'savings') total += amt;
       else if (tx.type === 'expense' && tx.accountId === 'savings') total -= amt;
       else if (tx.type === 'investment_contrib' && tx.accountId === 'savings') total -= amt;
+      else if (tx.type === 'investment_redemption' && tx.accountId === 'savings') total += amt;
       else if (tx.type === 'adjustment' && tx.accountId === 'savings') {
         const dir = tx.direction === 'subtract' ? -1 : 1;
         total += dir * amt;
@@ -5733,6 +5771,16 @@ document.addEventListener('keydown', (e) => {
       // adjusts forward). Here we only move the source account.
       const acc = (state.accounts || []).find(a => a.id === tx.accountId);
       if (acc) acc.openingBalance -= sign * tx.amount;
+    } else if (tx.type === 'investment_redemption') {
+      // Cash arrives at destination account; investment balance decreases by the redeemed
+      // amount. Both sides are mutated live so the projection starts from corrected values.
+      // The investment balance can't go below 0 — we clamp defensively.
+      const acc = (state.accounts || []).find(a => a.id === tx.accountId);
+      if (acc) acc.openingBalance += sign * tx.amount;
+      const inv = (state.investments || []).find(i => i.id === tx.investmentId);
+      if (inv) {
+        inv.balance = Math.max(0, (Number(inv.balance) || 0) - sign * tx.amount);
+      }
     }
   }
 
@@ -5804,6 +5852,12 @@ document.addEventListener('keydown', (e) => {
         line1 = tx.note || ('Invest · ' + (inv ? inv.name : 'investment'));
         line2 = `${formatDate(tx.date)} · ${acc ? acc.name : '?'} → ${inv ? inv.name : '?'}`;
         amtClass = 'neg'; amtPrefix = '−';
+      } else if (tx.type === 'investment_redemption') {
+        const inv = (state.investments || []).find(i => i.id === tx.investmentId);
+        icon = '<div class="tx-icon transfer">↙</div>';
+        line1 = tx.note || ('Redeem · ' + (inv ? inv.name : 'investment'));
+        line2 = `${formatDate(tx.date)} · ${inv ? inv.name : '?'} → ${acc ? acc.name : '?'}`;
+        amtClass = 'pos'; amtPrefix = '+';
       } else if (tx.type === 'adjustment') {
         const isAdd = tx.direction !== 'subtract';
         icon = '<div class="tx-icon adjustment">±</div>';
@@ -5888,8 +5942,8 @@ document.addEventListener('keydown', (e) => {
     },
     hide() { this.overlay().classList.remove('show'); document.body.style.overflow = ''; },
     populate(type, tx) {
-      const titles = { expense: 'New expense', income: 'New income', transfer: 'New transfer', adjustment: 'New adjustment', investment_contrib: 'New investment' };
-      document.getElementById('txModalTitle').textContent = tx ? `Edit ${type === 'investment_contrib' ? 'investment' : type}` : titles[type];
+      const titles = { expense: 'New expense', income: 'New income', transfer: 'New transfer', adjustment: 'New adjustment', investment_contrib: 'New investment', investment_redemption: 'Redeem investment' };
+      document.getElementById('txModalTitle').textContent = tx ? `Edit ${type === 'investment_contrib' ? 'investment' : (type === 'investment_redemption' ? 'redemption' : type)}` : titles[type];
       document.getElementById('txType').value = type;
       document.getElementById('txEditingId').value = tx ? tx.id : '';
       document.getElementById('txDeleteBtn').style.display = tx ? '' : 'none';
@@ -5899,15 +5953,16 @@ document.addEventListener('keydown', (e) => {
       const isTransfer = type === 'transfer';
       const isAdjustment = type === 'adjustment';
       const isInvestment = type === 'investment_contrib';
+      const isRedemption = type === 'investment_redemption';
       const single = !isTransfer;
       document.getElementById('txAccountField').style.display = single ? '' : 'none';
       document.getElementById('txFromField').style.display    = isTransfer ? '' : 'none';
       document.getElementById('txToField').style.display      = isTransfer ? '' : 'none';
       // Category chips only for expense/income — not for adjustments or investments
-      document.getElementById('txCategoryField').style.display = (single && !isAdjustment && !isInvestment) ? '' : 'none';
-      // Investment destination dropdown — only for investment_contrib
+      document.getElementById('txCategoryField').style.display = (single && !isAdjustment && !isInvestment && !isRedemption) ? '' : 'none';
+      // Investment destination/source dropdown — for investment_contrib AND investment_redemption
       const investField = document.getElementById('txInvestField');
-      if (investField) investField.style.display = isInvestment ? '' : 'none';
+      if (investField) investField.style.display = (isInvestment || isRedemption) ? '' : 'none';
       // Adjustment-specific fields
       const adjDirField = document.getElementById('txAdjDirectionField');
       const adjHiddenField = document.getElementById('txAdjHiddenField');
@@ -5954,8 +6009,23 @@ document.addEventListener('keydown', (e) => {
           // Trigger autofill on first open if amount empty
           if (!tx && investSel.value) investSel.dispatchEvent(new Event('change'));
         }
+      } else if (type === 'investment_redemption') {
+        document.getElementById('txAccountLabel').textContent = 'Destination account (cash lands here)';
+        document.getElementById('txAccount').value = tx ? tx.accountId : (lastUsedAccount('investment_redemption') || (state.accounts.find(a=>a.id==='savings')?.id || (state.accounts[0]?.id)));
+        const investSel = document.getElementById('txInvestment');
+        if (investSel) {
+          // Show current balance per investment so user knows what's available
+          const opts = (state.investments || []).map(inv => {
+            const bal = Number(inv.balance) || 0;
+            const balTxt = ' · balance ' + fmtMoney(bal, true);
+            return '<option value="' + escapeHtml(inv.id) + '">' + escapeHtml(inv.name) + balTxt + '</option>';
+          }).join('');
+          investSel.innerHTML = opts || '<option value="">(no investments configured)</option>';
+          if (tx && tx.investmentId) investSel.value = tx.investmentId;
+          investSel.onchange = null; // no auto-fill — user enters actual amount received
+        }
       }
-      if (single && type !== 'adjustment' && type !== 'investment_contrib') {
+      if (single && type !== 'adjustment' && type !== 'investment_contrib' && type !== 'investment_redemption') {
         const cats = type === 'income' ? INCOME_CATS : EXPENSE_CATS_FOR_TX;
         // Active EMIs as of selected date (only for expense type) — each becomes its own chip.
         const activeEmis = (type === 'expense') ? (state.emis || []).filter(e => {
@@ -6046,6 +6116,12 @@ document.addEventListener('keydown', (e) => {
         const investSel = document.getElementById('txInvestment');
         const investmentId = investSel ? investSel.value : '';
         if (!investmentId) { alert('Pick a destination investment.'); return; }
+        tx = { type, amount, date, accountId: acc, investmentId, note };
+      } else if (type === 'investment_redemption') {
+        const acc = document.getElementById('txAccount').value;
+        const investSel = document.getElementById('txInvestment');
+        const investmentId = investSel ? investSel.value : '';
+        if (!investmentId) { alert('Pick which investment to redeem from.'); return; }
         tx = { type, amount, date, accountId: acc, investmentId, note };
       } else if (type === 'adjustment') {
         const acc = document.getElementById('txAccount').value;
@@ -6172,6 +6248,12 @@ document.addEventListener('keydown', (e) => {
     if (!state.accounts || state.accounts.length === 0) { alert('Set up at least one account in onboarding first.'); return; }
     if (!state.investments || state.investments.length === 0) { alert('Add an investment in onboarding first.'); return; }
     openTxModal('investment_contrib');
+  });
+  const addRedeem = document.getElementById('addRedeemBtn');
+  if (addRedeem) addRedeem.addEventListener('click', () => {
+    if (!state.accounts || state.accounts.length === 0) { alert('Set up at least one account in onboarding first.'); return; }
+    if (!state.investments || state.investments.length === 0) { alert('Add an investment in onboarding first.'); return; }
+    openTxModal('investment_redemption');
   });
 
   // Journal month navigation (mirrors Budget page nav)
