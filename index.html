@@ -1210,7 +1210,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.7';
+const APP_VERSION = '2026.05.04.8';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3333,22 +3333,21 @@ function runProjection(overrides={}) {
         const logged = overrides[inv.id];
         const delta = logged - scheduled;
         if (delta === 0) return;
-        // Update contribPerMonth and contribSeries cumulatively from i onwards
-        result.contribPerMonth[invKey][i] = logged;
-        let cum = i === 0 ? 0 : (result.contribSeries[invKey][i - 1] || 0);
-        for (let j = i; j < n; j++) {
-          cum += result.contribPerMonth[invKey][j] || 0;
-          result.contribSeries[invKey][j] = cum;
-        }
-        // Update investment balance: one-time delta added at month i, compounded forward
+        // IMPORTANT: don't mutate result.contribPerMonth or result.cashContribSeries here.
+        // applyTransactionDelta has already deducted the FULL logged amount from the source
+        // account's opening balance — the cash has really left. The engine projects from
+        // that lower opening, so residual is naturally correct. Touching contribPerMonth or
+        // residualDelta would double-count the outflow.
+        //
+        // We DO bump the investment balance forward by the delta (compounded), since the
+        // engine's growth math used the original scheduled contributions, not the logged
+        // amounts — so the investment balance hasn't reflected the extra money yet.
         const mRate = invMonthlyRate[invKey] || 0;
         let runningDelta = delta;
         for (let j = i; j < n; j++) {
           investBalDelta[invKey][j] += runningDelta;
           runningDelta = runningDelta * (1 + mRate);
         }
-        // Residual adjustment: extra invested means less residual to savings
-        residualDelta[i] -= delta;
       });
     }
 
@@ -4491,11 +4490,11 @@ function renderBudget() {
       else if (tx.type === 'transfer' && tx.fromAccountId === 'savings') total -= amt;
       else if (tx.type === 'income' && tx.accountId === 'savings') total += amt;
       else if (tx.type === 'expense' && tx.accountId === 'savings') total -= amt;
-      else if (tx.type === 'investment_contrib' && tx.accountId === 'savings') total -= amt;
-      // NOTE: investment_redemption is intentionally NOT in this list. Redemptions are new
-      // cash entering from outside the engine's flow model (engine doesn't project redemptions).
-      // The engine sees the post-redemption opening balance and projects the FULL residual on top,
-      // which is correct — that's actual new cash, not double-counted budgeted flow.
+      // NOTE: investment_contrib is intentionally NOT in this list. applyTransactionDelta
+      // has already deducted it from savings opening. The engine projects from that lower
+      // opening using the SCHEDULED contribution amounts (overlay no longer mutates them),
+      // so the cash side is correct end-to-end. Including it here would double-count.
+      // Same logic for investment_redemption (new cash, engine doesn't project it).
       else if (tx.type === 'adjustment' && tx.accountId === 'savings') {
         const dir = tx.direction === 'subtract' ? -1 : 1;
         total += dir * amt;
