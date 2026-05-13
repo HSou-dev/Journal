@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.8",
+  "version": "2026.05.04.9",
   "released": "2026-05-04",
-  "notes": "Investment contribution overlay no longer mutates engine residual or contribPerMonth (which was causing massive negative residuals and Net-Worth-vs-Projection mismatches). Cash side is fully handled by applyTransactionDelta. Both investment_contrib and investment_redemption now treat the cash side identically, just bumping investment balance via overlay."
+  "notes": "Net Worth page now applies the same cash-balance double-count correction as the projection sheet. Values match across pages. Liquidity calculation already correctly reads inv.liquid live."
 }
