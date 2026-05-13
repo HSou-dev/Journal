@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.7",
+  "version": "2026.05.04.8",
   "released": "2026-05-04",
-  "notes": "Redemptions now flow into Cash Balance correctly (fixed double-count bug). New 'Redemptions' row in Surplus & Allocation section on the projection sheet showing total redemptions per month. Overflow row now includes redemptions as positive cash inflow."
+  "notes": "Investment contribution overlay no longer mutates engine residual or contribPerMonth (which was causing massive negative residuals and Net-Worth-vs-Projection mismatches). Cash side is fully handled by applyTransactionDelta. Both investment_contrib and investment_redemption now treat the cash side identically, just bumping investment balance via overlay."
 }
