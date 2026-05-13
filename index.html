@@ -1210,7 +1210,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.8';
+const APP_VERSION = '2026.05.04.9';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -4520,9 +4520,43 @@ function renderNetWorth() {
   const extEnd = valDate > state.horizonEnd ? valDate : state.horizonEnd;
   const p = runProjection({ horizonEnd: extEnd, scenarios: activeScenariosForRender() });
   const idx = Math.max(0, p.isos.indexOf(valDate));
-  const nwAtDate = p.netWorth[idx] || 0;
+
+  // ---- Cash double-count correction (mirrors projection sheet's Cash Balance overlay) ----
+  // applyTransactionDelta has already moved journal-logged transfers/income/expenses through
+  // savings.openingBalance. The engine then adds the FULL projected residual on top, which
+  // double-counts those inflows for current and future months. We subtract the cumulative
+  // net journal-driven savings delta from current month onwards through each future month.
+  // Past months use the engine raw value (the residual was real outflow that already happened).
+  const _now = new Date();
+  const _nowYM = _now.getFullYear() + '-' + String(_now.getMonth() + 1).padStart(2, '0');
+  function _nwNetSavingsDeltaThruMonth(endYM) {
+    let total = 0;
+    (state.transactions || []).forEach(tx => {
+      if (!tx.date) return;
+      const ym = tx.date.slice(0, 7);
+      if (ym < _nowYM || ym > endYM) return;
+      const amt = Number(tx.amount) || 0;
+      if (tx.type === 'transfer' && tx.toAccountId === 'savings') total += amt;
+      else if (tx.type === 'transfer' && tx.fromAccountId === 'savings') total -= amt;
+      else if (tx.type === 'income' && tx.accountId === 'savings') total += amt;
+      else if (tx.type === 'expense' && tx.accountId === 'savings') total -= amt;
+      else if (tx.type === 'adjustment' && tx.accountId === 'savings') {
+        const dir = tx.direction === 'subtract' ? -1 : 1;
+        total += dir * amt;
+      }
+    });
+    return total;
+  }
+  // Build adjusted cash and net worth series for the chart (past = raw, current/future = corrected)
+  const adjustedCashSeries = p.cashSeries.map((v, i) => {
+    const ym = p.isos[i];
+    return ym < _nowYM ? v : v - _nwNetSavingsDeltaThruMonth(ym);
+  });
+  const adjustedNetWorth = p.netWorth.map((v, i) => v - (p.cashSeries[i] - adjustedCashSeries[i]));
+
+  const nwAtDate = adjustedNetWorth[idx] || 0;
+  const cashAtDate = adjustedCashSeries[idx] || 0;
   const lqInvAtDate = p.investments.filter(i=>i.liquid).reduce((a,inv)=>a+(p.bal[inv.id+'_'+inv.name][idx]||0),0);
-  const cashAtDate = p.cashSeries[idx] || 0;
   const liabAtDate = p.liabSeries[idx] || 0;
   const lqAtDate = lqInvAtDate + cashAtDate;
   const totContrib = p.investments.reduce((a,inv)=>{ const k=inv.id+'_'+inv.name; return a+(p.contribSeries[k]?.[idx]||0); },0);
@@ -4543,7 +4577,7 @@ function renderNetWorth() {
   destroyChart('nwLine');
   charts.nwLine = new Chart(document.getElementById('nwLine'), {
     type:'line',
-    data: { labels: p.labels, datasets: [{ label:'Net Worth', data:p.netWorth, borderColor:'#d4a857', backgroundColor:'rgba(212,168,87,0.1)', borderWidth:2, fill:true, tension:0.3, pointRadius:0 }] },
+    data: { labels: p.labels, datasets: [{ label:'Net Worth', data:adjustedNetWorth, borderColor:'#d4a857', backgroundColor:'rgba(212,168,87,0.1)', borderWidth:2, fill:true, tension:0.3, pointRadius:0 }] },
     options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>' '+fmtMoney(c.parsed.y)}}}, scales:{x:axisOpt(), y:{...axisOpt(), ticks:{...axisOpt().ticks,callback:fmtAxis}}} }
   });
 
