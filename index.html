@@ -952,6 +952,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
           <thead><tr id="budgetHeaderRow"><th class="row-label">Item</th></tr></thead>
           <tbody id="budgetInflows"></tbody>
           <tbody id="budgetOutflows"></tbody>
+          <tbody id="budgetTransfers"></tbody>
           <tbody id="budgetSavings"></tbody>
           <tbody id="budgetBalances"></tbody>
         </table>
@@ -1210,7 +1211,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.11';
+const APP_VERSION = '2026.05.04.14';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3967,6 +3968,12 @@ function renderBudget() {
   // Helper: replaces an array of values with journal-driven actuals for past months,
   // returns BOTH numeric (for surplus calc) and display-formatted versions.
   // Returns { numeric: [], display: [] }
+  //
+  // Current-month math (post-2026-05-04 update): use `actual + max(0, budget − actual)`.
+  // This means: if you've logged ₹7k of food (budget ₹20k), numeric = ₹7k + ₹13k = ₹20k.
+  // If you've over-spent (₹25k logged), numeric = ₹25k + 0 = ₹25k (actual takes over once
+  // you exceed budget). This matches the user's stated mental model: "budget is the floor;
+  // actuals replace it once they exceed it".
   const overlayCategoryRow = (catKey, projectedSlice) => {
     const numeric = projectedSlice.slice();
     const display = projectedSlice.map((v, i) => fmtMoney(v));
@@ -3977,13 +3984,11 @@ function renderBudget() {
         numeric[i] = actualForMonth;
         display[i] = fmtMoney(actualForMonth);
       } else if (_isCurrent(i)) {
-        // Show "actual / budget" but use actual + remaining-budget for numeric (residual calc)
-        const totalDays = new Date(_now.getFullYear(), _now.getMonth() + 1, 0).getDate();
-        const daysLeft = Math.max(0, totalDays - _nowDay);
-        const remaining = projectedSlice[i] * (daysLeft / totalDays);
-        numeric[i] = actualForMonth + remaining;
-        display[i] = (projectedSlice[i] > 0)
-          ? fmtMoney(actualForMonth, true) + ' / ' + fmtMoney(projectedSlice[i], true)
+        const budget = projectedSlice[i] || 0;
+        const remaining = Math.max(0, budget - actualForMonth);
+        numeric[i] = actualForMonth + remaining; // actual + any unused budget
+        display[i] = (budget > 0)
+          ? fmtMoney(actualForMonth, true) + ' / ' + fmtMoney(budget, true)
           : fmtMoney(actualForMonth);
       }
     }
@@ -3999,17 +4004,81 @@ function renderBudget() {
         numeric[i] = actualForMonth;
         display[i] = fmtMoney(actualForMonth);
       } else if (_isCurrent(i)) {
-        // EMI is fixed monthly — show actual / scheduled when actual > 0
-        if (actualForMonth > 0) {
-          numeric[i] = actualForMonth;
-          display[i] = fmtMoney(actualForMonth, true) + ' / ' + fmtMoney(projectedSlice[i], true);
-        } else if (projectedSlice[i] > 0) {
-          display[i] = fmtMoney(0, true) + ' / ' + fmtMoney(projectedSlice[i], true);
+        // EMI is fixed monthly. actual + max(0, scheduled − actual)
+        const scheduled = projectedSlice[i] || 0;
+        const remaining = Math.max(0, scheduled - actualForMonth);
+        numeric[i] = actualForMonth + remaining;
+        if (scheduled > 0) {
+          display[i] = fmtMoney(actualForMonth, true) + ' / ' + fmtMoney(scheduled, true);
+        } else {
+          display[i] = fmtMoney(actualForMonth);
         }
       }
     }
     return { numeric, display };
   };
+  // Salary income overlay — symmetric to the expense overlays. Current month shows
+  // actual_logged + max(0, budget − actual_logged) numerically, and "actual / budget"
+  // visually. Past months show actual. Future months show projected budget.
+  //
+  // Logged salary per (person, month) is in state._txDerivedOverrides. We sum across
+  // multiple txns in the same month if they exist. For numeric: actual replaces budget
+  // ONLY if actual exceeds it; otherwise we project the gap will still arrive.
+  function _loggedSalaryForMonth(person, ym) {
+    let total = 0;
+    (state._txDerivedOverrides || []).forEach(o => {
+      if (o.person === person && o.month === ym) total += Number(o.amount) || 0;
+    });
+    return total;
+  }
+  const overlayIncomeSalaryRow = (person, projectedSlice) => {
+    // projectedSlice already includes the override REPLACEMENT (engine logic).
+    // We need to recover the original "what budget would have been" for display purposes.
+    // Easiest: walk state-level baseline + grown amount per month. But projectedSlice already
+    // shows the *effective* value (overridden where logged). For display, we want budget
+    // to mean "what was originally projected" — i.e., the value if no logging happened.
+    // Since the engine REPLACES on logging, projectedSlice for those months is the actual.
+    // We approximate "budget" as the projectedSlice value for that month IF no logging happened.
+    // To get budget for current month: compute the baseline+growth like the engine would have.
+    const numeric = projectedSlice.slice();
+    const display = projectedSlice.map(v => fmtMoney(v));
+    for (let i = 0; i < projectedSlice.length; i++) {
+      const ym = isos[i];
+      const logged = _loggedSalaryForMonth(person, ym);
+      if (_isPast(i)) {
+        // Past: show actual (= what's in projectedSlice, which IS actual due to override)
+        numeric[i] = projectedSlice[i];
+        display[i] = fmtMoney(projectedSlice[i]);
+      } else if (_isCurrent(i)) {
+        // projectedSlice[i] when logged = actual; when not logged = budget.
+        // We can't easily separate them post-fact, so we use the engine's logic: if logged>0,
+        // numeric = logged + max(0, original_budget − logged). The original budget for current
+        // month isn't directly available here unless we compute it. Simplest: if logged>0,
+        // assume the displayed projectedSlice IS already the logged value, and the user's
+        // budget for that person should be approximately what we project for next month.
+        // (Salaries usually don't change month-to-month within a year.) Use next-month's
+        // projected as budget proxy if it differs, else fall back to logged.
+        const nextProj = projectedSlice[i + 1] || 0;
+        if (logged > 0) {
+          // logged is what's in projectedSlice[i]
+          const budgetProxy = nextProj > 0 ? nextProj : logged;
+          const remaining = Math.max(0, budgetProxy - logged);
+          numeric[i] = logged + remaining;
+          display[i] = (budgetProxy !== logged)
+            ? fmtMoney(logged, true) + ' / ' + fmtMoney(budgetProxy, true)
+            : fmtMoney(logged);
+        } else {
+          // No salary logged yet → projectedSlice[i] is the budget itself
+          numeric[i] = projectedSlice[i];
+          display[i] = (projectedSlice[i] > 0)
+            ? fmtMoney(0, true) + ' / ' + fmtMoney(projectedSlice[i], true)
+            : fmtMoney(0);
+        }
+      }
+    }
+    return { numeric, display };
+  };
+
   const overlayInvestmentContribRow = (invId, projectedSlice) => {
     const numeric = projectedSlice.slice();
     const display = projectedSlice.map(v => fmtMoney(v));
@@ -4020,11 +4089,14 @@ function renderBudget() {
         numeric[i] = actualForMonth;
         display[i] = fmtMoney(actualForMonth);
       } else if (_isCurrent(i)) {
-        if (actualForMonth > 0) {
-          numeric[i] = actualForMonth;
-          display[i] = fmtMoney(actualForMonth, true) + ' / ' + fmtMoney(projectedSlice[i], true);
-        } else if (projectedSlice[i] > 0) {
-          display[i] = fmtMoney(0, true) + ' / ' + fmtMoney(projectedSlice[i], true);
+        const scheduled = projectedSlice[i] || 0;
+        const remaining = Math.max(0, scheduled - actualForMonth);
+        numeric[i] = actualForMonth + remaining;
+        if (scheduled > 0) {
+          display[i] = fmtMoney(actualForMonth, true) + ' / ' + fmtMoney(scheduled, true);
+        } else if (actualForMonth > 0) {
+          // No scheduled but logged a one-time (e.g. ad-hoc FD): show just actual
+          display[i] = fmtMoney(actualForMonth);
         }
       }
     }
@@ -4237,15 +4309,32 @@ function renderBudget() {
       _overlayTotalExpense[i] = monthExpActual + monthEmiActual + monthEmiScheduled;
       _overlayEmiTotal[i] = monthEmiActual + monthEmiScheduled;
     } else if (_isCurrent(i)) {
-      // Current month: numeric value used in surplus/residue/savings = the BUDGET, not actuals.
-      // Per-category cells still display "actual / budget" via overlayCategoryRow, but the
-      // engine's totalExpense is left at the budgeted value. This means logging an expense
-      // from salary or CC has no effect on the projected savings/residue — savings only moves
-      // when you explicitly transfer to/from it (handled separately by applyTransactionDelta
-      // and the savings overlay subtraction). Overshoots show up on the Budget Actuals page
-      // (and per-category projection cells), not in the residue.
-      _overlayTotalExpense[i] = totalExpense[i];
-      _overlayEmiTotal[i] = emiMonthly[i];
+      // Current month: use the SAME "actual + max(0, budget − actual)" logic, summed across
+      // categories AND EMIs. This makes the projection sheet's Total Expenses for the current
+      // month match what the user sees in the Journals page (actuals) plus any remaining
+      // budgeted-but-not-yet-spent amount. Surplus / residue / cash will all reflect this.
+      // Per category: budget might be replaced by larger actual (if over budget).
+      let totalCatNumeric = 0;
+      EXPENSE_CATEGORIES.forEach(c => {
+        const budget = (p.expCategorySeries[c.key] || [])[sliceFrom + i] || 0;
+        const actual = (expActualByMonth[ym] && expActualByMonth[ym][c.key]) || 0;
+        totalCatNumeric += actual + Math.max(0, budget - actual);
+      });
+      // Per EMI: same model
+      let totalEmiNumeric = 0;
+      (state.emis || []).forEach(e => {
+        if (!e.startMonth || !e.months) return;
+        const [sy, sm] = e.startMonth.split('-').map(Number);
+        let ey = sy, em = sm + e.months - 1;
+        while (em > 12) { em -= 12; ey++; }
+        const endIso = ey + '-' + String(em).padStart(2, '0');
+        if (ym >= e.startMonth && ym <= endIso) {
+          const actual = (emiActualByMonth[ym] && emiActualByMonth[ym][e.id]) || 0;
+          totalEmiNumeric += actual + Math.max(0, e.amount - actual);
+        }
+      });
+      _overlayTotalExpense[i] = totalCatNumeric + totalEmiNumeric;
+      _overlayEmiTotal[i] = totalEmiNumeric;
     }
   }
   totalExpense = _overlayTotalExpense;
@@ -4298,10 +4387,12 @@ function renderBudget() {
   const p2Slice = p.p2Series.slice(sliceFrom, sliceTo);
   const oneOffIncSlice = p.oneOffIncSeries.slice(sliceFrom, sliceTo);
   if (p1Slice.some(v => v > 0)) {
-    incomeRows.push({ label: (state.p1Name || 'You') + ' · Salary', values: p1Slice });
+    const ov = overlayIncomeSalaryRow('p1', p1Slice);
+    incomeRows.push({ label: (state.p1Name || 'You') + ' · Salary', overlay: ov });
   }
   if (state.mode === 'partner' && p2Slice.some(v => v > 0)) {
-    incomeRows.push({ label: (state.p2Name || 'Partner') + ' · Salary', values: p2Slice });
+    const ov = overlayIncomeSalaryRow('p2', p2Slice);
+    incomeRows.push({ label: (state.p2Name || 'Partner') + ' · Salary', overlay: ov });
   }
   if (oneOffIncSlice.some(v => v > 0)) incomeRows.push({ label: 'Ad-Hoc Income', values: oneOffIncSlice });
 
@@ -4328,7 +4419,10 @@ function renderBudget() {
 
   document.getElementById('budgetInflows').innerHTML =
     `<tr class="section-head"><th colspan="${colspan}">Inflows</th></tr>` +
-    incomeRows.map(r => `<tr><th>${escapeHtml(r.label)}</th>${cells(r.values)}</tr>`).join('') +
+    incomeRows.map(r => {
+      const cellHtml = r.overlay ? cellsOverlay(r.overlay) : cells(r.values);
+      return `<tr><th>${escapeHtml(r.label)}</th>${cellHtml}</tr>`;
+    }).join('') +
     scenarioIncomeRows.map(scRowHtml).join('') +
     `<tr class="subtotal"><th>Total Income</th>${cells(totalIncome)}</tr>`;
 
@@ -4407,13 +4501,56 @@ function renderBudget() {
     scenarioExpenseRows.map(scRowHtml).join('') +
     `<tr class="subtotal"><th>Total Expenses</th>${cells(totalExpense)}</tr>`;
 
+  // ---- Transfers section ----
+  // Surfaces transfer transactions (e.g., salary → savings sweep, salary → cc bill payment).
+  // These move money between own accounts so they DO NOT affect Total Income / Total Expense
+  // or Net Surplus — purely informational so the user can see internal cash movements.
+  // We group by (fromAccountId → toAccountId) pattern; one row per unique pattern observed
+  // in the journal. Patterns with no activity in the visible window are hidden.
+  const accNameById = {};
+  (state.accounts || []).forEach(a => { accNameById[a.id] = a.name || a.id; });
+  const transferPatterns = {}; // key: "from→to", value: { fromId, toId, label, valuesByYM }
+  (state.transactions || []).forEach(tx => {
+    if (tx.type !== 'transfer' || !tx.date) return;
+    const ym = tx.date.slice(0, 7);
+    if (!isos.slice(sliceFrom, sliceTo).includes(ym)) return;
+    const key = tx.fromAccountId + '→' + tx.toAccountId;
+    if (!transferPatterns[key]) {
+      transferPatterns[key] = {
+        label: (accNameById[tx.fromAccountId] || tx.fromAccountId) + ' → ' + (accNameById[tx.toAccountId] || tx.toAccountId),
+        valuesByYM: {},
+      };
+    }
+    transferPatterns[key].valuesByYM[ym] = (transferPatterns[key].valuesByYM[ym] || 0) + (Number(tx.amount) || 0);
+  });
+  const transferRows = Object.values(transferPatterns).map(pat => {
+    const vals = isos.slice(sliceFrom, sliceTo).map(ym => pat.valuesByYM[ym] || 0);
+    return `<tr><th style="font-style:italic;color:var(--ink-muted);">${escapeHtml(pat.label)}</th>${cells(vals)}</tr>`;
+  }).join('');
+  const transfersSectionHtml = transferRows
+    ? `<tr class="section-head"><th colspan="${colspan}">Transfers <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— between own accounts, doesn't affect surplus</span></th></tr>` + transferRows
+    : '';
+  // Insert the transfers section into the DOM. We append it via a wrapper tbody if not empty.
+  const transfersAnchor = document.getElementById('budgetTransfers');
+  if (transfersAnchor) {
+    transfersAnchor.innerHTML = transfersSectionHtml;
+  }
+
   // Surplus & Allocation: investment contributions (per-month grown) + residual to Cash.
   // Apply overlay so past investment contributions show actuals, current shows actual/scheduled.
+  // We include an investment row if it has EITHER a scheduled monthly contribution OR any
+  // journaled contribution in the visible window (so one-off lump-sum FDs/ETFs still show).
   const contribRows = [];
   p.investments.forEach(inv => {
-    if (!inv.monthlyContribution) return;
     const k = inv.id + '_' + inv.name;
     const slice = (p.contribPerMonth[k] || []).slice(sliceFrom, sliceTo);
+    // Check if any actual contributions exist in the visible window for this investment
+    let hasActuals = false;
+    for (let i = sliceFrom; i < sliceTo && !hasActuals; i++) {
+      const ym = isos[i];
+      if (investActualByMonth[ym] && investActualByMonth[ym][inv.id]) hasActuals = true;
+    }
+    if (!inv.monthlyContribution && !hasActuals) return;
     const ov = overlayInvestmentContribRow(inv.id, slice);
     contribRows.push({ label: inv.name, overlay: ov });
   });
@@ -4503,6 +4640,23 @@ function renderBudget() {
   const _overlayBalanceArray = (engineSliceVals, getPastValueFn) => {
     return engineSliceVals.map((v, i) => _isPast(i) ? getPastValueFn(isos[i]) : v);
   };
+
+  // ---- Starting balance rows (savings + salary, start-of-each-month) ----
+  // Start-of-month-X = end-of-month-(X-1). For past/current/future months we compute the
+  // same way: reverse-walk from today's balance, including all transactions that happened
+  // after the START of month X. This gives "what was in the account at midnight on day 1".
+  // Salary is included separately because it's a transit account — its starting balance
+  // matters (it's the float that pays for that month's CC bills + expenses).
+  function _prevMonthYM(ym) {
+    const [y, m] = ym.split('-').map(Number);
+    const dt = new Date(y, m - 2, 1); // m-2 because m is 1-based and Date is 0-based
+    return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+  }
+  const savingsStartVals = isos.slice(sliceFrom, sliceTo).map(ym => _savingsAtEndOfMonth(_prevMonthYM(ym)));
+  const salaryStartVals  = isos.slice(sliceFrom, sliceTo).map(ym => _salaryBalanceAtEndOfMonth(_prevMonthYM(ym)));
+  const startSavingsRow = `<tr><th style="font-style:italic;color:var(--ink-muted);"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#7aa3ff;margin-right:8px;"></span>Savings — start of month</th>${cells(savingsStartVals)}</tr>`;
+  const startSalaryRow  = `<tr><th style="font-style:italic;color:var(--ink-muted);"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#8fbdaa;margin-right:8px;"></span>Salary — start of month</th>${cells(salaryStartVals)}</tr>`;
+
   const investmentRows = p.investments.map(inv => {
     const k = inv.id + '_' + inv.name;
     const fullVals = p.bal[k] || [];
@@ -4552,6 +4706,7 @@ function renderBudget() {
   }).join('');
   document.getElementById('budgetBalances').innerHTML =
     `<tr class="section-head"><th colspan="${colspan}">Running Balances · compounded monthly</th></tr>` +
+    startSavingsRow + startSalaryRow +
     investmentRows + cashRow + liabilityRows;
 }
 function renderNetWorth() {
