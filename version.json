@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.15",
+  "version": "2026.05.04.16",
   "released": "2026-05-15",
-  "notes": "Cash Balance row now reflects overlay-actual surplus (over-budget hits reduce the projection). Previously it used engine-budget surplus which made the row inconsistent with the per-category cells. Now Total Expenses, Net Surplus, and Cash Balance all agree."
+  "notes": "Complete projection sheet redesign. Top: 3 Account Balance rows (Savings, Salary, CC; live for current month, start-of-month otherwise). Inflows now include Redemptions row. Surplus & Allocation simplified to 4 rows: MF SIP, RD, Other one-time investments (grouped), Planned to Savings (auto = surplus − allocated). Transfers section removed. Running Balances has only investment rows (no compounded-monthly tag). New bottom Cash Balance row shows projected end-of-month savings (May = May1 + Planned target; future = previous EOM + planned)."
 }
