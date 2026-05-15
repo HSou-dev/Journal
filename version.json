@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.10",
+  "version": "2026.05.04.11",
   "released": "2026-05-15",
-  "notes": "Adjustments now propagate to the projection sheet. Asset-add or liability-subtract → Ad-Hoc Income. Asset-subtract or liability-add → Miscellaneous expense. Schema v7 migration re-syncs existing adjustments."
+  "notes": "Fix: scope error on adjustments migration (syncSalaryOverrideFromTx now exposed via window._syncDerivedFromTx for cross-IIFE access)."
 }
