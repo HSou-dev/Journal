@@ -1213,7 +1213,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.16';
+const APP_VERSION = '2026.05.04.17';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -4852,10 +4852,71 @@ function renderNetWorth() {
     });
     return total;
   }
+
+  // ---- Overlay-gap correction (mirrors projection sheet Cash Balance row) ----
+  // Engine surplus uses budgeted expense; overlay surplus uses actuals where they exist.
+  // If user over-spent on Misc, the engine overstates surplus and consequently net worth.
+  // We compute cumulative gap per month and subtract it from end-of-month NW for current
+  // and future months. Past months use reverse-walked values (no overlay gap concept).
+  //
+  // For each month: overlay totalExpense = sum over categories of (actual + max(0, budget − actual))
+  // plus sum over EMIs of same. cumGap[i] = sum of (engine_surplus − overlay_surplus) from i=current onwards.
+  const expActualByMonthLocal = {};
+  const emiActualByMonthLocal = {};
+  (state.transactions || []).forEach(tx => {
+    if (!tx.date) return;
+    const ym = tx.date.slice(0, 7);
+    if (ym > _nowYM) return;
+    const amt = Number(tx.amount) || 0;
+    if (tx.type === 'expense') {
+      if (tx.category === 'emi' && tx.emiId) {
+        if (!emiActualByMonthLocal[ym]) emiActualByMonthLocal[ym] = {};
+        emiActualByMonthLocal[ym][tx.emiId] = (emiActualByMonthLocal[ym][tx.emiId] || 0) + amt;
+      } else if (tx.category) {
+        if (!expActualByMonthLocal[ym]) expActualByMonthLocal[ym] = {};
+        expActualByMonthLocal[ym][tx.category] = (expActualByMonthLocal[ym][tx.category] || 0) + amt;
+      }
+    }
+  });
+  // Compute overlay surplus gap per month (current/future only). Past months: gap = 0.
+  const _overlaySurplusGap = p.isos.map((ym, i) => {
+    if (ym < _nowYM) return 0; // past handled separately
+    // Engine-side expense for this month:
+    let engineExp = (p.totalExpense[i] || 0);
+    // Overlay-side expense:
+    let overlayExp = 0;
+    // Categories
+    Object.keys(p.expCategorySeries || {}).forEach(catKey => {
+      const budget = (p.expCategorySeries[catKey] || [])[i] || 0;
+      const actual = (expActualByMonthLocal[ym] && expActualByMonthLocal[ym][catKey]) || 0;
+      overlayExp += actual + Math.max(0, budget - actual);
+    });
+    // EMIs
+    (state.emis || []).forEach(e => {
+      if (!e.startMonth || !e.months) return;
+      const [sy, sm] = e.startMonth.split('-').map(Number);
+      let ey = sy, em = sm + e.months - 1;
+      while (em > 12) { em -= 12; ey++; }
+      const endIso = ey + '-' + String(em).padStart(2, '0');
+      if (ym >= e.startMonth && ym <= endIso) {
+        const actual = (emiActualByMonthLocal[ym] && emiActualByMonthLocal[ym][e.id]) || 0;
+        overlayExp += actual + Math.max(0, e.amount - actual);
+      }
+    });
+    // Engine totalExpense ALREADY includes EMIs + categories + one-off expenses.
+    // overlayExp here only sums categories + EMIs. Need to ADD one-off expenses to overlay.
+    overlayExp += (p.oneOffExpSeries || [])[i] || 0;
+    // gap = engine_surplus - overlay_surplus = -(engine_exp - overlay_exp) since incomes are same
+    // Positive gap = engine optimistic = need to subtract from NW
+    return overlayExp - engineExp;
+  });
+  let _gapCumNW = 0;
+  const cumGapNW = _overlaySurplusGap.map(g => (_gapCumNW += g));
+
   // Build adjusted cash and net worth series for the chart (past = raw, current/future = corrected)
   const adjustedCashSeries = p.cashSeries.map((v, i) => {
     const ym = p.isos[i];
-    return ym < _nowYM ? v : v - _nwNetSavingsDeltaThruMonth(ym);
+    return ym < _nowYM ? v : v - _nwNetSavingsDeltaThruMonth(ym) - (cumGapNW[i] || 0);
   });
   const adjustedNetWorth = p.netWorth.map((v, i) => v - (p.cashSeries[i] - adjustedCashSeries[i]));
 
