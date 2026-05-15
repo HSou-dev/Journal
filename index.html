@@ -1210,7 +1210,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.9';
+const APP_VERSION = '2026.05.04.10';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -1355,8 +1355,21 @@ function migrateState(s) {
     if (typeof s.p2BumpMonth !== 'number') s.p2BumpMonth = 4;       // April
     if (typeof s.expenseBumpMonth !== 'number') s.expenseBumpMonth = 4;
   }
+  // Schema v7: adjustments now propagate to the projection sheet as ad-hoc income
+  // (for asset adds / liability subtracts) or misc expense (for asset subtracts /
+  // liability adds). Previously they silently bumped openings without showing on the
+  // sheet — caused user confusion ("where's my adjustment?"). Migration ensures
+  // existing adjustment transactions get their derived overlay entries created so they
+  // become visible on the projection sheet immediately, without requiring the user to
+  // re-edit each one.
+  if ((s.schemaVersion || 0) < 7) {
+    if (!Array.isArray(s._txDerivedExpenseOneOffs)) s._txDerivedExpenseOneOffs = [];
+    // Flag for post-init re-sync (we can't call syncSalaryOverrideFromTx here — it's
+    // not defined yet at the time migrateState runs). The init code re-syncs.
+    s._needsAdjustmentResync = true;
+  }
 
-  s.schemaVersion = 6;
+  s.schemaVersion = 7;
   return s;
 }
 
@@ -1473,6 +1486,17 @@ async function enterApp() {
   // Run month-end auto-sweep before the dashboard renders so any newly created
   // sweep transactions are visible immediately and reflected in projections.
   if (stateHasData(state)) {
+    // Schema v7 migration: re-sync derived overlays for all adjustment transactions
+    // so they appear on the projection sheet. One-time, then we clear the flag.
+    if (state._needsAdjustmentResync) {
+      (state.transactions || []).forEach(tx => {
+        if (tx && tx.type === 'adjustment') {
+          syncSalaryOverrideFromTx(tx, 'upsert');
+        }
+      });
+      delete state._needsAdjustmentResync;
+      scheduleSave();
+    }
     runMonthEndAutoSweep();
     launchDashboard();
   }
@@ -2981,6 +3005,20 @@ function runProjection(overrides={}) {
     const arr = new Array(n);
     for (let i = 0; i < n; i++) arr[i] = base * expGrowthMul[i];
     expCategorySeries[c.key] = arr;
+  });
+
+  // Journal-derived expense one-offs (adjustments that represent money leaving).
+  // Routed into the Miscellaneous category for the month they occurred. They're additive
+  // on top of the user's budgeted Misc figure — so if budget was ₹10,000 Misc and the user
+  // logged a ₹12,000 subtract-adjustment to savings, Misc that month shows ₹22,000.
+  (state._txDerivedExpenseOneOffs || []).forEach(o => {
+    if (!o || !o.month || !o.amount) return;
+    const idx = months.findIndex(m => m.iso === o.month);
+    if (idx < 0) return;
+    const cat = o._category || 'exMisc';
+    if (expCategorySeries[cat]) {
+      expCategorySeries[cat][idx] += (Number(o.amount) || 0) * expMul;
+    }
   });
 
   // One-off expense series
@@ -5768,28 +5806,69 @@ document.addEventListener('keydown', (e) => {
   function syncSalaryOverrideFromTx(tx, action) {
     if (!state._txDerivedOverrides) state._txDerivedOverrides = [];
     if (!state._txDerivedOneOffs)   state._txDerivedOneOffs   = [];
+    if (!state._txDerivedExpenseOneOffs) state._txDerivedExpenseOneOffs = [];
 
     const isIncome = tx && tx.type === 'income';
     const isSalary = isIncome && tx.category === 'salary';
+    const isAdjustment = tx && tx.type === 'adjustment';
     const month = (tx && tx.date && /^\d{4}-\d{2}/.test(tx.date)) ? tx.date.slice(0, 7) : null;
 
-    // Always strip any prior derived rows from this tx (handles edits + non-income/non-salary updates)
+    // Always strip any prior derived rows from this tx (handles edits + type changes)
     state._txDerivedOverrides = state._txDerivedOverrides.filter(o => o._fromTx !== tx.id);
     state._txDerivedOneOffs   = state._txDerivedOneOffs.filter(o => o._fromTx !== tx.id);
+    state._txDerivedExpenseOneOffs = state._txDerivedExpenseOneOffs.filter(o => o._fromTx !== tx.id);
 
-    if (action === 'remove' || !isIncome || !month) return;
+    if (action === 'remove' || !month) return;
 
-    if (isSalary) {
-      // Salary → person-tagged override
-      const person = (tx.person === 'p2') ? 'p2' : 'p1';
-      state._txDerivedOverrides.push({
-        person, month, amount: Number(tx.amount) || 0, _fromTx: tx.id
-      });
-    } else {
-      // Gift, Interest, Rewards, Other → one-off income for that month
-      state._txDerivedOneOffs.push({
-        month, amount: Number(tx.amount) || 0, _fromTx: tx.id, _category: tx.category
-      });
+    // ─── Income transactions ───
+    if (isIncome) {
+      if (isSalary) {
+        const person = (tx.person === 'p2') ? 'p2' : 'p1';
+        state._txDerivedOverrides.push({
+          person, month, amount: Number(tx.amount) || 0, _fromTx: tx.id
+        });
+      } else {
+        state._txDerivedOneOffs.push({
+          month, amount: Number(tx.amount) || 0, _fromTx: tx.id, _category: tx.category
+        });
+      }
+      return;
+    }
+
+    // ─── Adjustment transactions ───
+    // Adjustments still mutate openings via applyTransactionDelta (keep existing behavior).
+    // In addition, we now mirror their effect into the projection sheet so the user can SEE
+    // them in income or expense rows — the historic complaint was that they silently bumped
+    // openings without showing up anywhere.
+    //   - asset + add       → ad-hoc income (positive)
+    //   - asset + subtract  → misc expense
+    //   - liability + add   → misc expense ("I owe more, so cost"); CC openings are stored
+    //                          negative, applyTransactionDelta pushes them more negative
+    //   - liability + sub   → ad-hoc income (rare; happens for refunds without expense reversal)
+    if (isAdjustment) {
+      const acc = (state.accounts || []).find(a => a.id === tx.accountId);
+      const isLiability = acc && acc.type === 'liability';
+      const dir = tx.direction === 'subtract' ? 'subtract' : 'add';
+      // Determine if this represents money "in" (income) or "out" (expense) for the user:
+      let asIncome;
+      if (isLiability) {
+        // For liabilities: add = expense, subtract = income
+        asIncome = (dir === 'subtract');
+      } else {
+        // For assets: add = income, subtract = expense
+        asIncome = (dir === 'add');
+      }
+      const amt = Number(tx.amount) || 0;
+      if (asIncome) {
+        state._txDerivedOneOffs.push({
+          month, amount: amt, _fromTx: tx.id, _category: 'adjustment'
+        });
+      } else {
+        state._txDerivedExpenseOneOffs.push({
+          month, amount: amt, _fromTx: tx.id, _category: 'exMisc'
+        });
+      }
+      return;
     }
   }
   // Find the investment record linked to a given account (if any)
