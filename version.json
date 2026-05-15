@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.11",
+  "version": "2026.05.04.14",
   "released": "2026-05-15",
-  "notes": "Fix: scope error on adjustments migration (syncSalaryOverrideFromTx now exposed via window._syncDerivedFromTx for cross-IIFE access)."
+  "notes": "Stage 3: Running Balances section now shows 'Savings — start of month' and 'Salary — start of month' rows at top, computed via reverse-walk. New 'Transfers' section between Outflows and Surplus & Allocation lists each transfer pattern (salary→savings, salary→cc) for visibility — doesn't affect Net Surplus."
 }
