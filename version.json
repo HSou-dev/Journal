@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.9",
-  "released": "2026-05-04",
-  "notes": "Net Worth page now applies the same cash-balance double-count correction as the projection sheet. Values match across pages. Liquidity calculation already correctly reads inv.liquid live."
+  "version": "2026.05.04.10",
+  "released": "2026-05-15",
+  "notes": "Adjustments now propagate to the projection sheet. Asset-add or liability-subtract → Ad-Hoc Income. Asset-subtract or liability-add → Miscellaneous expense. Schema v7 migration re-syncs existing adjustments."
 }
