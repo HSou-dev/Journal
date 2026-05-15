@@ -1211,7 +1211,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.14';
+const APP_VERSION = '2026.05.04.15';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -4696,8 +4696,25 @@ function renderBudget() {
     });
     return total;
   };
+  // ---- Final cash balance computation ----
+  // Past months: use reverse-walked savings.
+  // Current+future: start from engine raw, subtract netDelta (double-count fix), THEN
+  // subtract the gap between engine-budget surplus and overlay-actual surplus accumulated
+  // up to and including each month. This makes the Cash Balance row consistent with what
+  // the Surplus & Allocation rows visually show.
+  //
+  // overlaySurplusGap[i] = engine_surplus[i] - overlaid_surplus[i]
+  //   (positive when engine was too optimistic — overlay says we actually spent more)
+  // cumGap[i] = sum of overlaySurplusGap[0..i] for current+future months
+  // adjustedCash[i] = engineRawCash[i] - netDelta - cumGap[i]
+  const overlaySurplusGap = isos.slice(sliceFrom, sliceTo).map((ym, i) => {
+    if (!_isCurrent(i) && !_isFuture(i)) return 0; // past months handled by reverse-walk
+    return (p.surplus[sliceFrom + i] || 0) - (surplus[i] || 0);
+  });
+  let _gapCum = 0;
+  const cumGap = overlaySurplusGap.map(g => (_gapCum += g));
   const cashVals = _overlayBalanceArray(cashValsRaw, (ym) => _savingsAtEndOfMonth(ym))
-    .map((v, i) => (_isPast(i) ? v : v - _netJournalSavingsDeltaThruMonth(isos[i])));
+    .map((v, i) => (_isPast(i) ? v : v - _netJournalSavingsDeltaThruMonth(isos[i]) - cumGap[i]));
   const cashRow = `<tr class="subtotal"><th><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#d4a857;margin-right:8px;"></span>Cash Balance <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— Savings + residual (excl. salary transit)</span></th>${cells(cashVals)}</tr>`;
   const liabilityRows = (p.accounts || []).filter(a => a.type === 'liability').map(a => {
     const fullVals = p.accountBal[a.id] || [];
