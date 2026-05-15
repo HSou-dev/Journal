@@ -1210,7 +1210,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.10';
+const APP_VERSION = '2026.05.04.11';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -1488,10 +1488,12 @@ async function enterApp() {
   if (stateHasData(state)) {
     // Schema v7 migration: re-sync derived overlays for all adjustment transactions
     // so they appear on the projection sheet. One-time, then we clear the flag.
-    if (state._needsAdjustmentResync) {
+    // syncSalaryOverrideFromTx lives in another IIFE scope; we access it via the
+    // window._syncDerivedFromTx alias that scope exposes.
+    if (state._needsAdjustmentResync && typeof window._syncDerivedFromTx === 'function') {
       (state.transactions || []).forEach(tx => {
         if (tx && tx.type === 'adjustment') {
-          syncSalaryOverrideFromTx(tx, 'upsert');
+          window._syncDerivedFromTx(tx, 'upsert');
         }
       });
       delete state._needsAdjustmentResync;
@@ -5806,9 +5808,7 @@ document.addEventListener('keydown', (e) => {
   function syncSalaryOverrideFromTx(tx, action) {
     if (!state._txDerivedOverrides) state._txDerivedOverrides = [];
     if (!state._txDerivedOneOffs)   state._txDerivedOneOffs   = [];
-    if (!state._txDerivedExpenseOneOffs) state._txDerivedExpenseOneOffs = [];
-
-    const isIncome = tx && tx.type === 'income';
+    if (!state._txDerivedExpenseOneOffs) state._txDerivedExpenseOneOffs = [];    const isIncome = tx && tx.type === 'income';
     const isSalary = isIncome && tx.category === 'salary';
     const isAdjustment = tx && tx.type === 'adjustment';
     const month = (tx && tx.date && /^\d{4}-\d{2}/.test(tx.date)) ? tx.date.slice(0, 7) : null;
@@ -5871,6 +5871,10 @@ document.addEventListener('keydown', (e) => {
       return;
     }
   }
+  // Expose for cross-scope use (e.g. the schema v7 migration in enterApp).
+  // Set after function definition so it's safely available once this IIFE has finished
+  // executing. enterApp runs much later, after auth, so this is guaranteed populated.
+  window._syncDerivedFromTx = syncSalaryOverrideFromTx;
   // Find the investment record linked to a given account (if any)
   // Apply a transaction's effect to account balance
   function applyTransactionDelta(tx, sign) {
