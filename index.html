@@ -843,7 +843,6 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     <div class="nav-label">Overview</div>
     <div class="nav-item active" data-target="budgetActuals"><span class="dot"></span>Budget</div>
     <div class="nav-item" data-target="today"><span class="dot"></span>Journal</div>
-    <div class="nav-item" data-target="dashboard"><span class="dot"></span>Dashboard</div>
     <div class="nav-item" data-target="budget"><span class="dot"></span>Projection</div>
     <div class="nav-item" data-target="networth"><span class="dot"></span>Net Worth</div>
     <div class="nav-label">Analysis</div>
@@ -868,6 +867,10 @@ tr:hover td { background: rgba(255,255,255,0.01); }
         <span class="current" id="budgetActualsCurrent">—</span>
         <button id="budgetActualsNext" title="Next month">›</button>
         <button id="budgetActualsToday" style="margin-left:auto;border-color:var(--line);font-size:12px;padding:0 12px;width:auto;font-family:'Fraunces',serif;">This month</button>
+      </div>
+      <div class="card" id="baPieCard" style="margin-bottom:16px;display:none;">
+        <div class="card-head">Expense Split <span style="color:var(--ink-muted);font-weight:400;letter-spacing:0.05em;text-transform:none;font-size:11px;">— this month, by category</span></div>
+        <div class="chart-wrap short"><canvas id="baPie"></canvas></div>
       </div>
       <div id="budgetActualsBody"></div>
     </section>
@@ -901,29 +904,6 @@ tr:hover td { background: rgba(255,255,255,0.01); }
           <div class="card-head" style="padding:0; border:none;">Adjustments <span style="color:var(--ink-muted);font-size:11.5px;font-style:italic;font-weight:400;">— balance reconciliations</span></div>
         </div>
         <div id="adjustmentsList" style="padding: 6px 0;"></div>
-      </div>
-    </section>
-
-    <section class="section" id="dashboard">
-      <h1 class="section-title">A <em>snapshot</em> of the household.</h1>
-      <p class="section-sub">An at-a-glance portrait of earnings, obligations, and accumulated wealth — projected from your own figures. Pick any month, any year — the projection extends automatically.</p>
-      <div class="control-row">
-        <div class="ctrl"><label>Snapshot Month</label><input type="month" id="dashDate" /></div>
-        <div class="ctrl"><label>&nbsp;</label><button class="btn" id="dashRun">Update</button></div>
-        <div class="ctrl"><label>&nbsp;</label><button class="btn ghost" id="dashReset">Today</button></div>
-      </div>
-      <div class="grid-3" style="margin-bottom:16px;">
-        <div class="card kpi"><div class="card-head">Net Worth · Snapshot</div><div class="val gold"><span id="kpiNWCur">₹</span><span id="kpiNW">—</span><span class="unit" id="kpiNWUnit"></span></div><div class="sub" id="kpiNWDate">—</div></div>
-        <div class="card kpi"><div class="card-head">Liquidity · Snapshot</div><div class="val"><span id="kpiLQCur">₹</span><span id="kpiLQ">—</span><span class="unit" id="kpiLQUnit"></span></div><div class="sub"><span id="kpiLQPct">—</span>% of net worth</div></div>
-        <div class="card kpi"><div class="card-head">Monthly Surplus · Avg</div><div class="val green"><span id="kpiSurpCur">₹</span><span id="kpiSurp">—</span></div><div class="sub" id="kpiSurpSub">—</div></div>
-      </div>
-      <div class="grid-main" style="margin-bottom:16px;">
-        <div class="card"><div class="card-head">Net Worth Trajectory <span style="color:var(--ink-muted);font-weight:400;letter-spacing:0.05em;text-transform:none;">with compounding</span></div><div class="chart-wrap"><canvas id="dashTrajectory"></canvas></div></div>
-        <div class="card"><div class="card-head">Asset Composition · Today</div><div class="chart-wrap"><canvas id="dashDonut"></canvas></div></div>
-      </div>
-      <div class="grid-2">
-        <div class="card"><div class="card-head">Income vs Expense · this cycle</div><div class="chart-wrap short"><canvas id="dashIE"></canvas></div></div>
-        <div class="card"><div class="card-head">Opening Balances</div><table id="openBalTable"><thead><tr><th>Instrument</th><th class="num">Balance</th><th class="num">Rate</th></tr></thead><tbody></tbody></table></div>
       </div>
     </section>
 
@@ -1053,7 +1033,6 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     <div class="drawer-label">Overview</div>
     <div class="drawer-item" data-target="budgetActuals">Budget</div>
     <div class="drawer-item" data-target="today">Journal</div>
-    <div class="drawer-item" data-target="dashboard">Dashboard</div>
     <div class="drawer-item" data-target="budget">Projection</div>
     <div class="drawer-item" data-target="networth">Net Worth</div>
     <div class="drawer-label">Analysis</div>
@@ -1213,7 +1192,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.17';
+const APP_VERSION = '2026.05.04.19';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -1372,7 +1351,23 @@ function migrateState(s) {
     s._needsAdjustmentResync = true;
   }
 
-  s.schemaVersion = 7;
+  // Schema v8: adjustments no longer flow into derived income/expense overlays.
+  // They are pure account balance corrections (visible via per-account adjustment rows
+  // on the projection sheet top section). Purge any existing adjustment-sourced entries
+  // from _txDerivedOneOffs and _txDerivedExpenseOneOffs so Net Surplus stops double-counting them.
+  if ((s.schemaVersion || 0) < 8) {
+    const adjustmentIds = new Set(
+      (s.transactions || []).filter(t => t.type === 'adjustment').map(t => t.id)
+    );
+    if (Array.isArray(s._txDerivedOneOffs)) {
+      s._txDerivedOneOffs = s._txDerivedOneOffs.filter(o => !adjustmentIds.has(o._fromTx));
+    }
+    if (Array.isArray(s._txDerivedExpenseOneOffs)) {
+      s._txDerivedExpenseOneOffs = s._txDerivedExpenseOneOffs.filter(o => !adjustmentIds.has(o._fromTx));
+    }
+  }
+
+  s.schemaVersion = 8;
   return s;
 }
 
@@ -3516,7 +3511,6 @@ function axisOpt() {
 }
 
 function renderAll() {
-  renderDashboard();
   renderBudget();
   renderBudgetActuals();
   renderNetWorth();
@@ -3586,6 +3580,62 @@ function renderBudgetActuals() {
 
   // Build category rows (only categories with a non-zero budget, OR with non-zero actuals)
   const cats = EXPENSE_CATEGORIES.filter(c => (state[c.key] || 0) > 0 || actualsByCat[c.key] > 0);
+
+  // ---- Render expense-split pie chart (this month, by category + EMIs combined) ----
+  // The pie shows all spending sources side-by-side so the user sees where money went.
+  // Slices: each discretionary category with actual > 0, each EMI with actual > 0.
+  // Hidden gracefully if nothing spent this month.
+  const pieCard = document.getElementById('baPieCard');
+  const pieEntries = [];
+  EXPENSE_CATEGORIES.forEach(c => {
+    const v = actualsByCat[c.key] || 0;
+    if (v > 0) pieEntries.push({ label: c.label, val: v, color: c.color || '#7fb069' });
+  });
+  (state.emis || []).forEach(e => {
+    const v = emiActuals[e.id] || 0;
+    if (v > 0) pieEntries.push({ label: e.name + ' (EMI)', val: v, color: e.color || '#d4a857' });
+  });
+  if (pieCard) {
+    if (pieEntries.length === 0) {
+      pieCard.style.display = 'none';
+    } else {
+      pieCard.style.display = '';
+      // Sort descending so legend reads big-to-small
+      pieEntries.sort((a, b) => b.val - a.val);
+      destroyChart('baPie');
+      charts.baPie = new Chart(document.getElementById('baPie'), {
+        type: 'doughnut',
+        data: {
+          labels: pieEntries.map(e => e.label),
+          datasets: [{
+            data: pieEntries.map(e => e.val),
+            backgroundColor: pieEntries.map(e => e.color),
+            borderColor: 'rgba(20,17,13,0.6)',
+            borderWidth: 1,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'right',
+              labels: { color: '#c8b896', font: { size: 11 }, boxWidth: 12, padding: 6 }
+            },
+            tooltip: {
+              callbacks: {
+                label: (c) => {
+                  const total = pieEntries.reduce((s, e) => s + e.val, 0);
+                  const pct = total > 0 ? (c.parsed / total * 100).toFixed(1) : '0';
+                  return ' ' + c.label + ': ' + fmtMoney(c.parsed) + ' (' + pct + '%)';
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+  }
 
   if (cats.length === 0 && (state.emis || []).length === 0) {
     body.innerHTML = '<div class="budget-empty">No budget categories set yet. Add monthly limits via <strong>Edit my inputs → Expenses</strong>.</div>';
@@ -3816,6 +3866,12 @@ function renderBudgetRow(name, color, actual, budget, master, filter) {
 
 <script>
 function renderDashboard() {
+  // No-op. The Dashboard section was removed in v18 — its KPIs and charts duplicated
+  // what's visible on Budget Actuals and Projection. The function is kept (empty) so any
+  // remaining callers don't throw.
+  return;
+}
+function _legacyRenderDashboardUNUSED() {
   const snapDate = state.snapshotDate || state.horizonStart;
   document.getElementById('dashDate').value = snapDate;
   // Auto-extend horizon if snapshot date or horizon end is past current end
@@ -4496,14 +4552,78 @@ function renderBudget() {
       }
     }
   }
-  // Slice down to the visible window (we computed using sliceFrom+i, but the arrays themselves
-  // are already sized n = visible months count, so no further slicing needed).
-  const sectionTitleAccts = 'Account Balances <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— start of month (live for current month)</span>';
+  // ---- Per-account adjustment sub-rows (expandable) ----
+  // For each account, collect all adjustments by month within the visible window.
+  // Direction: 'add' = positive, 'subtract' = negative. For asset accounts, +ve adjustment
+  // means money appeared; -ve means money disappeared. For liability (CC), +ve means more debt;
+  // -ve means less debt. The display preserves the raw sign so the user reads the journal as-is.
+  function _adjustmentsForAccountByMonth(accId) {
+    const byMonth = new Array(n).fill(null).map(() => []); // each cell: list of {amount, signed, note, date}
+    (state.transactions || []).forEach(tx => {
+      if (tx.type !== 'adjustment' || tx.accountId !== accId || !tx.date) return;
+      const ym = tx.date.slice(0, 7);
+      const idxInWindow = isos.slice(sliceFrom, sliceTo).indexOf(ym);
+      if (idxInWindow < 0) return;
+      const sign = tx.direction === 'subtract' ? -1 : 1;
+      const amt = Number(tx.amount) || 0;
+      byMonth[idxInWindow].push({ signed: sign * amt, amount: amt, direction: tx.direction || 'add', note: tx.note || '', date: tx.date });
+    });
+    return byMonth;
+  }
+  function _adjustmentTotalsRow(byMonth) {
+    return byMonth.map(list => list.reduce((s, x) => s + x.signed, 0));
+  }
+  const _adjSavings = _adjustmentsForAccountByMonth('savings');
+  const _adjSalary  = _adjustmentsForAccountByMonth('salary');
+  const _adjCC      = _adjustmentsForAccountByMonth('cc');
+  const _adjSavingsTotals = _adjustmentTotalsRow(_adjSavings);
+  const _adjSalaryTotals  = _adjustmentTotalsRow(_adjSalary);
+  const _adjCCTotals      = _adjustmentTotalsRow(_adjCC);
+
+  // Build expandable row HTML for one account. The collapsed view is the main balance row
+  // with a small ▸ caret that toggles a hidden sub-row showing adjustments for that account.
+  // The sub-row is hidden by default; click toggles 'show' class and rotates the caret.
+  function _accountRowExpandable(accId, label, color, balanceRow, adjTotals, hasAdj) {
+    const caret = hasAdj
+      ? `<button type="button" class="acct-expand" data-acct="${accId}" style="background:none;border:none;color:var(--ink-muted);cursor:pointer;padding:0 6px 0 0;font-size:10px;line-height:1;">▸</button>`
+      : '<span style="display:inline-block;width:18px;"></span>';
+    const dot = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color};margin-right:8px;"></span>`;
+    const mainRow = `<tr class="acct-main" data-acct="${accId}"><th>${caret}${dot}${escapeHtml(label)}</th>${cells(balanceRow)}</tr>`;
+    if (!hasAdj) return mainRow;
+    // Adjustment sub-row: shown when caret is expanded. We format each cell with the net adjustment
+    // value (positive shown with +, negative with parens). Empty months show "—".
+    const subRowCells = adjTotals.map(v => {
+      if (!v || Math.abs(v) < 0.5) return '<td>—</td>';
+      const cls = v < 0 ? 'color:#e06060;' : 'color:#7fb069;';
+      const sign = v > 0 ? '+' : '';
+      return `<td style="${cls}font-style:italic;font-size:11px;">${sign}${fmtMoney(v, true)}</td>`;
+    }).join('');
+    const subRow = `<tr class="acct-adj-sub" data-acct="${accId}" style="display:none;"><th style="padding-left:32px;font-style:italic;color:var(--ink-muted);font-size:11px;font-weight:400;">↳ adjustments this month</th>${subRowCells}</tr>`;
+    return mainRow + subRow;
+  }
+
+  const hasAdjSavings = _adjSavingsTotals.some(v => v !== 0);
+  const hasAdjSalary  = _adjSalaryTotals.some(v => v !== 0);
+  const hasAdjCC      = _adjCCTotals.some(v => v !== 0);
+  const sectionTitleAccts = 'Account Balances <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— start of month (live for current month) · click ▸ to expand adjustments</span>';
   document.getElementById('budgetAccountBalances').innerHTML =
     `<tr class="section-head"><th colspan="${colspan}">${sectionTitleAccts}</th></tr>` +
-    `<tr><th><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#d4a857;margin-right:8px;"></span>Savings account balance</th>${cells(accSavingsRow)}</tr>` +
-    `<tr><th><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#8fbdaa;margin-right:8px;"></span>Salary account balance</th>${cells(accSalaryRow)}</tr>` +
-    (ccAcc ? `<tr><th><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${ccAcc.color || '#e06060'};margin-right:8px;"></span>Credit card balance</th>${cells(accCcRow)}</tr>` : '');
+    _accountRowExpandable('savings', 'Savings account balance', '#d4a857', accSavingsRow, _adjSavingsTotals, hasAdjSavings) +
+    _accountRowExpandable('salary',  'Salary account balance',  '#8fbdaa', accSalaryRow,  _adjSalaryTotals,  hasAdjSalary) +
+    (ccAcc ? _accountRowExpandable('cc', 'Credit card balance', ccAcc.color || '#e06060', accCcRow, _adjCCTotals, hasAdjCC) : '');
+
+  // Wire up caret toggle. We re-attach every render since innerHTML rebuilds the rows.
+  document.querySelectorAll('#budgetAccountBalances .acct-expand').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const acctId = btn.getAttribute('data-acct');
+      const sub = document.querySelector(`#budgetAccountBalances .acct-adj-sub[data-acct="${acctId}"]`);
+      if (!sub) return;
+      const isShown = sub.style.display !== 'none';
+      sub.style.display = isShown ? 'none' : '';
+      btn.textContent = isShown ? '▸' : '▾';
+    });
+  });
 
   document.getElementById('budgetInflows').innerHTML =
     `<tr class="section-head"><th colspan="${colspan}">Inflows</th></tr>` +
@@ -5780,7 +5900,6 @@ function wireDashboard() {
   const sectionRenderMap = {
     'today':         () => { if (window.renderTodayPage) window.renderTodayPage(); },
     'budgetActuals': renderBudgetActuals,
-    'dashboard':     renderDashboard,
     'budget':        renderBudget,
     'networth':      renderNetWorth,
     'scenarios':     renderScenarios,
@@ -5799,8 +5918,7 @@ function wireDashboard() {
     if (renderFn) setTimeout(renderFn, 20);
   }
   document.querySelectorAll('.nav-item').forEach(el => { el.addEventListener('click', () => activateSection(el.dataset.target)); });
-  document.getElementById('dashRun').addEventListener('click', () => { state.snapshotDate = document.getElementById('dashDate').value; renderDashboard(); });
-  document.getElementById('dashReset').addEventListener('click', () => { state.snapshotDate = state.horizonStart; renderDashboard(); });
+  // (dashRun / dashReset event listeners removed — Dashboard section deleted in v18)
   document.getElementById('budgetRun').addEventListener('click', () => { state.budgetStart = document.getElementById('budgetStart').value; state.budgetEnd = document.getElementById('budgetEnd').value; renderBudget(); });
   document.getElementById('budgetReset').addEventListener('click', () => {
     const [hsy, hsm] = state.horizonStart.split('-').map(Number);
@@ -6162,39 +6280,14 @@ document.addEventListener('keydown', (e) => {
     }
 
     // ─── Adjustment transactions ───
-    // Adjustments still mutate openings via applyTransactionDelta (keep existing behavior).
-    // In addition, we now mirror their effect into the projection sheet so the user can SEE
-    // them in income or expense rows — the historic complaint was that they silently bumped
-    // openings without showing up anywhere.
-    //   - asset + add       → ad-hoc income (positive)
-    //   - asset + subtract  → misc expense
-    //   - liability + add   → misc expense ("I owe more, so cost"); CC openings are stored
-    //                          negative, applyTransactionDelta pushes them more negative
-    //   - liability + sub   → ad-hoc income (rare; happens for refunds without expense reversal)
+    // Adjustments mutate account openings via applyTransactionDelta (kept).
+    // As of v19, adjustments NO LONGER flow into Ad-Hoc Income or Misc Expense overlays.
+    // Their effect is visible exclusively on the Account Balance rows at the top of the
+    // projection sheet (via the expandable per-account adjustment sub-row).
+    // This keeps Net Surplus honest (income from real flows only) and adjustments visible
+    // as the balance corrections they are.
     if (isAdjustment) {
-      const acc = (state.accounts || []).find(a => a.id === tx.accountId);
-      const isLiability = acc && acc.type === 'liability';
-      const dir = tx.direction === 'subtract' ? 'subtract' : 'add';
-      // Determine if this represents money "in" (income) or "out" (expense) for the user:
-      let asIncome;
-      if (isLiability) {
-        // For liabilities: add = expense, subtract = income
-        asIncome = (dir === 'subtract');
-      } else {
-        // For assets: add = income, subtract = expense
-        asIncome = (dir === 'add');
-      }
-      const amt = Number(tx.amount) || 0;
-      if (asIncome) {
-        state._txDerivedOneOffs.push({
-          month, amount: amt, _fromTx: tx.id, _category: 'adjustment'
-        });
-      } else {
-        state._txDerivedExpenseOneOffs.push({
-          month, amount: amt, _fromTx: tx.id, _category: 'exMisc'
-        });
-      }
-      return;
+      return; // no derived overlay entries — pure balance adjustment only
     }
   }
   // Expose for cross-scope use (e.g. the schema v7 migration in enterApp).
