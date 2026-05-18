@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.17",
-  "released": "2026-05-15",
-  "notes": "Net Worth page now applies the same overlay-gap correction as the projection sheet's Cash Balance row. Both views agree on end-of-May net worth (~₹16.43L instead of the inflated ₹17.18L)."
+  "version": "2026.05.04.19",
+  "released": "2026-05-16",
+  "notes": "Adjustments redesigned: they no longer pollute Ad-Hoc Income or Misc Expense. Their effect is now visible exclusively on the top Account Balance rows via expandable per-account adjustment sub-rows. Schema v8 purges historical adjustment-derived overlay entries. Net Surplus drops by ~₹18K for May (no longer counts adjustments as income), Misc drops by ~₹50K (no longer counts Silver ETF adj as expense), but account balances stay correct because applyTransactionDelta still mutates them."
 }
