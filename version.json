@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.19",
-  "released": "2026-05-16",
-  "notes": "Adjustments redesigned: they no longer pollute Ad-Hoc Income or Misc Expense. Their effect is now visible exclusively on the top Account Balance rows via expandable per-account adjustment sub-rows. Schema v8 purges historical adjustment-derived overlay entries. Net Surplus drops by ~₹18K for May (no longer counts adjustments as income), Misc drops by ~₹50K (no longer counts Silver ETF adj as expense), but account balances stay correct because applyTransactionDelta still mutates them."
+  "version": "2026.05.04.21",
+  "released": "2026-05-19",
+  "notes": "Projection sheet mobile redesign. Sticky first column + first row so labels/months always visible during scroll. Smaller text and padding on mobile (≤768px). All section headers collapsible (Account Balances, Inflows, Outflows, Surplus & Allocation, Running Balances, Cash Balance). EMI rows grouped under one 'EMIs (4)' summary in Outflows; Investment rows grouped under 'Investments (7)' in Running Balances. On mobile, Running Balances + EMI group collapse by default. Tap any section header or group summary to expand/collapse."
 }
