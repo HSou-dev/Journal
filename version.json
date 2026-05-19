@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.21",
+  "version": "2026.05.04.22",
   "released": "2026-05-19",
-  "notes": "Projection sheet mobile redesign. Sticky first column + first row so labels/months always visible during scroll. Smaller text and padding on mobile (≤768px). All section headers collapsible (Account Balances, Inflows, Outflows, Surplus & Allocation, Running Balances, Cash Balance). EMI rows grouped under one 'EMIs (4)' summary in Outflows; Investment rows grouped under 'Investments (7)' in Running Balances. On mobile, Running Balances + EMI group collapse by default. Tap any section header or group summary to expand/collapse."
+  "notes": "Future-month Account Balances now bridge correctly from May's Cash Balance. June top Savings = May bottom Cash Balance (was using engine raw projection, now uses cash-flow chain). Future-month Salary and CC reset to ₹0 (assumes month-end sweep + CC payment). Bottom Cash Balance row now uses same pre-computed chain — single source of truth for end-of-month savings."
 }
