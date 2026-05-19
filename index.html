@@ -1221,7 +1221,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.21';
+const APP_VERSION = '2026.05.04.22';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -4552,6 +4552,55 @@ function renderBudget() {
   const savAcc = (state.accounts || []).find(a => a.id === 'savings');
   const salAcc = (state.accounts || []).find(a => a.id === 'salary');
   const ccAcc  = (state.accounts || []).find(a => a.id === 'cc');
+  // ---- Compute future-month chain values FIRST so Account Balances row can bridge from them ----
+  // The Cash Balance bottom row computes per-month end-of-month savings. We need the SAME
+  // chain to populate Account Balances row's future months — start of June = end of May, etc.
+  // We pre-compute this chain so Account Balances has access to it.
+  //
+  // For each month in the visible window:
+  //   past:    end-of-month savings = _savingsAtEndOfMonth(thatMonthYM) (reverse-walked)
+  //   current: end-of-month savings = live savings + live salary − |live CC| (v20 truth)
+  //   future:  end-of-month savings = previous-month-end + that-month's-planned-to-savings
+  //
+  // Note: we also need Planned to Savings target per month, which is computed later in the
+  // render flow. To avoid the ordering issue, we replicate JUST the target calc here
+  // (for the chain), and the renderer below will reuse plannedSavingsRowNew with same values.
+  function _plannedTargetForFuture(idxInWindow, ym) {
+    // Use surplus-based formula for future months (consistent with how plannedSavingsRowNew is built)
+    // We don't have scheduledInvRows or otherOneTimeRow yet at this point in the function,
+    // so derive scheduled investment totals directly from p.contribPerMonth.
+    let scheduledInv = 0;
+    let oneTimeInv = 0;
+    (p.investments || []).forEach(inv => {
+      const k = inv.id + '_' + inv.name;
+      const val = (p.contribPerMonth[k] || [])[sliceFrom + idxInWindow] || 0;
+      if (inv.monthlyContribution > 0) scheduledInv += val;
+      else oneTimeInv += val;
+    });
+    return (surplus[idxInWindow] || 0) - scheduledInv - oneTimeInv;
+  }
+
+  const _eomSavingsChain = new Array(n).fill(0);
+  let _eomRunning = null;
+  for (let i = 0; i < n; i++) {
+    const ym = isos[sliceFrom + i];
+    if (_isPast(i)) {
+      _eomSavingsChain[i] = _savingsAtEndOfMonth(ym);
+      _eomRunning = _eomSavingsChain[i];
+    } else if (_isCurrent(i)) {
+      // v20: live snapshot of all 3 accounts at the moment user is viewing
+      const _liveSav = savAcc ? (Number(savAcc.openingBalance) || 0) : 0;
+      const _liveSal = salAcc ? (Number(salAcc.openingBalance) || 0) : 0;
+      const _liveCc  = ccAcc  ? Math.abs(Number(ccAcc.openingBalance) || 0) : 0;
+      _eomSavingsChain[i] = _liveSav + _liveSal - _liveCc;
+      _eomRunning = _eomSavingsChain[i];
+    } else {
+      const prev = _eomRunning !== null ? _eomRunning : (_eomSavingsChain[i - 1] || 0);
+      _eomSavingsChain[i] = prev + _plannedTargetForFuture(i, ym);
+      _eomRunning = _eomSavingsChain[i];
+    }
+  }
+
   for (let i = 0; i < n; i++) {
     const ym = isos[sliceFrom + i];
     const prevYM = _prevMonthYM(ym);
@@ -4566,19 +4615,15 @@ function renderBudget() {
       accSalaryRow[i]  = salAcc ? (Number(salAcc.openingBalance) || 0) : 0;
       accCcRow[i]      = ccAcc  ? (Number(ccAcc.openingBalance)  || 0) : 0;
     } else {
-      // Future: use engine projection (end of previous month = start of this month)
-      // Engine's accountBal[id][prevIdx] gives end-of-prev-month balance
-      const prevIdx = sliceFrom + i - 1;
-      if (prevIdx >= 0) {
-        accSavingsRow[i] = (p.accountBal['savings'] || [])[prevIdx] || 0;
-        accSalaryRow[i]  = (p.accountBal['salary']  || [])[prevIdx] || 0;
-        accCcRow[i]      = (p.accountBal['cc']      || [])[prevIdx] || 0;
-      } else {
-        // Edge case: first month of horizon and it's future (rare)
-        accSavingsRow[i] = savAcc ? Number(savAcc.openingBalance) || 0 : 0;
-        accSalaryRow[i]  = salAcc ? Number(salAcc.openingBalance) || 0 : 0;
-        accCcRow[i]      = ccAcc  ? Number(ccAcc.openingBalance)  || 0 : 0;
-      }
+      // Future month start = previous month end. Specifically:
+      //   Savings → previous month's end-of-month savings (from the chain we computed)
+      //   Salary  → 0 (assume month-end sweep cleared salary)
+      //   CC      → 0 (assume previous month's CC bill was paid in full)
+      // This matches the user's mental model: at the start of each new month, salary float
+      // is zero and CC is paid off. Reality may differ but it gives a clean projection.
+      accSavingsRow[i] = i > 0 ? _eomSavingsChain[i - 1] : 0;
+      accSalaryRow[i]  = 0;
+      accCcRow[i]      = 0;
     }
   }
   // ---- Per-account adjustment sub-rows (expandable) ----
@@ -4957,40 +5002,10 @@ function renderBudget() {
     investmentRows;
 
   // ---- CASH BALANCE section (bottom of sheet) ----
-  // Single row: Savings end-of-month projection.
-  // Current month: per user spec, end-of-month = May-1-balance + full Planned to Savings target.
-  // (Visually independent from the live "Account Balances" top row — top reflects today,
-  //  bottom reflects where the month ENDS once everything plays out.)
-  // Past months: reverse-walked end-of-month savings.
-  // Future months: previous month's bottom + this month's planned-to-savings target.
-  const cashBalanceVals = new Array(n).fill(0);
-  let runningEom = null;
-  for (let i = 0; i < n; i++) {
-    const ym = isos[sliceFrom + i];
-    if (_isPast(i)) {
-      cashBalanceVals[i] = _savingsAtEndOfMonth(ym);
-      runningEom = cashBalanceVals[i];
-    } else if (_isCurrent(i)) {
-      // Cash-flow truth: today's live savings + what would still flow if you sweep salary
-      // residue and pay CC bill at month end (with no further activity for rest of month).
-      // This equals: live savings + (live salary − |live CC|).
-      // Internally consistent with the Account Balances row at the top and the
-      // "Planned to Savings" target on the Allocation row.
-      const _sav = (state.accounts || []).find(a => a.id === 'savings');
-      const _sal = (state.accounts || []).find(a => a.id === 'salary');
-      const _cc  = (state.accounts || []).find(a => a.id === 'cc');
-      const liveSavings = _sav ? (Number(_sav.openingBalance) || 0) : 0;
-      const liveSalary  = _sal ? (Number(_sal.openingBalance) || 0) : 0;
-      const liveCcOwed  = _cc  ? Math.abs(Number(_cc.openingBalance) || 0) : 0;
-      cashBalanceVals[i] = liveSavings + liveSalary - liveCcOwed;
-      runningEom = cashBalanceVals[i];
-    } else {
-      // Future: previous EOM + this month's planned target
-      const prev = runningEom !== null ? runningEom : (cashBalanceVals[i - 1] || 0);
-      cashBalanceVals[i] = prev + (plannedSavingsRowNew.target[i] || 0);
-      runningEom = cashBalanceVals[i];
-    }
-  }
+  // Uses the pre-computed _eomSavingsChain — single source of truth that the top
+  // Account Balances row also bridges from. This guarantees:
+  //   "June top Savings" == "May bottom Cash Balance" exactly.
+  const cashBalanceVals = _eomSavingsChain.slice();
   document.getElementById('budgetCashBalance').innerHTML =
     `<tr class="section-head"><th colspan="${colspan}">Cash Balance <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— savings projected end-of-month</span></th></tr>` +
     `<tr class="subtotal"><th><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#d4a857;margin-right:8px;"></span>Savings (end of month)</th>${cells(cashBalanceVals)}</tr>`;
