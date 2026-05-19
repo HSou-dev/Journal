@@ -604,6 +604,35 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   .stat { min-width: 50%; border-bottom: 1px solid var(--line); }
   .review-grid { grid-template-columns: 1fr; }
   .rep-row.emi, .rep-row.inv, .rep-row.acc { grid-template-columns: 1fr 1fr; }
+
+  /* ── Projection sheet: mobile-optimized ─────────────────────────────
+     Sticky first column (row labels) and sticky header row (month names).
+     Tighter padding + smaller text. The wrapper provides horizontal scroll
+     while the first column stays visible — you never lose row context. */
+  .proj-table-wrap { max-height: calc(100vh - 240px); }
+  .proj-table { font-size: 10.5px; }
+  .proj-table thead th { padding: 6px 8px; font-size: 10px; }
+  .proj-table tbody td, .proj-table tbody th { padding: 5px 8px; font-size: 10.5px; }
+
+  /* Sticky header row */
+  .proj-table thead th { position: sticky; top: 0; z-index: 3; background: var(--bg-elevated); }
+  /* Sticky first column (row labels). th:first-child is the row label cell. */
+  .proj-table tbody th { position: sticky; left: 0; z-index: 2; background: var(--bg-card); max-width: 130px; white-space: normal; line-height: 1.2; }
+  /* Top-left corner cell: doubly sticky (both vertical + horizontal) */
+  .proj-table thead th:first-child { left: 0; z-index: 4; }
+  /* Section headers span all columns and stick to top during scroll */
+  .proj-table tbody tr.section-head th { position: sticky; left: 0; background: var(--bg-elevated); z-index: 2; max-width: none; }
+
+  /* Subtotal / surplus rows: keep highlight visible through the stickiness */
+  .proj-table tbody tr.subtotal th { background: rgba(255,255,255,0.06); }
+  .proj-table tbody tr.surplus-row th { background: rgba(212,168,87,0.10); }
+
+  /* Inline "actual / budget" can wrap to two lines if needed */
+  .proj-table tbody td { max-width: 90px; white-space: normal; line-height: 1.25; word-break: break-word; }
+
+  /* Hide section subtitle hints (the "— start of month" etc. italic suffixes)
+     on mobile — they overflow the narrow first column. */
+  .proj-table tbody tr.section-head th > span { display: none; }
 }
 </style>
 </head>
@@ -1192,7 +1221,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.19';
+const APP_VERSION = '2026.05.04.21';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -4804,13 +4833,35 @@ function renderBudget() {
       if (tx.type !== 'transfer' || tx.toAccountId !== 'savings') return;
       actualTransfer += Number(tx.amount) || 0;
     });
-    // Target: surplus minus all investments allocated this month
-    let scheduledInvForMonth = 0;
-    scheduledInvRows.forEach(r => { scheduledInvForMonth += r.overlay.numeric[i] || 0; });
-    const target = (surplus[i] || 0) - scheduledInvForMonth - (otherOneTimeRow.numeric[i] || 0);
+    // ────── Target computation depends on month ──────
+    // For CURRENT month: use live cash-flow truth — what would land in savings if you
+    // settled all accounts today (sweep salary residue, pay CC bill, no further activity).
+    //   target = (live salary) − |live CC|
+    // PLUS the savings transfers already made this month (so the display "actual / target"
+    // is internally consistent — actual is part of total expected sweep).
+    //
+    // For PAST / FUTURE months: original formula (surplus − all investment allocations).
+    // Past months use reverse-walked savings closing balance; future months use budgeted residue.
+    let target;
+    if (_isCurrent(i)) {
+      const _sav = (state.accounts || []).find(a => a.id === 'savings');
+      const _sal = (state.accounts || []).find(a => a.id === 'salary');
+      const _cc  = (state.accounts || []).find(a => a.id === 'cc');
+      const liveSalary = _sal ? (Number(_sal.openingBalance) || 0) : 0;
+      const liveCcOwed = _cc ? Math.abs(Number(_cc.openingBalance) || 0) : 0;
+      // remaining sweep = what's left in salary after paying CC
+      const remainingSweep = liveSalary - liveCcOwed;
+      // target total expected = already-transferred-this-month + remaining-sweep
+      target = actualTransfer + remainingSweep;
+    } else {
+      // Past/future: original surplus-based math
+      let scheduledInvForMonth = 0;
+      scheduledInvRows.forEach(r => { scheduledInvForMonth += r.overlay.numeric[i] || 0; });
+      target = (surplus[i] || 0) - scheduledInvForMonth - (otherOneTimeRow.numeric[i] || 0);
+    }
     plannedSavingsRowNew.target[i] = target;
-    plannedSavingsRowNew.numeric[i] = actualTransfer;  // for cash-flow check; display separately
-    // Format display with negative red+parens styling
+    plannedSavingsRowNew.numeric[i] = actualTransfer;
+    // Format display
     const fmtTarget = (t) => {
       if (t < 0) return `<span style="color:#e06060;">(${fmtMoney(Math.abs(t), true)})</span>`;
       return fmtMoney(t, true);
@@ -4920,9 +4971,18 @@ function renderBudget() {
       cashBalanceVals[i] = _savingsAtEndOfMonth(ym);
       runningEom = cashBalanceVals[i];
     } else if (_isCurrent(i)) {
-      // May 1 reverse-walked + full Planned to Savings target for this month
-      const may1 = _savingsAtEndOfMonth(_prevMonthYM(ym));
-      cashBalanceVals[i] = may1 + (plannedSavingsRowNew.target[i] || 0);
+      // Cash-flow truth: today's live savings + what would still flow if you sweep salary
+      // residue and pay CC bill at month end (with no further activity for rest of month).
+      // This equals: live savings + (live salary − |live CC|).
+      // Internally consistent with the Account Balances row at the top and the
+      // "Planned to Savings" target on the Allocation row.
+      const _sav = (state.accounts || []).find(a => a.id === 'savings');
+      const _sal = (state.accounts || []).find(a => a.id === 'salary');
+      const _cc  = (state.accounts || []).find(a => a.id === 'cc');
+      const liveSavings = _sav ? (Number(_sav.openingBalance) || 0) : 0;
+      const liveSalary  = _sal ? (Number(_sal.openingBalance) || 0) : 0;
+      const liveCcOwed  = _cc  ? Math.abs(Number(_cc.openingBalance) || 0) : 0;
+      cashBalanceVals[i] = liveSavings + liveSalary - liveCcOwed;
       runningEom = cashBalanceVals[i];
     } else {
       // Future: previous EOM + this month's planned target
@@ -4938,6 +4998,216 @@ function renderBudget() {
   // Clear the now-unused transfers section (legacy from prior design).
   const transfersAnchor = document.getElementById('budgetTransfers');
   if (transfersAnchor) transfersAnchor.innerHTML = '';
+
+  // ───── Post-render decorations (collapsible sections + grouped rows) ─────
+  // Make each section header a click target that toggles visibility of its body rows.
+  // A section is a tbody element. We decorate the first row (.section-head) with a caret
+  // and the tbody gets a data-collapsed attribute that hides the non-header rows when set.
+  // We also build "grouped" rows for EMIs (in Outflows) and Investments (in Running Balances):
+  // when grouped, the individual rows are hidden and a single summary row shows totals.
+  _decorateProjSheetCollapsible();
+}
+
+function _decorateProjSheetCollapsible() {
+  // Persisted state for which sections / groups are collapsed. Keys are section id
+  // (tbody id) or group id (e.g. "outflows-emis"). Defaults vary by viewport size:
+  // on mobile, Running Balances + Account Balances collapse by default; on desktop, all expand.
+  if (!window._projCollapseState) {
+    const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+    window._projCollapseState = {
+      // section-level (entire tbody collapses)
+      'budgetAccountBalances': false,
+      'budgetInflows': false,
+      'budgetOutflows': false,
+      'budgetSavings': false,
+      'budgetBalances': isMobile,  // Running Balances starts collapsed on mobile
+      'budgetCashBalance': false,
+      // group-level
+      'outflows-emis': isMobile,    // EMI rows grouped under one summary on mobile
+      'balances-invest': false,     // Investment rows always grouped (always shown as one summary)
+    };
+  }
+  const cs = window._projCollapseState;
+
+  // Inject caret + click handler into each tbody's section-head row.
+  const sections = [
+    { id: 'budgetAccountBalances', label: 'Account Balances' },
+    { id: 'budgetInflows',         label: 'Inflows' },
+    { id: 'budgetOutflows',        label: 'Outflows' },
+    { id: 'budgetSavings',         label: 'Surplus & Allocation' },
+    { id: 'budgetBalances',        label: 'Running Balances' },
+    { id: 'budgetCashBalance',     label: 'Cash Balance' },
+  ];
+  sections.forEach(({ id }) => {
+    const tbody = document.getElementById(id);
+    if (!tbody) return;
+    const headRow = tbody.querySelector('tr.section-head');
+    if (!headRow) return;
+    const th = headRow.querySelector('th');
+    if (!th) return;
+    // Avoid double-decoration: rebuild caret each render to reflect current state
+    const collapsed = cs[id];
+    const existing = th.querySelector('.section-caret');
+    if (existing) existing.remove();
+    const caret = document.createElement('span');
+    caret.className = 'section-caret';
+    caret.style.cssText = 'display:inline-block;width:14px;color:var(--ink-muted);cursor:pointer;user-select:none;font-size:11px;margin-right:4px;';
+    caret.textContent = collapsed ? '▸' : '▾';
+    th.insertBefore(caret, th.firstChild);
+    th.style.cursor = 'pointer';
+    th.onclick = (e) => {
+      e.stopPropagation();
+      cs[id] = !cs[id];
+      _applyProjSheetCollapse();
+    };
+  });
+
+  // Group EMI rows in Outflows section.
+  // EMIs are rows in budgetOutflows whose label ends with "(EMI)". We move them under a
+  // group-summary row and hide individuals when collapsed.
+  _buildGroupedRows({
+    tbodyId: 'budgetOutflows',
+    groupId: 'outflows-emis',
+    matchFn: (tr) => {
+      const th = tr.querySelector('th');
+      if (!th) return false;
+      const txt = (th.textContent || '').trim();
+      return /\(EMI\)\s*$/.test(txt);
+    },
+    summaryLabel: 'EMIs',
+  });
+
+  // Group Investment rows in Running Balances (currently ALL rows in that tbody are investments,
+  // minus the section head). Group them as "Investments".
+  _buildGroupedRows({
+    tbodyId: 'budgetBalances',
+    groupId: 'balances-invest',
+    matchFn: (tr) => !tr.classList.contains('section-head'),
+    summaryLabel: 'Investments',
+  });
+
+  _applyProjSheetCollapse();
+}
+
+// Build a single "summary row" for a group of rows. The summary row sums their values per column
+// and shows "Label (N)". Individual rows get a marker class so we can hide them when collapsed.
+function _buildGroupedRows({ tbodyId, groupId, matchFn, summaryLabel }) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  // Remove any existing summary row from a prior render
+  tbody.querySelectorAll('tr[data-group-summary="' + groupId + '"]').forEach(r => r.remove());
+
+  const allRows = Array.from(tbody.querySelectorAll('tr'));
+  const matchedRows = allRows.filter(matchFn);
+  if (matchedRows.length < 2) return; // not worth grouping 0 or 1 row
+
+  // Mark individuals
+  matchedRows.forEach(r => r.setAttribute('data-group-member', groupId));
+
+  // Build summary row: sum values across matched rows per column.
+  // We sum the rendered numeric text of each td — but that loses precision (₹X / ₹Y display).
+  // Better: each row stores its numeric value as a data-* attr if we had one. We don't, so
+  // we parse from text. Strip commas, ₹, spaces. Take FIRST number (the "actual" if "actual/budget").
+  const firstRow = matchedRows[0];
+  const numCols = firstRow.querySelectorAll('td').length;
+  const sums = new Array(numCols).fill(0);
+  matchedRows.forEach(r => {
+    r.querySelectorAll('td').forEach((td, i) => {
+      // Parse the first numeric value in the cell
+      const text = (td.textContent || '').replace(/[₹,\s]/g, '').replace(/[KkMmLl]/, '');
+      // Try simpler: if the text matches "X / Y" we take both for now sum the X
+      const match = (td.textContent || '').match(/-?[\d,.]+\s*(?:[KkMmLl])?/g);
+      if (match && match[0]) {
+        const v = _parseRenderedAmount(match[0]);
+        if (!isNaN(v)) sums[i] += v;
+      }
+    });
+  });
+
+  // Build the summary row
+  const summary = document.createElement('tr');
+  summary.setAttribute('data-group-summary', groupId);
+  summary.style.cursor = 'pointer';
+  const th = document.createElement('th');
+  th.style.cssText = 'font-weight:600;';
+  const caret = document.createElement('span');
+  caret.className = 'group-caret';
+  caret.style.cssText = 'display:inline-block;width:14px;color:var(--ink-muted);user-select:none;font-size:11px;margin-right:4px;';
+  th.appendChild(caret);
+  const labelSpan = document.createElement('span');
+  labelSpan.textContent = summaryLabel + ' (' + matchedRows.length + ')';
+  th.appendChild(labelSpan);
+  summary.appendChild(th);
+  sums.forEach(v => {
+    const td = document.createElement('td');
+    td.textContent = _fmtSummaryAmount(v);
+    summary.appendChild(td);
+  });
+  // Insert summary before the first matched row
+  tbody.insertBefore(summary, firstRow);
+  summary.onclick = () => {
+    if (!window._projCollapseState) return;
+    window._projCollapseState[groupId] = !window._projCollapseState[groupId];
+    _applyProjSheetCollapse();
+  };
+}
+
+function _parseRenderedAmount(str) {
+  // Handle K/L/M/Cr suffixes that fmtMoney uses for compact rendering
+  const s = String(str).replace(/,/g, '').replace(/₹/g, '').trim();
+  const m = s.match(/^(-?[\d.]+)\s*([KkMmLl])?$/);
+  if (!m) return parseFloat(s) || 0;
+  let val = parseFloat(m[1]) || 0;
+  const suffix = (m[2] || '').toLowerCase();
+  if (suffix === 'k') val *= 1000;
+  else if (suffix === 'l') val *= 100000;
+  else if (suffix === 'm') val *= 1000000;
+  return val;
+}
+
+function _fmtSummaryAmount(v) {
+  if (Math.abs(v) < 0.5) return '—';
+  if (typeof fmtMoney === 'function') return fmtMoney(v, true);
+  return '₹' + Math.round(v).toLocaleString('en-IN');
+}
+
+function _applyProjSheetCollapse() {
+  const cs = window._projCollapseState || {};
+  // Section-level: hide all non-section-head rows in the tbody when collapsed
+  ['budgetAccountBalances','budgetInflows','budgetOutflows','budgetSavings','budgetBalances','budgetCashBalance'].forEach(id => {
+    const tbody = document.getElementById(id);
+    if (!tbody) return;
+    const collapsed = !!cs[id];
+    tbody.querySelectorAll('tr').forEach(tr => {
+      if (tr.classList.contains('section-head')) return;
+      tr.style.display = collapsed ? 'none' : '';
+    });
+    const caret = tbody.querySelector('.section-caret');
+    if (caret) caret.textContent = collapsed ? '▸' : '▾';
+  });
+  // Group-level: when collapsed, hide individual members and show summary;
+  //              when expanded, show individuals and hide summary
+  Object.keys(cs).forEach(key => {
+    if (!key.includes('-')) return; // section IDs don't have dashes; group IDs do
+    const isCollapsed = !!cs[key];
+    document.querySelectorAll('tr[data-group-member="' + key + '"]').forEach(r => {
+      // Only override display if the parent section itself is visible
+      const parentTbody = r.closest('tbody');
+      const sectionId = parentTbody ? parentTbody.id : null;
+      const sectionCollapsed = sectionId ? !!cs[sectionId] : false;
+      if (sectionCollapsed) { r.style.display = 'none'; return; }
+      r.style.display = isCollapsed ? 'none' : '';
+    });
+    document.querySelectorAll('tr[data-group-summary="' + key + '"]').forEach(r => {
+      const parentTbody = r.closest('tbody');
+      const sectionId = parentTbody ? parentTbody.id : null;
+      const sectionCollapsed = sectionId ? !!cs[sectionId] : false;
+      if (sectionCollapsed) { r.style.display = 'none'; return; }
+      r.style.display = isCollapsed ? '' : 'none';
+      const caret = r.querySelector('.group-caret');
+      if (caret) caret.textContent = isCollapsed ? '▸' : '▾';
+    });
+  });
 }
 function renderNetWorth() {
   const valDate = state.valuationDate || state.horizonEnd;
