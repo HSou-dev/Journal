@@ -1221,7 +1221,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.22';
+const APP_VERSION = '2026.05.04.23';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -1396,7 +1396,29 @@ function migrateState(s) {
     }
   }
 
-  s.schemaVersion = 8;
+  // Schema v9: one-off entries gain Frequency + EndMonth fields. Old entries had
+  // 'repeat: true' = yearly, 'repeat: false' = once. We backfill 'frequency' from 'repeat'.
+  // Applies to state.incomeOneOffs/expenseOneOffs AND scenarios[].params.incomeOneOffs/expenseOneOffs.
+  if ((s.schemaVersion || 0) < 9) {
+    const backfill = (arr) => {
+      if (!Array.isArray(arr)) return;
+      arr.forEach(o => {
+        if (!o) return;
+        if (!o.frequency) o.frequency = o.repeat ? 'yearly' : 'once';
+        if (typeof o.endMonth !== 'string') o.endMonth = '';
+      });
+    };
+    backfill(s.incomeOneOffs);
+    backfill(s.expenseOneOffs);
+    (s.scenarios || []).forEach(sc => {
+      if (sc && sc.params) {
+        backfill(sc.params.incomeOneOffs);
+        backfill(sc.params.expenseOneOffs);
+      }
+    });
+  }
+
+  s.schemaVersion = 9;
   return s;
 }
 
@@ -2987,36 +3009,78 @@ function runProjection(overrides={}) {
   const oneOffIncSeries = new Array(n).fill(0);
   function expandOneOff(o, target, growthRate, multiplier) {
     if (!o || !o.month || !o.amount) return;
-    const idxOrig = months.findIndex(m => m.iso === o.month);
+    // Backward-compat: o.repeat = true  →  frequency 'yearly'; else 'once'.
+    // If o.frequency is explicitly set, it wins.
+    const freq = o.frequency || (o.repeat ? 'yearly' : 'once');
     const [oy, om] = o.month.split('-').map(Number);
-    if (idxOrig >= 0) {
-      target[idxOrig] += o.amount * multiplier;
-      if (o.repeat) {
+    // End-month cap (optional). If specified, no contribution past this month.
+    const endIso = o.endMonth && /^\d{4}-\d{2}$/.test(o.endMonth) ? o.endMonth : null;
+    const passesEnd = (iso) => endIso ? iso <= endIso : true;
+
+    const idxOrig = months.findIndex(m => m.iso === o.month);
+
+    // ─── Frequency: once ───
+    // Single contribution on the original month if it falls in the horizon.
+    if (freq === 'once') {
+      if (idxOrig >= 0 && passesEnd(o.month)) {
+        target[idxOrig] += o.amount * multiplier;
+      }
+      return;
+    }
+
+    // ─── Frequency: monthly ───
+    // Add to every month from start through endMonth (or horizon end). Growth applied
+    // annually — within a calendar year amount stays flat; in year k after start year,
+    // amount = base * (1 + g)^k. This matches typical rental escalation, etc.
+    if (freq === 'monthly') {
+      const startMs = months.findIndex(m => m.iso === o.month);
+      const firstIdx = startMs >= 0 ? startMs : 0; // if start is before horizon, begin at horizon start
+      // For each month from firstIdx forward, contribute (with year-based growth)
+      for (let i = firstIdx; i < n; i++) {
+        const iso = months[i].iso;
+        if (iso < o.month) continue; // safety; skip months before start
+        if (!passesEnd(iso)) break;
+        const [cy] = iso.split('-').map(Number);
+        const yearsSinceStart = Math.max(0, cy - oy);
+        target[i] += o.amount * Math.pow(1 + growthRate, yearsSinceStart) * multiplier;
+      }
+      return;
+    }
+
+    // ─── Frequency: yearly ───
+    // Add to start month, then every 12 months after. Same as legacy o.repeat = true.
+    if (freq === 'yearly') {
+      if (idxOrig >= 0) {
+        if (passesEnd(o.month)) target[idxOrig] += o.amount * multiplier;
         let k = 1, i = idxOrig + 12;
         while (i < n) {
+          const iso = months[i].iso;
+          if (!passesEnd(iso)) break;
           target[i] += o.amount * Math.pow(1 + growthRate, k) * multiplier;
           i += 12; k++;
         }
-      }
-    } else if (o.repeat) {
-      // Original is before horizon; find first occurrence in horizon
-      const [hy] = horizonStart.split('-').map(Number);
-      let yr = hy;
-      while (yr <= 9999) {
-        const candidate = yr + '-' + String(om).padStart(2,'0');
-        if (candidate > horizonEnd) return;
-        const ci = months.findIndex(m => m.iso === candidate);
-        if (ci >= 0) {
-          let i = ci, year = yr;
-          while (i < n) {
-            const yearsSinceOrig = year - oy;
-            target[i] += o.amount * Math.pow(1 + growthRate, yearsSinceOrig) * multiplier;
-            i += 12; year++;
+      } else {
+        // Original is before horizon; find first occurrence in horizon
+        const [hy] = horizonStart.split('-').map(Number);
+        let yr = hy;
+        while (yr <= 9999) {
+          const candidate = yr + '-' + String(om).padStart(2,'0');
+          if (candidate > horizonEnd) return;
+          const ci = months.findIndex(m => m.iso === candidate);
+          if (ci >= 0) {
+            let i = ci, year = yr;
+            while (i < n) {
+              const iso = months[i].iso;
+              if (!passesEnd(iso)) break;
+              const yearsSinceOrig = year - oy;
+              target[i] += o.amount * Math.pow(1 + growthRate, yearsSinceOrig) * multiplier;
+              i += 12; year++;
+            }
+            return;
           }
-          return;
+          yr++;
+          if (yr - hy > 200) return;
         }
-        yr++;
-        if (yr - hy > 200) return;
       }
     }
   }
@@ -5580,25 +5644,32 @@ function renderScenarioFields(sc) {
       <div style="margin-top:12px;font-size:12px;color:var(--ink-muted);font-style:italic;font-family:'Fraunces',serif;">Income drops to zero, monthly expenses reduced by the chosen percentage, and new SIP contributions stop. Existing investment balances continue compounding.</div>`;
   }
   if (sc.type === 'custom') {
-    const incRows = (p.incomeOneOffs||[]).map((o,i) => `
-      <div class="rep-row emi" data-sc-list="incomeOneOffs" data-sc-list-idx="${i}" style="grid-template-columns:1fr 1fr 2fr auto;">
-        <div class="field"><label>Month</label><input type="month" data-sc-list-field="month" value="${o.month||''}" /></div>
+    // Build a row for one-off income or expense. Adds Frequency dropdown (Once/Monthly/Yearly)
+    // and End month (optional, bounds Monthly/Yearly repeats). End month is hidden when freq=once.
+    const buildRow = (list, o, i) => {
+      const freq = o.frequency || (o.repeat ? 'yearly' : 'once');
+      const endHidden = freq === 'once' ? 'style="visibility:hidden;"' : '';
+      return `
+      <div class="rep-row emi" data-sc-list="${list}" data-sc-list-idx="${i}" style="grid-template-columns:1fr 1fr 1fr 1fr 2fr auto;">
+        <div class="field"><label>Start month</label><input type="month" data-sc-list-field="month" value="${o.month||''}" /></div>
         <div class="field"><label>Amount</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-sc-list-field="amount" min="0" step="any" value="${o.amount||0}" /></div></div>
+        <div class="field"><label>Frequency</label><select data-sc-list-field="frequency">
+          <option value="once" ${freq==='once'?'selected':''}>Once</option>
+          <option value="monthly" ${freq==='monthly'?'selected':''}>Monthly</option>
+          <option value="yearly" ${freq==='yearly'?'selected':''}>Yearly</option>
+        </select></div>
+        <div class="field" data-sc-list-endfield ${endHidden}><label>End month <span class="opt">opt</span></label><input type="month" data-sc-list-field="endMonth" value="${o.endMonth||''}" /></div>
         <div class="field"><label>Note</label><input type="text" data-sc-list-field="note" value="${escapeHtml(o.note||'')}" /></div>
         <button class="del-btn" data-sc-list-del>×</button>
-      </div>`).join('');
-    const expRows = (p.expenseOneOffs||[]).map((o,i) => `
-      <div class="rep-row emi" data-sc-list="expenseOneOffs" data-sc-list-idx="${i}" style="grid-template-columns:1fr 1fr 2fr auto;">
-        <div class="field"><label>Month</label><input type="month" data-sc-list-field="month" value="${o.month||''}" /></div>
-        <div class="field"><label>Amount</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-sc-list-field="amount" min="0" step="any" value="${o.amount||0}" /></div></div>
-        <div class="field"><label>Note</label><input type="text" data-sc-list-field="note" value="${escapeHtml(o.note||'')}" /></div>
-        <button class="del-btn" data-sc-list-del>×</button>
-      </div>`).join('');
+      </div>`;
+    };
+    const incRows = (p.incomeOneOffs||[]).map((o,i) => buildRow('incomeOneOffs', o, i)).join('');
+    const expRows = (p.expenseOneOffs||[]).map((o,i) => buildRow('expenseOneOffs', o, i)).join('');
     return nameField + `
-      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:8px 0 6px;">One-off income</div>
+      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:8px 0 6px;">Income events <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— one-off, monthly, or yearly</span></div>
       <div id="scCustIncList">${incRows}</div>
       <button class="btn ghost" data-sc-add-row="incomeOneOffs" style="margin-bottom:14px;">+ Add income event</button>
-      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:8px 0 6px;">One-off expense</div>
+      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:8px 0 6px;">Expense events <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— one-off, monthly, or yearly</span></div>
       <div id="scCustExpList">${expRows}</div>
       <button class="btn ghost" data-sc-add-row="expenseOneOffs" style="margin-bottom:14px;">+ Add expense event</button>
       <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:8px 0 6px;">Recurring expense bump</div>
@@ -5615,6 +5686,18 @@ function bindScenarioFieldHandlers(sc) {
   document.querySelectorAll('#scEditFields .toggle[data-sc-toggle]').forEach(tog => {
     tog.querySelector('.switch').addEventListener('click', () => tog.classList.toggle('on'));
   });
+  // Frequency dropdown: live-toggle End month field visibility without re-rendering.
+  // When freq=once, end month is meaningless; we hide it for cleaner UX.
+  document.querySelectorAll('#scEditFields select[data-sc-list-field="frequency"]').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const row = sel.closest('[data-sc-list]');
+      if (!row) return;
+      const endField = row.querySelector('[data-sc-list-endfield]');
+      if (endField) {
+        endField.style.visibility = sel.value === 'once' ? 'hidden' : '';
+      }
+    });
+  });
   // Custom: add-row handler — read DOM values first, then add the empty row, then re-render
   document.querySelectorAll('#scEditFields [data-sc-add-row]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -5624,7 +5707,7 @@ function bindScenarioFieldHandlers(sc) {
       // Now mutate the array
       sc.params = sc.params || {};
       sc.params[which] = sc.params[which] || [];
-      sc.params[which].push({ month: '', amount: 0, note: '' });
+      sc.params[which].push({ month: '', amount: 0, note: '', frequency: 'once', endMonth: '' });
       // Re-render
       const fields = document.getElementById('scEditFields');
       fields.innerHTML = renderScenarioFields(sc);
@@ -5675,7 +5758,9 @@ function readScenarioEditFields(sc) {
       const month = r.querySelector('[data-sc-list-field="month"]')?.value || '';
       const amount = Number(r.querySelector('[data-sc-list-field="amount"]')?.value) || 0;
       const note = r.querySelector('[data-sc-list-field="note"]')?.value || '';
-      arr.push({ month, amount, note });
+      const frequency = r.querySelector('[data-sc-list-field="frequency"]')?.value || 'once';
+      const endMonth = r.querySelector('[data-sc-list-field="endMonth"]')?.value || '';
+      arr.push({ month, amount, note, frequency, endMonth });
     });
     sc.params[which] = arr;
   });
@@ -5786,14 +5871,26 @@ function commitScenarioToBase(scId) {
   } else if (sc.type === 'custom') {
     if (Array.isArray(p.incomeOneOffs)) {
       p.incomeOneOffs.filter(o => o.month && Number(o.amount)).forEach(o => {
-        pending.incomeOneOffs.push({ month: o.month, amount: Number(o.amount), note: o.note || (sc.name || 'Custom'), repeat: false });
-        committed.push(`Income ${fmtMoney(Number(o.amount), true)} on ${o.month}`);
+        pending.incomeOneOffs.push({
+          month: o.month, amount: Number(o.amount), note: o.note || (sc.name || 'Custom'),
+          frequency: o.frequency || 'once',
+          endMonth: o.endMonth || '',
+          repeat: (o.frequency === 'yearly'),  // legacy field for any code still reading it
+        });
+        const freqLabel = o.frequency === 'monthly' ? '/mo' : (o.frequency === 'yearly' ? '/yr' : '');
+        committed.push(`Income ${fmtMoney(Number(o.amount), true)}${freqLabel} from ${o.month}` + (o.endMonth ? ` to ${o.endMonth}` : ''));
       });
     }
     if (Array.isArray(p.expenseOneOffs)) {
       p.expenseOneOffs.filter(o => o.month && Number(o.amount)).forEach(o => {
-        pending.expenseOneOffs.push({ month: o.month, amount: Number(o.amount), note: o.note || (sc.name || 'Custom'), repeat: false });
-        committed.push(`Expense ${fmtMoney(Number(o.amount), true)} on ${o.month}`);
+        pending.expenseOneOffs.push({
+          month: o.month, amount: Number(o.amount), note: o.note || (sc.name || 'Custom'),
+          frequency: o.frequency || 'once',
+          endMonth: o.endMonth || '',
+          repeat: (o.frequency === 'yearly'),
+        });
+        const freqLabel = o.frequency === 'monthly' ? '/mo' : (o.frequency === 'yearly' ? '/yr' : '');
+        committed.push(`Expense ${fmtMoney(Number(o.amount), true)}${freqLabel} from ${o.month}` + (o.endMonth ? ` to ${o.endMonth}` : ''));
       });
     }
     if (p.monthlyExpenseStart && Number(p.monthlyExpenseAmount) > 0) {
