@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.22",
+  "version": "2026.05.04.23",
   "released": "2026-05-19",
-  "notes": "Future-month Account Balances now bridge correctly from May's Cash Balance. June top Savings = May bottom Cash Balance (was using engine raw projection, now uses cash-flow chain). Future-month Salary and CC reset to ₹0 (assumes month-end sweep + CC payment). Bottom Cash Balance row now uses same pre-computed chain — single source of truth for end-of-month savings."
+  "notes": "Scenarios: income and expense events now support Frequency (Once/Monthly/Yearly) and an optional End month. Monthly recurring (e.g. rental income) and yearly recurring (e.g. bonus) both grow by salary growth rate annually. Engine's expandOneOff extended to handle all three frequencies. Schema v9 backfills frequency from legacy 'repeat' boolean. Wizard one-off rows remain unchanged (backward-compatible via migration)."
 }
