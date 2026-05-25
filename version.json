@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.33",
+  "version": "2026.05.04.34",
   "released": "2026-05-19",
-  "notes": "Fix: projection sheet first column text now wraps. Root cause: a global 'th { text-transform: uppercase; letter-spacing: 0.15em; font-size: 10px }' rule was applying to .proj-table tbody th, making 'Savings account balance' render as wide-spaced 'SAVINGS ACCOUNT BALANCE' which couldn't fit in 180px and overflowed into adjacent month columns. Fix: explicitly reset text-transform, letter-spacing, and font-size on .proj-table tbody th to body-text defaults. Now labels render in proper title case at readable size, and overflow-wrap: anywhere kicks in to break long labels into 2-3 lines as needed."
+  "notes": "Fix: first column text wrapping (option A — pure CSS, no HTML change). Two changes: (1) box-sizing: border-box on all .proj-table cells — was content-box, so 14+14=28px padding was ADDING to the 180px width letting text spill into 208px effective. Border-box clamps total to 180px, forcing text into the available 152px. (2) word-break: break-word on .proj-table tbody th (was 'normal' which doesn't break mid-word). Combined with overflow-wrap: anywhere, this guarantees text breaks even if a single word is too long for the column. Same treatment applied to the 'Item' header cell."
 }
