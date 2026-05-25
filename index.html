@@ -682,6 +682,9 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   white-space: nowrap;
   background-color: var(--bg-card);  /* default opaque background so sticky never shows through */
   border-bottom: 1px solid var(--line-soft);
+  /* All proj-table cells use border-box so column widths are honored exactly,
+     padding stays within the assigned width, and content doesn't overflow. */
+  box-sizing: border-box;
 }
 .proj-table thead th {
   background-color: var(--surface-sticky-head);
@@ -698,13 +701,24 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   color: var(--ink-dim);
   background-color: var(--surface-sticky);
   white-space: normal;       /* labels wrap to 2+ lines naturally */
-  word-break: normal;
+  word-break: break-word;    /* aggressive: break mid-word if needed (was: normal, which didn't break) */
   overflow-wrap: anywhere;
   line-height: 1.35;
+  /* box-sizing: border-box makes padding count INSIDE the 180px width.
+     Without this, content-box adds 14+14=28px padding on top of 180, effectively
+     letting text spill into 208px of space. Border-box clamps total cell to 180px,
+     forcing text into the available 152px and triggering word-break. */
+  box-sizing: border-box;
   /* Reset globals from `th { ... }` that would break wrapping: */
   text-transform: none;      /* no uppercase — uppercase glyphs are wider, harder to wrap */
   letter-spacing: normal;    /* no extra letter spacing */
   font-size: 12.5px;         /* readable body size, not the tiny 10px header size */
+}
+/* Apply same constraints to the matching "Item" header cell (first thead th, no data-col) */
+.proj-table thead th:not([data-col]) {
+  box-sizing: border-box;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .proj-table tbody th * { white-space: normal !important; overflow-wrap: anywhere; }
 .proj-table tbody td { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
@@ -1967,7 +1981,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.33';
+const APP_VERSION = '2026.05.04.34';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
