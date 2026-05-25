@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.23",
+  "version": "2026.05.04.24",
   "released": "2026-05-19",
-  "notes": "Scenarios: income and expense events now support Frequency (Once/Monthly/Yearly) and an optional End month. Monthly recurring (e.g. rental income) and yearly recurring (e.g. bonus) both grow by salary growth rate annually. Engine's expandOneOff extended to handle all three frequencies. Schema v9 backfills frequency from legacy 'repeat' boolean. Wizard one-off rows remain unchanged (backward-compatible via migration)."
+  "notes": "UI overhaul inspired by Cashew's Material You design language. (1) Projection sheet sticky scrolling rebuilt — first column and header row now properly opaque, content scrolls cleanly underneath with subtle edge shadows. Section heads also sticky on horizontal scroll. (2) Design tokens added: rounder radii (8/12/16/22px + pill), layered shadows, smoother motion curves. (3) Nav items rounded into pills with active highlight. (4) Cards use bigger radius (16px) with soft shadow that lifts on hover. (5) Buttons fully rounded pills with accent shadow. (6) Inputs have 12px radius and gold focus ring. (7) Modals 22px radius with scale+fade entrance animation. (8) Section navigation has fade-slide-in. (9) Account tiles lift on hover. (10) Hamburger button circular with shadow."
 }
