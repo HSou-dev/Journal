@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.34",
+  "version": "2026.05.04.35",
   "released": "2026-05-19",
-  "notes": "Fix: first column text wrapping (option A — pure CSS, no HTML change). Two changes: (1) box-sizing: border-box on all .proj-table cells — was content-box, so 14+14=28px padding was ADDING to the 180px width letting text spill into 208px effective. Border-box clamps total to 180px, forcing text into the available 152px. (2) word-break: break-word on .proj-table tbody th (was 'normal' which doesn't break mid-word). Combined with overflow-wrap: anywhere, this guarantees text breaks even if a single word is too long for the column. Same treatment applied to the 'Item' header cell."
+  "notes": "Add overflow: hidden to .proj-table tbody th. Diagnostic showed cell box ends exactly at 227.4px where May TD starts (zero gap), yet text visually appeared to overlap. This is glyph anti-aliasing / font kerning extending 1-2px past the box boundary at certain zoom levels. overflow: hidden on the cell itself clips any such spillover. Vertical wrapping still works (cell grows to accommodate multiple lines, hidden only clips horizontally)."
 }
