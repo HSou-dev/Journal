@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.25",
+  "version": "2026.05.04.26",
   "released": "2026-05-19",
-  "notes": "Major UI overhaul: (1) Light theme default (warm cream/charcoal) with dark mode toggle. (2) Green accent everywhere (replaces gold). All hard-coded gold rgba mapped to theme-aware --accent-* variables. (3) Mobile app skin: hamburger removed, bottom tab bar (Budget/Journal/More-button/Projection/More), FAB for adding transactions, bottom-sheet style modals on mobile (slide up from bottom with grab handle). (4) Projection sheet first column properly wraps text (no overlap), width 180-220px desktop / 140-160px mobile, nested spans wrap too. (5) Charts adapt to theme via CSS variables. (6) Theme preference persisted in localStorage."
+  "notes": "Fix: mobile bottom nav + FAB now visible. Base CSS rules for #bottomNav and #fabBtn that hide them by default were defined AFTER the mobile media query, causing them to win due to source order. Added !important to the mobile-only show rules to override base."
 }
