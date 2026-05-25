@@ -1111,11 +1111,37 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     margin-top: 4px;
   }
 
-  /* Override the desktop proj-table mobile sizing: now first column gets MUCH more room
-     since we only show 3 value columns at a time. Wrap freely. */
-  .proj-table tbody th { min-width: 140px; max-width: none; padding: 10px 12px; font-size: 12.5px; line-height: 1.35; }
-  .proj-table tbody td { min-width: 0; max-width: none; padding: 10px 10px; font-size: 12.5px; text-align: right; }
-  .proj-table thead th { padding: 8px 10px; font-size: 10.5px; }
+  /* ── Mobile projection: table layout strategy ─────────────────────────────
+     Force table-layout: fixed so column widths are explicit and hidden cells
+     contribute zero width. Set table width to fit the viewport. First column
+     gets a fixed share (label space), value cols share the remaining space. */
+  #budgetGrid {
+    table-layout: fixed;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  /* First column (row label, no data-col): roughly half the viewport for labels */
+  #budgetGrid tbody th:not([data-col]),
+  #budgetGrid thead th:not([data-col]) {
+    width: 44%;
+    min-width: 0;
+    max-width: none;
+  }
+  /* Value columns: each gets a share of the remaining ~56% */
+  #budgetGrid [data-col] { width: 18.66%; }
+
+  /* Override the desktop proj-table mobile sizing: first column wraps freely. */
+  .proj-table tbody th { padding: 10px 12px; font-size: 12.5px; line-height: 1.35; max-width: none; position: static !important; box-shadow: none !important; }
+  .proj-table tbody td { padding: 10px 8px; font-size: 12px; text-align: right; max-width: none; }
+  .proj-table thead th { padding: 8px 6px; font-size: 10.5px; position: static !important; box-shadow: none !important; }
+  /* Header row sticky to TOP only (vertical scroll), not sticky to LEFT */
+  .proj-table thead th {
+    position: -webkit-sticky !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 3;
+    background-color: var(--surface-sticky-head);
+  }
   /* Disable horizontal scroll on the table wrap — only 3 columns, fits */
   .proj-table-wrap { overflow-x: hidden; touch-action: pan-y; }
 
@@ -1908,7 +1934,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.30';
+const APP_VERSION = '2026.05.04.31';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
