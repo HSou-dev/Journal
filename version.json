@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.32",
+  "version": "2026.05.04.33",
   "released": "2026-05-19",
-  "notes": "Projection sheet width fix on desktop AND mobile. Switched .proj-table from table-layout: auto (where content forced first column to ~570px wide) to table-layout: fixed with explicit widths: first col 180px, value cols 120px on desktop; 36%/21%/21%/21% on mobile. Labels wrap naturally. Total desktop table width = 180 + 120×N months, scrolls horizontally inside .proj-table-wrap. Section-head italic subtitle hints (the gray '— start of month · click ▸ to expand adjustments' suffixes) now hidden universally — they were noise that bloated first-column width. Mobile updated from 44%/18.66% to 36%/21% (slightly less label space, more breathing room for numbers)."
+  "notes": "Fix: projection sheet first column text now wraps. Root cause: a global 'th { text-transform: uppercase; letter-spacing: 0.15em; font-size: 10px }' rule was applying to .proj-table tbody th, making 'Savings account balance' render as wide-spaced 'SAVINGS ACCOUNT BALANCE' which couldn't fit in 180px and overflowed into adjacent month columns. Fix: explicitly reset text-transform, letter-spacing, and font-size on .proj-table tbody th to body-text defaults. Now labels render in proper title case at readable size, and overflow-wrap: anywhere kicks in to break long labels into 2-3 lines as needed."
 }
