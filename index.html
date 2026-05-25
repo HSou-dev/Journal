@@ -646,11 +646,32 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 .proj-table-wrap::-webkit-scrollbar-corner { background: transparent; }
 
 .proj-table {
-  width: max-content;
-  border-collapse: separate;        /* collapse + sticky has rendering quirks; separate is cleaner */
+  /* table-layout: fixed makes column widths explicit (set per-column below).
+     Labels in the first column wrap freely instead of forcing the column wider
+     to fit content. Without this, table-layout: auto computes column widths
+     from all content (visible AND hidden), and even with min/max-width hints,
+     the browser can choose wider widths if content demands. */
+  table-layout: fixed;
+  border-collapse: separate;
   border-spacing: 0;
   font-size: 12.5px;
   position: relative;
+}
+
+/* Desktop column widths. With table-layout: fixed, these are honored as-is.
+   Total table width = 180 + (120 × N months). Wraps overflow horizontally
+   inside .proj-table-wrap. Mobile overrides these to percentages further below. */
+.proj-table tbody th,
+.proj-table thead th:first-child {
+  width: 180px;
+  min-width: 180px;
+  max-width: 180px;
+}
+.proj-table thead th[data-col],
+.proj-table tbody td[data-col] {
+  width: 120px;
+  min-width: 120px;
+  max-width: 120px;
 }
 
 /* ── Cells: base ── */
@@ -676,15 +697,18 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   font-weight: 500;
   color: var(--ink-dim);
   background-color: var(--surface-sticky);
-  min-width: 180px;
-  max-width: 220px;
-  white-space: normal;
+  white-space: normal;       /* labels wrap to 2+ lines naturally */
   word-break: normal;
   overflow-wrap: anywhere;
   line-height: 1.35;
 }
 .proj-table tbody th * { white-space: normal !important; overflow-wrap: anywhere; }
 .proj-table tbody td { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+
+/* Hide section-head italic subtitle hints universally (was only mobile before).
+   The italic gray suffix like "— start of month · click ▸ to expand adjustments"
+   is noise that pushes the first column wider and clutters the visual hierarchy. */
+.proj-table tbody tr.section-head th > span { display: none !important; }
 
 /* ── Sticky first column (row labels) ──
    The first <th> in each <tr> sticks to the left edge while content scrolls under it.
@@ -1114,21 +1138,26 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   /* ── Mobile projection: table layout strategy ─────────────────────────────
      Force table-layout: fixed so column widths are explicit and hidden cells
      contribute zero width. Set table width to fit the viewport. First column
-     gets a fixed share (label space), value cols share the remaining space. */
+     gets 36% (label space, wraps naturally to multiple lines), value cols share
+     the remaining 64% as 21% each (3 × 21 = 63%, ~1% rounding/border slack). */
   #budgetGrid {
     table-layout: fixed;
     width: 100% !important;
     min-width: 0 !important;
   }
-  /* First column (row label, no data-col): roughly half the viewport for labels */
+  /* First column (row label, no data-col): 36% of viewport */
   #budgetGrid tbody th:not([data-col]),
   #budgetGrid thead th:not([data-col]) {
-    width: 44%;
-    min-width: 0;
-    max-width: none;
+    width: 36% !important;
+    min-width: 0 !important;
+    max-width: none !important;
   }
-  /* Value columns: each gets a share of the remaining ~56% */
-  #budgetGrid [data-col] { width: 18.66%; }
+  /* Value columns: 21% each of viewport (overrides desktop's 120px fixed) */
+  #budgetGrid [data-col] {
+    width: 21% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
 
   /* Override the desktop proj-table mobile sizing: first column wraps freely. */
   .proj-table tbody th { padding: 10px 12px; font-size: 12.5px; line-height: 1.35; max-width: none; position: static !important; box-shadow: none !important; }
@@ -1934,7 +1963,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.31';
+const APP_VERSION = '2026.05.04.32';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
