@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.29",
+  "version": "2026.05.04.30",
   "released": "2026-05-19",
-  "notes": "Mobile projection sheet redesigned as Previous-Current-Next 3-month window with swipe navigation. Approach: every cell gets a data-col attribute; on mobile CSS hides all data-col cells, and a JS-injected style tag reveals exactly 3 columns at a time. Swipe left advances window forward, swipe right back. Tap chevron chips for tap-to-shift. Middle column subtly highlighted in accent green. First column now has full width to wrap labels naturally (140px min, no max). Indicator strip above shows current month chips with 'now' tag when applicable. Touch handler ignores vertical swipes (lets normal scroll happen) and slow drags (>700ms). Desktop unchanged."
+  "notes": "Mobile projection sheet: fix value cells not showing. Root cause: in v29 I accidentally closed the @media (max-width: 768px) block too early in the CSS, leaving mobile-only rules (bottom nav, syncBar, etc.) applied at all viewports — and the mobile column-hide rule structure was tangled. v30 restructures CSS so the entire mobile block is contiguous and properly closed. Also removed the @media wrapper around the dynamic reveal style tag so it applies regardless of viewport (display: table-cell !important is a no-op when no hide rule applies)."
 }
