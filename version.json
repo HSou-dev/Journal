@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.37",
+  "version": "2026.05.04.38",
   "released": "2026-05-19",
-  "notes": "REAL fix found. The diagnostic showed white-space: nowrap on the TH despite our rule saying 'normal'. Source: the legacy '.budget-grid th.row-label, .budget-grid tbody th { white-space: nowrap }' rule (line 831) was applying — the projection table has BOTH .proj-table AND .budget-grid classes. Same-specificity but defined LATER in source so it won. Fixed by removing white-space:nowrap from legacy rule + adding !important on the .proj-table tbody th wrap properties as belt-and-suspenders. Word-break: break-word + overflow-wrap: anywhere will now actually trigger because nowrap is no longer blocking them."
+  "notes": "Mobile cell polish: increased horizontal padding (8px → 14px on TDs, 6px → 12px on THEAD), reduced number font size (12px → 11.5px), bumped row vertical padding (10px → 12px). Numbers now have breathing room between adjacent columns and look cleaner."
 }
