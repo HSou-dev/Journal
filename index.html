@@ -674,6 +674,13 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   max-width: 120px;
 }
 
+/* COLGROUP widths — the most reliable way to lock column widths in fixed layout.
+   table-layout: fixed reads widths from the first <col>, then row cells, then
+   the first row of <th>s. With <col>s present, sticky cells can't force a
+   different column width even if their content overflows. */
+.proj-col-label { width: 180px; }
+.proj-col-month { width: 120px; }
+
 /* ── Cells: base ── */
 .proj-table thead th,
 .proj-table tbody td,
@@ -700,24 +707,15 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   font-weight: 500;
   color: var(--ink-dim);
   background-color: var(--surface-sticky);
-  white-space: normal;       /* labels wrap to 2+ lines naturally */
-  word-break: break-word;    /* aggressive: break mid-word if needed (was: normal, which didn't break) */
+  white-space: normal;
+  word-break: break-word;
   overflow-wrap: anywhere;
   line-height: 1.35;
-  /* box-sizing: border-box makes padding count INSIDE the 180px width.
-     Without this, content-box adds 14+14=28px padding on top of 180, effectively
-     letting text spill into 208px of space. Border-box clamps total cell to 180px,
-     forcing text into the available 152px and triggering word-break. */
   box-sizing: border-box;
-  /* overflow: hidden clips any text that DOES spill (e.g. when text is at exactly
-     the available width — glyph anti-aliasing or font kerning can extend it 1-2px
-     past the box). Without this, text visually leaks into the next column even
-     when the cell width is correct. */
-  overflow: hidden;
   /* Reset globals from `th { ... }` that would break wrapping: */
-  text-transform: none;      /* no uppercase — uppercase glyphs are wider, harder to wrap */
-  letter-spacing: normal;    /* no extra letter spacing */
-  font-size: 12.5px;         /* readable body size, not the tiny 10px header size */
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 12.5px;
 }
 /* Apply same constraints to the matching "Item" header cell (first thead th, no data-col) */
 .proj-table thead th:not([data-col]) {
@@ -1181,6 +1179,10 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     min-width: 0 !important;
     max-width: none !important;
   }
+  /* COLGROUP mobile widths — same percentages, applied to <col> elements.
+     Belt-and-suspenders with the cell widths above. */
+  #budgetGrid .proj-col-label { width: 36% !important; }
+  #budgetGrid .proj-col-month { width: 21% !important; }
 
   /* Override the desktop proj-table mobile sizing: first column wraps freely. */
   .proj-table tbody th { padding: 10px 12px; font-size: 12.5px; line-height: 1.35; max-width: none; position: static !important; box-shadow: none !important; }
@@ -1986,7 +1988,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.35';
+const APP_VERSION = '2026.05.04.36';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -5332,6 +5334,22 @@ function renderBudget() {
   const cellsOverlay = (overlay) => overlay.numeric.map((v, i) => fmtCellDisplay(overlay.display[i], v, i)).join('');
   const headerRow = document.getElementById('budgetHeaderRow');
   headerRow.innerHTML = '<th class="row-label">Item</th>' + labels.map((l, i) => `<th class="num${_isCurrent(i) ? ' current-month' : ''}" data-col="${i}">${l}${_isCurrent(i) ? ' <span class="current-month-tag">now</span>' : ''}</th>`).join('');
+  // Also build/refresh a <colgroup> so explicit column widths are honored by the browser.
+  // table-layout: fixed + colgroup is the most reliable way to lock column widths.
+  // Without this, position: sticky on the first column can fight the width constraint
+  // and let content force the column wider than CSS says.
+  const tbl = document.getElementById('budgetGrid');
+  if (tbl) {
+    let cg = tbl.querySelector('colgroup');
+    if (!cg) {
+      cg = document.createElement('colgroup');
+      tbl.insertBefore(cg, tbl.firstChild);
+    }
+    // First col + N month cols. Widths read from CSS via the data-col attribute.
+    let cgHtml = '<col class="proj-col-label" />';
+    for (let i = 0; i < n; i++) cgHtml += `<col class="proj-col-month" data-col="${i}" />`;
+    cg.innerHTML = cgHtml;
+  }
   const colspan = n + 1;
   const constantRow = v => new Array(n).fill(v);
 
@@ -5945,7 +5963,17 @@ function _applyMobileProjWindow(offset, monthCount, labels) {
     document.head.appendChild(styleTag);
   }
   const cols = [offset, offset + 1, offset + 2].filter(c => c >= 0 && c < monthCount);
-  const sel = cols.map(c => `#budgetGrid [data-col="${c}"]`).join(', ');
+  // Cell-level reveal (for thead th and tbody td with matching data-col)
+  const cellSel = cols.map(c => `#budgetGrid [data-col="${c}"]`).join(', ');
+  // Also reveal the matching <col> elements (so column widths are restored)
+  const colSel  = cols.map(c => `#budgetGrid col[data-col="${c}"]`).join(', ');
+  // Hide all <col> outside the window — on mobile, table-layout: fixed reads col widths,
+  // and a col that's not display:none still occupies width even if its cells are hidden.
+  const hideColsOutsideWindow = `
+    @media (max-width: 768px) {
+      #budgetGrid col[data-col] { visibility: collapse; }
+      ${colSel} { visibility: visible; }
+    }`;
   // Emphasize the middle column (focused month). Only applied on mobile.
   const midCol = offset + 1;
   const midSel = midCol >= 0 && midCol < monthCount
@@ -5954,11 +5982,9 @@ function _applyMobileProjWindow(offset, monthCount, labels) {
         #budgetGrid thead th[data-col="${midCol}"] { color: var(--accent); font-weight: 700; }
       }`
     : '';
-  // The reveal rule itself: not wrapped in @media so it works whenever the base hide rule
-  // applies. The base hide rule is inside @media (max-width: 768px), so on desktop nothing
-  // hides anyway, and `display: table-cell !important` here is a no-op.
   styleTag.textContent = `
-    ${sel} { display: table-cell !important; }
+    ${cellSel} { display: table-cell !important; }
+    ${hideColsOutsideWindow}
     ${midSel}
   `;
   // Update the swipe indicator strip (Previous · Current · Next labels)
