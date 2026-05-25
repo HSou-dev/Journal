@@ -1127,18 +1127,6 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     font-weight: 600;
   }
   #budgetGrid thead th.mobile-focus-col { color: var(--accent); font-weight: 700; }
-}
-
-/* ── Mobile projection column hiding ────────────────────────────────────────
-   These rules apply via JS-injected <style id="_projColRules"> when the user
-   is in mobile mode and a window offset is set. The selectors below are the
-   permanent base — JS overwrites them with the active 3-month window. */
-@media (max-width: 768px) {
-  #budgetGrid [data-col] { display: none; }
-}
-@media (min-width: 769px) {
-  #mobileProjIndicator { display: none; }
-}
 
   /* ── Mobile app skin: hide webby chrome, show app chrome ──────────────────── */
   #hamburgerBtn { display: none !important; }          /* replaced by bottom-nav More button */
@@ -1153,8 +1141,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 
   /* Push bottom-anchored bars above the bottom nav so they don't overlap. */
   #syncBar { bottom: calc(84px + var(--safe-bot)) !important; right: 12px !important; padding: 6px !important; }
-  /* On mobile, syncBar shrinks to just the colored status dot — no email/status text.
-     Email is accessible via drawer; status is implicit when synced. */
+  /* On mobile, syncBar shrinks to just the colored status dot — no email/status text. */
   #syncBar #syncStatus, #syncBar #userEmail { display: none; }
   #installBanner { bottom: calc(84px + var(--safe-bot)) !important; }
   #updateBanner { bottom: calc(84px + var(--safe-bot)) !important; }
@@ -1163,8 +1150,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   body.auth-active #bottomNav, body.auth-active #fabBtn,
   body.wizard-active #bottomNav, body.wizard-active #fabBtn { display: none !important; }
 
-  /* Mobile bottom-sheet style modals: slide up from bottom, full width, rounded top.
-     Affects the transaction edit modal + scenario modal + any .tx-modal-overlay. */
+  /* Mobile bottom-sheet style modals: slide up from bottom, full width, rounded top. */
   .tx-modal-overlay { align-items: flex-end; padding: 0; }
   .tx-modal {
     max-width: 100%;
@@ -1186,6 +1172,15 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     background: var(--line);
     margin: 10px auto 0;
   }
+
+  /* ── Mobile projection column hiding ─────────────────────────────────────
+     Base rule hides all value cells; JS injects #_projColRules to reveal the
+     active 3-month window. Inside the mobile media block so it doesn't affect desktop. */
+  #budgetGrid [data-col] { display: none; }
+}
+
+@media (min-width: 769px) {
+  #mobileProjIndicator { display: none; }
 }
 
 /* ── Bottom nav (visible only ≤768px via media query above) ────────────────── */
@@ -1913,7 +1908,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.29';
+const APP_VERSION = '2026.05.04.30';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -5873,16 +5868,21 @@ function _applyMobileProjWindow(offset, monthCount, labels) {
   }
   const cols = [offset, offset + 1, offset + 2].filter(c => c >= 0 && c < monthCount);
   const sel = cols.map(c => `#budgetGrid [data-col="${c}"]`).join(', ');
-  // Emphasize the middle column (focused month)
+  // Emphasize the middle column (focused month). Only applied on mobile.
   const midCol = offset + 1;
   const midSel = midCol >= 0 && midCol < monthCount
-    ? `#budgetGrid [data-col="${midCol}"] { box-shadow: inset 0 0 0 999px var(--accent-soft); font-weight: 600; }
-       #budgetGrid thead th[data-col="${midCol}"] { color: var(--accent); font-weight: 700; box-shadow: none; }`
+    ? `@media (max-width: 768px) {
+        #budgetGrid tbody td[data-col="${midCol}"] { box-shadow: inset 0 0 0 999px var(--accent-soft); font-weight: 600; }
+        #budgetGrid thead th[data-col="${midCol}"] { color: var(--accent); font-weight: 700; }
+      }`
     : '';
-  styleTag.textContent = `@media (max-width: 768px) {
+  // The reveal rule itself: not wrapped in @media so it works whenever the base hide rule
+  // applies. The base hide rule is inside @media (max-width: 768px), so on desktop nothing
+  // hides anyway, and `display: table-cell !important` here is a no-op.
+  styleTag.textContent = `
     ${sel} { display: table-cell !important; }
     ${midSel}
-  }`;
+  `;
   // Update the swipe indicator strip (Previous · Current · Next labels)
   _updateMobileProjIndicator(offset, monthCount, labels);
 }
