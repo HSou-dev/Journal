@@ -650,6 +650,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   border-collapse: separate;        /* collapse + sticky has rendering quirks; separate is cleaner */
   border-spacing: 0;
   font-size: 12.5px;
+  position: relative;
 }
 
 /* ── Cells: base ── */
@@ -658,11 +659,11 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 .proj-table tbody th {
   padding: 10px 14px;
   white-space: nowrap;
-  background: var(--bg-card);       /* default opaque background so sticky never shows through */
+  background-color: var(--bg-card);  /* default opaque background so sticky never shows through */
   border-bottom: 1px solid var(--line-soft);
 }
 .proj-table thead th {
-  background: var(--surface-sticky-head);
+  background-color: var(--surface-sticky-head);
   font-weight: 600;
   color: var(--ink-dim);
   font-size: 11px;
@@ -674,7 +675,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   text-align: left;
   font-weight: 500;
   color: var(--ink-dim);
-  background: var(--surface-sticky);
+  background-color: var(--surface-sticky);
   min-width: 180px;
   max-width: 220px;
   white-space: normal;
@@ -684,25 +685,24 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 }
 .proj-table tbody th * { white-space: normal !important; overflow-wrap: anywhere; }
 .proj-table tbody td { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
-.proj-table tbody tr:hover td,
-.proj-table tbody tr:hover th { background: var(--accent-hover); }
 
 /* ── Sticky first column (row labels) ──
    The first <th> in each <tr> sticks to the left edge while content scrolls under it.
-   Background MUST be opaque (--surface-sticky) — that's what makes content vanish behind it. */
+   IMPORTANT: background must be FULLY OPAQUE (solid color, not rgba) so scrolled content
+   doesn't show through. We also raise the z-index above hover/highlight states. */
 .proj-table tbody th {
   position: sticky;
   left: 0;
   z-index: 2;
   /* Soft shadow on the right edge sells the layering — feels like a paper edge. */
-  box-shadow: 4px 0 6px -4px rgba(0,0,0,0.35);
+  box-shadow: 4px 0 6px -4px rgba(20,30,40,0.18);
 }
 /* Section-head rows span the whole row but still need to stick when scrolling horizontally. */
 .proj-table tbody tr.section-head th {
   position: sticky;
   left: 0;
   z-index: 2;
-  background: var(--surface-sticky-head);
+  background-color: var(--surface-sticky-head);
   max-width: none;
 }
 
@@ -711,7 +711,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   position: sticky;
   top: 0;
   z-index: 3;
-  box-shadow: 0 4px 6px -4px rgba(0,0,0,0.35);
+  box-shadow: 0 4px 6px -4px rgba(20,30,40,0.18);
 }
 /* Corner cell (top-left): doubly sticky. Must be ABOVE both other sticky layers. */
 .proj-table thead th:first-child {
@@ -719,38 +719,58 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   left: 0;
   top: 0;
   z-index: 5;
-  background: var(--surface-sticky-head);
-  box-shadow: 4px 4px 6px -4px rgba(0,0,0,0.4);
+  background-color: var(--surface-sticky-head);
+  box-shadow: 4px 4px 6px -4px rgba(20,30,40,0.20);
 }
 
-/* Section rows: refined styling */
+/* Section rows: refined styling. Apply via background-color so we don't override sticky bg. */
 .proj-table tr.section-head th {
   padding: 12px 16px 8px;
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--gold);
+  color: var(--accent);
   font-weight: 600;
   border-bottom: 1px solid var(--line);
   border-top: 1px solid var(--line);
 }
 .proj-table tr.section-head:first-child th { border-top: none; }
-.proj-table tr.subtotal th,
-.proj-table tr.subtotal td { font-weight: 600; background: rgba(255,255,255,0.03); color: var(--ink); }
-.proj-table tr.surplus-row th,
-.proj-table tr.surplus-row td { background: var(--accent-soft); font-weight: 600; color: var(--gold-bright); }
 
-/* Current-month column highlight */
-.proj-table thead th.current-month,
-.proj-table tbody td.current-month { background: var(--accent-soft); color: var(--gold-bright); }
-.proj-table thead th.current-month { color: var(--gold-bright); }
-.proj-table tbody tr:hover td.current-month { background: var(--accent-glow); }
+/* Subtotal / surplus / highlight rows MUST use opaque backgrounds — never rgba with alpha < 1.
+   Otherwise scrolled content shows through on the sticky first column. */
+.proj-table tr.subtotal th,
+.proj-table tr.subtotal td {
+  font-weight: 600;
+  background-color: var(--bg-elevated);
+  color: var(--ink);
+}
+.proj-table tr.surplus-row th,
+.proj-table tr.surplus-row td {
+  background-color: var(--bg-elevated);
+  font-weight: 600;
+  color: var(--accent-bright);
+}
+/* Hover: use a fully opaque shade so the sticky column stays solid */
+.proj-table tbody tr:hover td,
+.proj-table tbody tr:hover th { background-color: var(--bg-elevated); }
+.proj-table tbody tr.subtotal:hover td,
+.proj-table tbody tr.subtotal:hover th,
+.proj-table tbody tr.surplus-row:hover td,
+.proj-table tbody tr.surplus-row:hover th { background-color: var(--bg-elevated); }
+
+/* Current-month column highlight — needs opaque colors too */
+.proj-table thead th.current-month { background-color: var(--accent-soft); color: var(--accent); }
+.proj-table tbody td.current-month {
+  /* For non-sticky tds we can layer a tint with box-shadow inset, keeping bg opaque */
+  box-shadow: inset 0 0 0 999px var(--accent-soft);
+  color: var(--accent);
+}
 .current-month-tag {
   display: inline-block;
   margin-left: 6px;
   padding: 2px 7px;
   border-radius: var(--radius-pill);
-  background: var(--gold);
+  background: var(--accent);
   color: var(--on-accent);
   font-size: 9px;
   font-family: 'JetBrains Mono', monospace;
@@ -955,10 +975,13 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   .masthead .meta { padding-right: 54px; }
 }
 @media (max-width: 768px) and (orientation: landscape) {
-  #hamburgerBtn { display: none !important; }
+  /* Landscape mobile: same as portrait mobile — keep bottom nav, hide hamburger.
+     (Removed the old "show desktop sidebar in landscape" rule that conflicted with new mobile skin.) */
+}
+@media (min-width: 769px) {
+  /* Desktop: drawer and hamburger don't exist. */
   #navDrawer, #navDrawerOverlay { display: none !important; }
-  .sidebar { display: block; }
-  .layout { grid-template-columns: 180px 1fr; }
+  #hamburgerBtn { display: none !important; }
 }
 @media (max-width: 480px) { #installBanner { flex-wrap: wrap; } .install-actions { width: 100%; justify-content: flex-end; } }
 @media (min-width: 769px) {
@@ -1028,6 +1051,18 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 
   /* Main content area must clear the bottom nav (72px height + safe-area inset) */
   .main { padding-bottom: calc(96px + var(--safe-bot)); }
+
+  /* Push bottom-anchored bars above the bottom nav so they don't overlap. */
+  #syncBar { bottom: calc(84px + var(--safe-bot)) !important; right: 12px !important; padding: 6px !important; }
+  /* On mobile, syncBar shrinks to just the colored status dot — no email/status text.
+     Email is accessible via drawer; status is implicit when synced. */
+  #syncBar #syncStatus, #syncBar #userEmail { display: none; }
+  #installBanner { bottom: calc(84px + var(--safe-bot)) !important; }
+  #updateBanner { bottom: calc(84px + var(--safe-bot)) !important; }
+
+  /* Hide bottom nav + FAB when the user isn't in the main app yet (auth or wizard). */
+  body.auth-active #bottomNav, body.auth-active #fabBtn,
+  body.wizard-active #bottomNav, body.wizard-active #fabBtn { display: none !important; }
 
   /* Mobile bottom-sheet style modals: slide up from bottom, full width, rounded top.
      Affects the transaction edit modal + scenario modal + any .tx-modal-overlay. */
@@ -1141,6 +1176,16 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 #themeToggleBtn:active { transform: scale(0.95); }
 #drawerThemeToggle { cursor: pointer; }
 #drawerThemeToggle:hover { background: var(--accent-soft); }
+.drawer-info {
+  font-size: 12px;
+  color: var(--ink-muted);
+  font-family: 'JetBrains Mono', monospace;
+  cursor: default !important;
+  word-break: break-all;
+}
+.drawer-info:hover { background: transparent !important; color: var(--ink-muted) !important; }
+.drawer-logout { color: var(--red) !important; font-weight: 500; }
+.drawer-logout:hover { background: rgba(197,69,62,0.10) !important; color: var(--red) !important; }
 </style>
 </head>
 <body>
@@ -1566,10 +1611,9 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     <button id="drawerCloseBtn" aria-label="Close menu">×</button>
   </div>
   <div class="drawer-nav">
+    <!-- Drawer is the "More" menu — primary destinations (Budget/Journal/Projection)
+         are accessed via the bottom tab bar. Drawer only contains secondary items. -->
     <div class="drawer-label">Overview</div>
-    <div class="drawer-item" data-target="budgetActuals">Budget</div>
-    <div class="drawer-item" data-target="today">Journal</div>
-    <div class="drawer-item" data-target="budget">Projection</div>
     <div class="drawer-item" data-target="networth">Net Worth</div>
     <div class="drawer-label">Analysis</div>
     <div class="drawer-item" data-target="scenarios">Scenarios</div>
@@ -1581,6 +1625,9 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       <span id="drawerThemeIcon">🌙</span>
       <span id="drawerThemeLabel">Dark mode</span>
     </div>
+    <div class="drawer-label">Account</div>
+    <div class="drawer-item drawer-info" id="drawerUserEmail">Loading…</div>
+    <div class="drawer-item drawer-logout" id="drawerLogout">Sign out</div>
   </div>
 </aside>
 
@@ -1767,7 +1814,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.26';
+const APP_VERSION = '2026.05.04.28';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -2004,6 +2051,8 @@ async function doResetPw() {
 
 function doLogout() {
   if (!confirm('Sign out? Your data is saved to the cloud.')) return;
+  document.body.classList.remove('app-active', 'wizard-active');
+  document.body.classList.add('auth-active');
   if (window._fb.configured) { window._fb.signOut(); }
   else { document.getElementById('mainApp').style.display = 'none'; document.getElementById('authScreen').style.display = 'flex'; }
 }
@@ -2271,6 +2320,9 @@ function fmtAxis(v) {
 
 function showStep(n) {
   currentStep = n;
+  // Mark body so mobile bottom nav + FAB stay hidden during onboarding wizard.
+  document.body.classList.remove('app-active', 'auth-active');
+  document.body.classList.add('wizard-active');
   for (let i = 1; i <= 8; i++) {
     const el = document.getElementById('step' + i);
     if (el) el.style.display = (i === n) ? 'block' : 'none';
@@ -4089,6 +4141,9 @@ function runProjection(overrides={}) {
 
 function launchDashboard() {
   scheduleSave();
+  // Mark body as "in-app" so the bottom nav + FAB show on mobile.
+  document.body.classList.remove('auth-active', 'wizard-active');
+  document.body.classList.add('app-active');
   // Only set default dates if not already set (preserve returning users' selections)
   if (!state.snapshotDate) state.snapshotDate = state.horizonStart;
   // Default budget window is one year from horizonStart, not full horizon
@@ -6865,8 +6920,9 @@ function wireDashboard() {
   const bnMore = document.getElementById('bnMoreBtn');
   if (bnMore) bnMore.addEventListener('click', () => {
     const drawer = document.getElementById('navDrawer');
-    if (drawer) drawer.classList.add('open');
-    document.body.classList.add('drawer-open');
+    const overlay = document.getElementById('navDrawerOverlay');
+    if (drawer) { drawer.classList.add('open'); drawer.setAttribute('aria-hidden', 'false'); }
+    if (overlay) overlay.classList.add('show');
   });
   // FAB → simulates "Add transaction" by activating Journal page and clicking #addExpenseBtn
   const fab = document.getElementById('fabBtn');
@@ -6912,6 +6968,19 @@ function wireDashboard() {
     const cur = document.documentElement.getAttribute('data-theme') || 'light';
     applyTheme(cur === 'dark' ? 'light' : 'dark');
   });
+  // Drawer: sign out option
+  document.getElementById('drawerLogout')?.addEventListener('click', () => {
+    if (typeof doLogout === 'function') doLogout();
+  });
+  // Drawer: keep displayed email in sync (read from #userEmail span, populated by enterApp)
+  function syncDrawerEmail() {
+    const src = document.getElementById('userEmail');
+    const dst = document.getElementById('drawerUserEmail');
+    if (src && dst) dst.textContent = src.textContent || 'Offline mode';
+  }
+  syncDrawerEmail();
+  // Re-sync whenever drawer opens
+  document.getElementById('bnMoreBtn')?.addEventListener('click', () => setTimeout(syncDrawerEmail, 20));
   // (dashRun / dashReset event listeners removed — Dashboard section deleted in v18)
   document.getElementById('budgetRun').addEventListener('click', () => { state.budgetStart = document.getElementById('budgetStart').value; state.budgetEnd = document.getElementById('budgetEnd').value; renderBudget(); });
   document.getElementById('budgetReset').addEventListener('click', () => {
@@ -7060,6 +7129,7 @@ function exitEditMode(save) {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  document.body.classList.add('auth-active');
   document.getElementById('authScreen').style.display = 'flex';
   document.getElementById('mainApp').style.display = 'none';
   document.getElementById('offlineNote').style.display = 'none';
@@ -7084,10 +7154,13 @@ window.addEventListener('DOMContentLoaded', () => {
       fb.onAuth(async (user) => {
         if (user) {
           currentUser = user;
+          document.body.classList.remove('auth-active');
           document.getElementById('authScreen').style.display = 'none';
           await enterApp();
         } else {
           currentUser = null;
+          document.body.classList.remove('app-active', 'wizard-active');
+          document.body.classList.add('auth-active');
           document.getElementById('mainApp').style.display = 'none';
           document.getElementById('authScreen').style.display = 'flex';
         }
@@ -7873,10 +7946,17 @@ document.addEventListener('keydown', (e) => {
   document.querySelectorAll('.drawer-item').forEach(item => {
     item.addEventListener('click', () => {
       const target = item.dataset.target;
-      const sidebarItem = document.querySelector('.nav-item[data-target="' + target + '"]');
-      if (sidebarItem) sidebarItem.click();
-      document.querySelectorAll('.drawer-item').forEach(d => d.classList.remove('active'));
-      item.classList.add('active');
+      // Info-only rows (like email display) don't navigate and don't close.
+      if (item.classList.contains('drawer-info')) return;
+      // Theme toggle stays open so user sees the flip; explicit close button if they want to dismiss.
+      if (item.id === 'drawerThemeToggle') return;
+      if (target) {
+        const sidebarItem = document.querySelector('.nav-item[data-target="' + target + '"]');
+        if (sidebarItem) sidebarItem.click();
+        document.querySelectorAll('.drawer-item').forEach(d => d.classList.remove('active'));
+        item.classList.add('active');
+      }
+      // Whether navigating or running an action (logout), close the drawer.
       closeDrawer();
     });
   });
