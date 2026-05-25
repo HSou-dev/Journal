@@ -992,6 +992,11 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   flex-direction: column;
   overflow: hidden;
   box-shadow: var(--shadow-lg);
+  /* Force a stacking context above the FAB (z-index 941) and bottom nav (940).
+     Without explicit z-index, the modal inherits 'auto' which can let position:fixed
+     siblings (FAB, nav) bleed through at the same DOM level. */
+  position: relative;
+  z-index: 1;
   transform: translateY(16px) scale(0.98);
   transition: transform var(--motion-emphasized);
 }
@@ -1304,6 +1309,13 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   .tx-modal-overlay.show .tx-modal { transform: translateY(0); }
   /* Foot needs extra bottom padding for iPhone home indicator / Android nav bar */
   .tx-modal-foot { padding-bottom: calc(16px + var(--safe-bot)) !important; }
+
+  /* When ANY modal is open, hide the bottom nav + FAB entirely. The modal is taking
+     the full visual stage; the nav/FAB belong to the underlying page and should be
+     gone while the user is inside a modal. This guarantees no overlap regardless
+     of z-index chicanery. JS sets body.modal-open when .tx-modal-overlay.show appears. */
+  body.modal-open #bottomNav,
+  body.modal-open #fabBtn { display: none !important; }
   /* Sheet grabber handle */
   .tx-modal::before {
     content: '';
@@ -2050,7 +2062,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.40';
+const APP_VERSION = '2026.05.04.41';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -6771,11 +6783,21 @@ function openScModal(id) {
   const overlay = document.getElementById(id);
   if (!overlay) return;
   overlay.classList.add('show');
+  _syncModalOpenBodyClass();
 }
 function closeScModal(id) {
   const overlay = document.getElementById(id);
   if (!overlay) return;
   overlay.classList.remove('show');
+  _syncModalOpenBodyClass();
+}
+
+// Sync body.modal-open class based on whether ANY .tx-modal-overlay is currently shown.
+// This drives the CSS rules that hide the bottom nav + FAB while a modal is open,
+// guaranteeing no overlap regardless of z-index ordering.
+function _syncModalOpenBodyClass() {
+  const anyShown = document.querySelector('.tx-modal-overlay.show');
+  document.body.classList.toggle('modal-open', !!anyShown);
 }
 
 // Commit a scenario's effects to the base plan where they cleanly map.
@@ -7956,9 +7978,15 @@ document.addEventListener('keydown', (e) => {
       this.populate(type, tx);
       this.overlay().classList.add('show');
       document.body.style.overflow = 'hidden';
+      document.body.classList.add('modal-open');
       setTimeout(() => { const amt = document.getElementById('txAmount'); if (amt) amt.focus(); }, 50);
     },
-    hide() { this.overlay().classList.remove('show'); document.body.style.overflow = ''; },
+    hide() {
+      this.overlay().classList.remove('show');
+      document.body.style.overflow = '';
+      if (typeof _syncModalOpenBodyClass === 'function') _syncModalOpenBodyClass();
+      else document.body.classList.remove('modal-open');
+    },
     populate(type, tx) {
       const titles = { expense: 'New expense', income: 'New income', transfer: 'New transfer', adjustment: 'New adjustment', investment_contrib: 'New investment', investment_redemption: 'Redeem investment' };
       document.getElementById('txModalTitle').textContent = tx ? `Edit ${type === 'investment_contrib' ? 'investment' : (type === 'investment_redemption' ? 'redemption' : type)}` : titles[type];
