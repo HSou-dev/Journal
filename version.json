@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.39",
+  "version": "2026.05.04.40",
   "released": "2026-05-19",
-  "notes": "Mobile section-head rows ('ACCOUNT BALANCES', 'INFLOWS', etc.) were wrapping letter-by-letter into narrow stacks because they inherited word-break: break-word !important from .proj-table tbody th. Section labels are short and should never break mid-word. Fixed: override word-break, overflow-wrap, white-space back to 'normal' for section-head th specifically. Also reduced letter-spacing 0.12em → 0.06em on mobile so the text doesn't stretch as wide."
+  "notes": "Two fixes. (1) Numpad/calculator: was using hardcoded dark gradient bg + rgba(255,255,255,X) button tints — invisible text in light mode. Now uses theme-aware var(--bg-raised), var(--bg-card), var(--bg-elevated). Works in both themes. (2) Scenario edit modal: Save/Cancel buttons moved from inside .tx-modal-body to a sticky .tx-modal-foot at the bottom of the modal frame. .tx-modal is now flex-column layout: header + scrollable body + pinned footer. Save button always visible regardless of how tall the form gets, never hidden behind bottom nav. Foot has safe-area-inset bottom padding for iPhone home indicator clearance."
 }
