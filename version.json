@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.42",
+  "version": "2026.05.04.43",
   "released": "2026-05-19",
-  "notes": "Modal max-height: 88vh → 85dvh (dynamic viewport height). 'vh' is the LARGEST possible viewport (with browser chrome collapsed). 'dvh' is the CURRENT visible viewport, so the modal respects address bar showing/hiding. This fixes the issue where Cancel/Save buttons were cut off below the visible screen edge even though they were within the logical viewport. Also tightened foot padding (16 → 12px + safe-area) so buttons sit higher above the screen edge."
+  "notes": "Fix: Preview now ignores enabled flag on scenarios. Root cause: activeScenariosForRender() filtered preview list by `enabled !== false`, AND runProjection() also internally filtered scenarios by enabled. So if you previewed a disabled scenario, neither layer would apply it. Now: preview list is authoritative — any scenario in the preview list gets applied regardless of enabled state. The enabled toggle now ONLY controls whether the scenario appears in the scenarios-page comparison chart (each enabled scenario gets its own line + a 'stacked' line if 2+). Also removed the auto-removal from preview list when toggling enabled off — preview persists independent of enabled."
 }
