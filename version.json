@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.41",
+  "version": "2026.05.04.42",
   "released": "2026-05-19",
-  "notes": "Scenario modal Save/Cancel buttons were hidden behind bottom nav + FAB. Diagnostic confirmed: modal foot at y=477-551 overlapped bottom nav at y=479-551, AND elementsFromPoint returned <nav#bottomNav> and <button#fabBtn> as top elements at screen bottom (z-index ordering wasn't enough). Fix: when ANY .tx-modal-overlay has .show class, body gets .modal-open class which hides #bottomNav and #fabBtn via display: none !important. Cleanest possible fix — no more overlap regardless of z-index. Wired into openScModal/closeScModal AND tx modal show/hide. Also added .tx-modal stacking context (position: relative; z-index: 1) for belt-and-suspenders."
+  "notes": "Modal max-height: 88vh → 85dvh (dynamic viewport height). 'vh' is the LARGEST possible viewport (with browser chrome collapsed). 'dvh' is the CURRENT visible viewport, so the modal respects address bar showing/hiding. This fixes the issue where Cancel/Save buttons were cut off below the visible screen edge even though they were within the logical viewport. Also tightened foot padding (16 → 12px + safe-area) so buttons sit higher above the screen edge."
 }
