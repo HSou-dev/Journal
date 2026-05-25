@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.31",
+  "version": "2026.05.04.32",
   "released": "2026-05-19",
-  "notes": "Mobile projection fix #2: the diagnostic revealed table was 5884px wide on a 597px viewport. With default table-layout: auto and width: max-content, the hidden cells were still contributing to width calculation. Fix: force table-layout: fixed on mobile + explicit percentage widths per column (first col 44%, value cols 18.66% each). Hidden cells now truly contribute zero width. Also unset position: sticky on first column TH on mobile (no horizontal scroll needed anymore), kept sticky on thead for vertical scroll."
+  "notes": "Projection sheet width fix on desktop AND mobile. Switched .proj-table from table-layout: auto (where content forced first column to ~570px wide) to table-layout: fixed with explicit widths: first col 180px, value cols 120px on desktop; 36%/21%/21%/21% on mobile. Labels wrap naturally. Total desktop table width = 180 + 120×N months, scrolls horizontally inside .proj-table-wrap. Section-head italic subtitle hints (the gray '— start of month · click ▸ to expand adjustments' suffixes) now hidden universally — they were noise that bloated first-column width. Mobile updated from 44%/18.66% to 36%/21% (slightly less label space, more breathing room for numbers)."
 }
