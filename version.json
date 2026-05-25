@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.35",
+  "version": "2026.05.04.36",
   "released": "2026-05-19",
-  "notes": "Add overflow: hidden to .proj-table tbody th. Diagnostic showed cell box ends exactly at 227.4px where May TD starts (zero gap), yet text visually appeared to overlap. This is glyph anti-aliasing / font kerning extending 1-2px past the box boundary at certain zoom levels. overflow: hidden on the cell itself clips any such spillover. Vertical wrapping still works (cell grows to accommodate multiple lines, hidden only clips horizontally)."
+  "notes": "Real fix for projection wrap: added <colgroup> with <col> elements. table-layout: fixed reads widths from <col> first, which sticky cells can't override. Each row now has a hard-locked 180px first column and 120px value columns on desktop. On mobile, percentages on cols: 36% / 21% × 3. Cols outside the visible 3-month window use visibility:collapse to release their layout width. Removed the overflow:hidden hack from v35 (was clipping instead of wrapping). Now if text doesn't fit it WILL wrap to the next line."
 }
