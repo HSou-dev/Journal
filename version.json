@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.24",
+  "version": "2026.05.04.25",
   "released": "2026-05-19",
-  "notes": "UI overhaul inspired by Cashew's Material You design language. (1) Projection sheet sticky scrolling rebuilt — first column and header row now properly opaque, content scrolls cleanly underneath with subtle edge shadows. Section heads also sticky on horizontal scroll. (2) Design tokens added: rounder radii (8/12/16/22px + pill), layered shadows, smoother motion curves. (3) Nav items rounded into pills with active highlight. (4) Cards use bigger radius (16px) with soft shadow that lifts on hover. (5) Buttons fully rounded pills with accent shadow. (6) Inputs have 12px radius and gold focus ring. (7) Modals 22px radius with scale+fade entrance animation. (8) Section navigation has fade-slide-in. (9) Account tiles lift on hover. (10) Hamburger button circular with shadow."
+  "notes": "Major UI overhaul: (1) Light theme default (warm cream/charcoal) with dark mode toggle. (2) Green accent everywhere (replaces gold). All hard-coded gold rgba mapped to theme-aware --accent-* variables. (3) Mobile app skin: hamburger removed, bottom tab bar (Budget/Journal/More-button/Projection/More), FAB for adding transactions, bottom-sheet style modals on mobile (slide up from bottom with grab handle). (4) Projection sheet first column properly wraps text (no overlap), width 180-220px desktop / 140-160px mobile, nested spans wrap too. (5) Charts adapt to theme via CSS variables. (6) Theme preference persisted in localStorage."
 }
