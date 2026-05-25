@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.40",
+  "version": "2026.05.04.41",
   "released": "2026-05-19",
-  "notes": "Two fixes. (1) Numpad/calculator: was using hardcoded dark gradient bg + rgba(255,255,255,X) button tints — invisible text in light mode. Now uses theme-aware var(--bg-raised), var(--bg-card), var(--bg-elevated). Works in both themes. (2) Scenario edit modal: Save/Cancel buttons moved from inside .tx-modal-body to a sticky .tx-modal-foot at the bottom of the modal frame. .tx-modal is now flex-column layout: header + scrollable body + pinned footer. Save button always visible regardless of how tall the form gets, never hidden behind bottom nav. Foot has safe-area-inset bottom padding for iPhone home indicator clearance."
+  "notes": "Scenario modal Save/Cancel buttons were hidden behind bottom nav + FAB. Diagnostic confirmed: modal foot at y=477-551 overlapped bottom nav at y=479-551, AND elementsFromPoint returned <nav#bottomNav> and <button#fabBtn> as top elements at screen bottom (z-index ordering wasn't enough). Fix: when ANY .tx-modal-overlay has .show class, body gets .modal-open class which hides #bottomNav and #fabBtn via display: none !important. Cleanest possible fix — no more overlap regardless of z-index. Wired into openScModal/closeScModal AND tx modal show/hide. Also added .tx-modal stacking context (position: relative; z-index: 1) for belt-and-suspenders."
 }
