@@ -2065,7 +2065,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.44';
+const APP_VERSION = '2026.05.04.45';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3164,10 +3164,13 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
         }
       }
     } else if (sc.type === 'custom') {
-      // Helper: expand a one-off entry honoring frequency + endMonth.
-      // Mirrors the main projection's expandOneOff so behavior is consistent.
-      // Returns an array of length n representing this entry's contributions per month.
-      const expandScenarioEntry = (o) => {
+      // Helper: expand a one-off entry honoring frequency + endMonth + annual growth.
+      // Growth rate is the per-year compound rate applied to recurring amounts:
+      //   - income entries → salaryGrowth (raises track salary trajectory)
+      //   - expense entries → expenseGrowth (recurring costs inflate at the expense rate)
+      // Growth is calendar-year based: flat within a year, bumps at year boundaries.
+      // Lump-sum entries (frequency: 'once') stay nominal — they're a single dated event.
+      const expandScenarioEntry = (o, growthRate) => {
         const row = new Array(n).fill(0);
         if (!o || !o.month || !Number(o.amount)) return row;
         const amt = Number(o.amount);
@@ -3175,31 +3178,37 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
         const endIso = o.endMonth && /^\d{4}-\d{2}$/.test(o.endMonth) ? o.endMonth : null;
         const passesEnd = (iso) => endIso ? iso <= endIso : true;
         const startIdx = findIdx(o.month);
+        const [startY] = o.month.split('-').map(Number);
+        const g = Number(growthRate) || 0;
 
         if (freq === 'once') {
+          // Lump sum: single nominal hit, no growth.
           if (startIdx >= 0 && passesEnd(o.month)) row[startIdx] = amt;
           return row;
         }
         if (freq === 'monthly') {
-          // Apply to every month from start through endMonth (or horizon end).
-          // Note: no inflation/growth applied here — scenarios are intentionally
-          // flat-rated relative to today so users see the raw impact.
+          // Every month from start through endMonth (or horizon end), with annual growth.
+          // Amount in calendar year (startY + k) = amt × (1 + g)^k.
           const firstIdx = startIdx >= 0 ? startIdx : 0;
           for (let i = firstIdx; i < n; i++) {
             const iso = isos[i];
             if (iso < o.month) continue;
             if (!passesEnd(iso)) break;
-            row[i] = amt;
+            const [cy] = iso.split('-').map(Number);
+            const yearsSinceStart = Math.max(0, cy - startY);
+            row[i] = amt * Math.pow(1 + g, yearsSinceStart);
           }
           return row;
         }
         if (freq === 'yearly') {
-          // Apply to start month and every 12 months thereafter, honoring endMonth.
+          // Every 12 months from start, with annual growth on each anniversary.
           if (startIdx < 0) return row;
+          let yearsSinceStart = 0;
           for (let i = startIdx; i < n; i += 12) {
             const iso = isos[i];
             if (!passesEnd(iso)) break;
-            row[i] = amt;
+            row[i] = amt * Math.pow(1 + g, yearsSinceStart);
+            yearsSinceStart++;
           }
           return row;
         }
@@ -3207,7 +3216,8 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
       };
 
       (p.incomeOneOffs || []).forEach(o => {
-        const row = expandScenarioEntry(o);
+        // Income entries grow at the salary rate (treats them like recurring earnings).
+        const row = expandScenarioEntry(o, salaryGrowth);
         if (!row.some(v => v !== 0)) return;
         for (let i = 0; i < n; i++) incomeDelta[i] += row[i];
         const freqLabel = o.frequency === 'monthly' ? ' (monthly)' : (o.frequency === 'yearly' ? ' (yearly)' : '');
@@ -3218,7 +3228,8 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
         });
       });
       (p.expenseOneOffs || []).forEach(o => {
-        const row = expandScenarioEntry(o);
+        // Expense entries grow at the expense rate (recurring costs inflate).
+        const row = expandScenarioEntry(o, expenseGrowth);
         if (!row.some(v => v !== 0)) return;
         for (let i = 0; i < n; i++) expenseDelta[i] += row[i];
         const freqLabel = o.frequency === 'monthly' ? ' (monthly)' : (o.frequency === 'yearly' ? ' (yearly)' : '');
@@ -3232,24 +3243,34 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
         const i0 = findIdx(p.monthlyExpenseStart);
         const amt = Number(p.monthlyExpenseAmount) || 0;
         if (i0 >= 0 && amt) {
+          const [startY] = p.monthlyExpenseStart.split('-').map(Number);
+          const g = Number(expenseGrowth) || 0;
           const row = new Array(n).fill(0);
           for (let i = i0; i < n; i++) {
-            row[i] = amt;
-            expenseDelta[i] += amt;
+            const [cy] = isos[i].split('-').map(Number);
+            const yearsSinceStart = Math.max(0, cy - startY);
+            const grownAmt = amt * Math.pow(1 + g, yearsSinceStart);
+            row[i] = grownAmt;
+            expenseDelta[i] += grownAmt;
           }
           scRows.push({ label: `Recurring expense bump`, kind: 'expense', values: row });
         }
       }
       // Recurring income bump — mirror of monthlyExpenseStart/Amount above.
-      // Lets the user add a flat monthly income increase without juggling per-month entries.
+      // Grows at the salary rate so the bump tracks earned-income trajectory.
       if (p.monthlyIncomeStart && Number(p.monthlyIncomeAmount)) {
         const i0 = findIdx(p.monthlyIncomeStart);
         const amt = Number(p.monthlyIncomeAmount) || 0;
         if (i0 >= 0 && amt) {
+          const [startY] = p.monthlyIncomeStart.split('-').map(Number);
+          const g = Number(salaryGrowth) || 0;
           const row = new Array(n).fill(0);
           for (let i = i0; i < n; i++) {
-            row[i] = amt;
-            incomeDelta[i] += amt;
+            const [cy] = isos[i].split('-').map(Number);
+            const yearsSinceStart = Math.max(0, cy - startY);
+            const grownAmt = amt * Math.pow(1 + g, yearsSinceStart);
+            row[i] = grownAmt;
+            incomeDelta[i] += grownAmt;
           }
           scRows.push({ label: `Recurring income bump`, kind: 'income', values: row });
         }
@@ -6748,18 +6769,18 @@ function renderScenarioFields(sc) {
     const incRows = (p.incomeOneOffs||[]).map((o,i) => buildRow('incomeOneOffs', o, i)).join('');
     const expRows = (p.expenseOneOffs||[]).map((o,i) => buildRow('expenseOneOffs', o, i)).join('');
     return nameField + `
-      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:8px 0 6px;">Income events <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— one-off, monthly, or yearly</span></div>
+      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:8px 0 6px;">Income events <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— one-off, monthly, or yearly · recurring grows at salary rate</span></div>
       <div id="scCustIncList">${incRows}</div>
       <button class="btn ghost" data-sc-add-row="incomeOneOffs" style="margin-bottom:14px;">+ Add income event</button>
-      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:8px 0 6px;">Expense events <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— one-off, monthly, or yearly</span></div>
+      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:8px 0 6px;">Expense events <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— one-off, monthly, or yearly · recurring grows at expense rate</span></div>
       <div id="scCustExpList">${expRows}</div>
       <button class="btn ghost" data-sc-add-row="expenseOneOffs" style="margin-bottom:14px;">+ Add expense event</button>
-      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:8px 0 6px;">Recurring expense bump</div>
+      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:8px 0 6px;">Recurring expense bump <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— grows at expense rate</span></div>
       <div class="grid-2" style="gap:10px;">
         <div class="field"><label>Start month <span class="opt">optional</span></label><input type="month" data-sc-param="monthlyExpenseStart" value="${p.monthlyExpenseStart||''}" /></div>
         <div class="field"><label>Monthly amount</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-sc-param="monthlyExpenseAmount" min="0" step="any" value="${p.monthlyExpenseAmount||0}" /></div></div>
       </div>
-      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:14px 0 6px;">Recurring income bump <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— e.g. salary raise, rental income</span></div>
+      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:14px 0 6px;">Recurring income bump <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— e.g. raise, rental · grows at salary rate</span></div>
       <div class="grid-2" style="gap:10px;">
         <div class="field"><label>Start month <span class="opt">optional</span></label><input type="month" data-sc-param="monthlyIncomeStart" value="${p.monthlyIncomeStart||''}" /></div>
         <div class="field"><label>Monthly amount</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-sc-param="monthlyIncomeAmount" min="0" step="any" value="${p.monthlyIncomeAmount||0}" /></div></div>
