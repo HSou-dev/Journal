@@ -2065,7 +2065,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.42';
+const APP_VERSION = '2026.05.04.43';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3070,7 +3070,10 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
   const baseInc = baseIncomeSeries || new Array(n).fill(0);
   const baseExp = baseExpenseSeries || new Array(n).fill(0);
 
-  (scenarios || []).filter(sc => sc && sc.enabled !== false).forEach(sc => {
+  // Apply scenarios. The engine no longer filters by `enabled` — callers should
+  // pass exactly the scenarios they want applied. Currently `activeScenariosForRender()`
+  // returns the preview list (ignoring enabled flag), which is what gets passed here.
+  (scenarios || []).filter(sc => !!sc).forEach(sc => {
     const p = sc.params || {};
     const scRows = [];
 
@@ -3712,9 +3715,12 @@ function initWizard() {
 // Transient: not persisted, resets each session.
 // state._previewMode (bool) and state._previewScenarioIds (array of scenario ids).
 function activeScenariosForRender() {
+  // Preview is the only mechanism that applies scenarios to the rendered view.
+  // The `enabled` flag is intentionally ignored here: previewing a scenario means
+  // "show me what this would do", regardless of whether it's enabled for the active plan.
   if (!state || !state._previewMode) return [];
   const ids = state._previewScenarioIds || [];
-  return (state.scenarios || []).filter(s => ids.includes(s.id) && s.enabled !== false);
+  return (state.scenarios || []).filter(s => ids.includes(s.id));
 }
 
 function setPreviewMode(scenarioIds) {
@@ -7008,12 +7014,9 @@ function renderScenarios() {
         if (sc) {
           sc.enabled = sc.enabled === false;
           tog.classList.toggle('on');
-          // If this scenario was in preview but is now disabled, drop it from preview
-          if (sc.enabled === false && state._previewMode && (state._previewScenarioIds||[]).includes(id)) {
-            const newIds = state._previewScenarioIds.filter(x => x !== id);
-            setPreviewMode(newIds);
-            return; // setPreviewMode already triggers re-render
-          }
+          // Note: preview is independent of enabled — toggling enabled does NOT
+          // affect what's in the preview list. Preview list is the authoritative
+          // source of what's applied to the rendered view.
           scheduleSave();
           renderScenarios();
         }
