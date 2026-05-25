@@ -701,6 +701,10 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   word-break: normal;
   overflow-wrap: anywhere;
   line-height: 1.35;
+  /* Reset globals from `th { ... }` that would break wrapping: */
+  text-transform: none;      /* no uppercase — uppercase glyphs are wider, harder to wrap */
+  letter-spacing: normal;    /* no extra letter spacing */
+  font-size: 12.5px;         /* readable body size, not the tiny 10px header size */
 }
 .proj-table tbody th * { white-space: normal !important; overflow-wrap: anywhere; }
 .proj-table tbody td { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
@@ -1963,7 +1967,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.32';
+const APP_VERSION = '2026.05.04.33';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
