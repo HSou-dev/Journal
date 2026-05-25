@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.30",
+  "version": "2026.05.04.31",
   "released": "2026-05-19",
-  "notes": "Mobile projection sheet: fix value cells not showing. Root cause: in v29 I accidentally closed the @media (max-width: 768px) block too early in the CSS, leaving mobile-only rules (bottom nav, syncBar, etc.) applied at all viewports — and the mobile column-hide rule structure was tangled. v30 restructures CSS so the entire mobile block is contiguous and properly closed. Also removed the @media wrapper around the dynamic reveal style tag so it applies regardless of viewport (display: table-cell !important is a no-op when no hide rule applies)."
+  "notes": "Mobile projection fix #2: the diagnostic revealed table was 5884px wide on a 597px viewport. With default table-layout: auto and width: max-content, the hidden cells were still contributing to width calculation. Fix: force table-layout: fixed on mobile + explicit percentage widths per column (first col 44%, value cols 18.66% each). Hidden cells now truly contribute zero width. Also unset position: sticky on first column TH on mobile (no horizontal scroll needed anymore), kept sticky on thead for vertical scroll."
 }
