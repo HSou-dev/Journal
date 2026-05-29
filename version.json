@@ -1,5 +1,5 @@
 {
-  "version": "2026.05.04.47",
+  "version": "2026.05.04.48",
   "released": "2026-05-19",
-  "notes": "Fix: mobile projection page showed only the first (Item) column, rest blank. Root cause: a leftover CSS rule from the old 3-month-swipe approach — '#budgetGrid [data-col] { display: none; }' — was still hiding ALL value cells. In v46 that approach was replaced with native horizontal scroll, and the JS that used to reveal a 3-column window (#_projColRules) was stubbed to a no-op. So the hide rule stayed active with nothing to un-hide the cells. Removed the orphaned hide rule. Also added mobile colgroup width overrides (label 150px, month 130px) so table-layout: auto matches the intended cell widths instead of inheriting the larger desktop col widths."
+  "notes": "Fix: scrolled values overlapping sticky cells on the projection page. Sticky cells (current-month column header, and the Total Income / Total Expenses / Net Surplus / Savings-EOM row headers) had semi-transparent backgrounds, so content scrolling underneath showed through. Causes: (1) legacy .budget-grid tr.subtotal/surplus-row/residual rules used rgba(...,0.03) and accent-soft (10% alpha) backgrounds — made opaque (var(--bg-elevated)). The table has both .proj-table and .budget-grid classes; the legacy rules came later in source so they won. (2) current-month thead cell used var(--accent-soft) directly — now uses opaque surface-sticky-head base + accent tint via inset box-shadow. (3) current-month tbody cell given explicit opaque base bg under its inset tint."
 }
