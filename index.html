@@ -1974,7 +1974,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.48';
+const APP_VERSION = '2026.05.04.49';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -2171,7 +2171,29 @@ function migrateState(s) {
     });
   }
 
-  s.schemaVersion = 9;
+  // Schema v10: remove the auto-sweep feature. Earlier builds auto-created "Auto-sweep"
+  // transfers that drained salary-account residue into savings and permanently mutated
+  // both opening balances. This was wrong for users who intentionally keep a balance in
+  // the salary account (e.g. a credit-card reserve). We reverse every auto-sweep:
+  //   - add the swept amount back to salary opening, remove it from savings opening
+  //   - delete the sweep transaction
+  //   - clear the lastAutoSweepThrough marker
+  if ((s.schemaVersion || 0) < 10) {
+    const sweeps = (s.transactions || []).filter(t => t && t._autoSweep);
+    if (sweeps.length) {
+      const sal = (s.accounts || []).find(a => a.id === 'salary');
+      const sav = (s.accounts || []).find(a => a.id === 'savings');
+      sweeps.forEach(sw => {
+        const amt = Number(sw.amount) || 0;
+        if (sal) sal.openingBalance = (Number(sal.openingBalance) || 0) + amt; // give it back to salary
+        if (sav) sav.openingBalance = (Number(sav.openingBalance) || 0) - amt; // remove from savings
+      });
+      s.transactions = (s.transactions || []).filter(t => !(t && t._autoSweep));
+    }
+    delete s.lastAutoSweepThrough;
+  }
+
+  s.schemaVersion = 10;
   return s;
 }
 
@@ -2303,7 +2325,8 @@ async function enterApp() {
       delete state._needsAdjustmentResync;
       scheduleSave();
     }
-    runMonthEndAutoSweep();
+    // Auto-sweep removed (schema v10). Salary-account residue is intentionally kept
+    // (e.g. as a credit-card reserve) and no longer force-moved into savings.
     launchDashboard();
   }
   else showStep(1);
@@ -2323,7 +2346,10 @@ async function enterApp() {
 // salary residue manually.
 //
 // User can delete a sweep — won't be recreated, since lastAutoSweepThrough already advanced.
-function runMonthEndAutoSweep() {
+// REMOVED in schema v10 — replaced by a no-op. The original implementation is renamed
+// below and kept only for reference; nothing calls it.
+function runMonthEndAutoSweep() { /* no-op: auto-sweep removed in v10 */ }
+function _runMonthEndAutoSweep_DISABLED() {
   if (!state || !Array.isArray(state.accounts) || !Array.isArray(state.transactions)) return;
   const salaryAcc = state.accounts.find(a => a.id === 'salary');
   const savingsAcc = state.accounts.find(a => a.id === 'savings');
@@ -5518,11 +5544,22 @@ function renderBudget() {
       _eomSavingsChain[i] = _savingsAtEndOfMonth(ym);
       _eomRunning = _eomSavingsChain[i];
     } else if (_isCurrent(i)) {
-      // v20: live snapshot of all 3 accounts at the moment user is viewing
-      const _liveSav = savAcc ? (Number(savAcc.openingBalance) || 0) : 0;
-      const _liveSal = salAcc ? (Number(salAcc.openingBalance) || 0) : 0;
-      const _liveCc  = ccAcc  ? Math.abs(Number(ccAcc.openingBalance) || 0) : 0;
-      _eomSavingsChain[i] = _liveSav + _liveSal - _liveCc;
+      // Current month: end-of-month SAVINGS = start-of-month savings + this month's
+      // planned residue (surplus − investments), exactly like future months.
+      // (Previously this used a consolidated sav+sal−CC "liquidity" figure, which mixed
+      // accounts and diverged from how every other month's savings row is computed.)
+      let prev;
+      if (_eomRunning !== null) {
+        prev = _eomRunning;                       // running chain from the prior (past) month
+      } else {
+        // Current month is the first in the window: start-of-month savings = end of the
+        // immediately preceding calendar month, reverse-walked from live balance.
+        const [cy, cm] = ym.split('-').map(Number);
+        let py = cy, pm = cm - 1; if (pm < 1) { pm = 12; py--; }
+        const prevYM = py + '-' + String(pm).padStart(2, '0');
+        prev = _savingsAtEndOfMonth(prevYM);
+      }
+      _eomSavingsChain[i] = prev + _plannedTargetForFuture(i, ym);
       _eomRunning = _eomSavingsChain[i];
     } else {
       const prev = _eomRunning !== null ? _eomRunning : (_eomSavingsChain[i - 1] || 0);
