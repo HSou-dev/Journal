@@ -1974,7 +1974,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.51';
+const APP_VERSION = '2026.05.04.52';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3938,23 +3938,37 @@ function runProjection(overrides={}) {
           i += 12; k++;
         }
       } else {
-        // Original is before horizon; find first occurrence in horizon
-        const [hy] = horizonStart.split('-').map(Number);
+        // Original month is not in the horizon window. Two distinct cases:
+        //   (a) original is AFTER the horizon end → this recurrence hasn't started yet
+        //       within the visible window, so it contributes nothing. (Bug fix: previously
+        //       this fell through to the back-fill below and leaked a future bonus into an
+        //       earlier month, making results depend on horizon length.)
+        //   (b) original is BEFORE the horizon start → find the first in-horizon occurrence
+        //       and place every 12 months from there.
+        const horizonStartIso = months.length ? months[0].iso : o.month;
+        if (o.month > (months.length ? months[n - 1].iso : o.month)) {
+          return; // (a) starts after the window ends — nothing to add
+        }
+        // (b) original is before the window: find first occurrence on/after horizon start
+        const [hy] = horizonStartIso.split('-').map(Number);
         let yr = hy;
         while (yr <= 9999) {
           const candidate = yr + '-' + String(om).padStart(2,'0');
           if (candidate > horizonEnd) return;
-          const ci = months.findIndex(m => m.iso === candidate);
-          if (ci >= 0) {
-            let i = ci, year = yr;
-            while (i < n) {
-              const iso = months[i].iso;
-              if (!passesEnd(iso)) break;
-              const yearsSinceOrig = year - oy;
-              target[i] += o.amount * Math.pow(1 + growthRate, yearsSinceOrig) * multiplier;
-              i += 12; year++;
+          // Only accept a candidate that is on/after the original month (never before it)
+          if (candidate >= o.month) {
+            const ci = months.findIndex(m => m.iso === candidate);
+            if (ci >= 0) {
+              let i = ci, year = yr;
+              while (i < n) {
+                const iso = months[i].iso;
+                if (!passesEnd(iso)) break;
+                const yearsSinceOrig = year - oy;
+                target[i] += o.amount * Math.pow(1 + growthRate, yearsSinceOrig) * multiplier;
+                i += 12; year++;
+              }
+              return;
             }
-            return;
           }
           yr++;
           if (yr - hy > 200) return;
