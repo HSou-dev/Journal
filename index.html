@@ -1974,7 +1974,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.50';
+const APP_VERSION = '2026.05.04.51';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -4927,6 +4927,87 @@ function _legacyRenderDashboardUNUSED() {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared savings projection chain — single source of truth for the savings-account
+// balance over time, used by BOTH the Projection sheet and the Net Worth page so
+// they always agree. For each month:
+//   savings[m] = savings[m-1] × (1 + monthlyCashRate) + residue[m]
+// where residue = surplus − scheduled investments − one-time investments.
+// Past months are reverse-walked from the live balance (true historical closing).
+// Returns an array aligned to p.isos.
+function projectSavingsChain(p) {
+  const isos = p.isos;
+  const n = isos.length;
+  const now = new Date();
+  const nowYM = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  const cashRateMonthly = Math.pow(1 + (Number(state.cashRate) || 0.04), 1 / 12) - 1;
+
+  const todaySavings = (() => {
+    const a = (state.accounts || []).find(x => x.id === 'savings');
+    return a ? (Number(a.openingBalance) || 0) : 0;
+  })();
+
+  // Reverse-walk the savings balance to the end of any past month.
+  function savingsAtEndOfMonth(monthYM) {
+    let bal = todaySavings;
+    (state.transactions || []).forEach(tx => {
+      if (!tx.date || tx.date.slice(0, 7) <= monthYM) return; // only txns AFTER this month
+      const amt = Number(tx.amount) || 0;
+      if (tx.type === 'expense') {
+        if (tx.accountId === 'savings') bal += amt;
+      } else if (tx.type === 'income') {
+        if (tx.accountId === 'savings') bal -= amt;
+      } else if (tx.type === 'transfer') {
+        if (tx.fromAccountId === 'savings') bal += amt;
+        if (tx.toAccountId === 'savings') bal -= amt;
+      } else if (tx.type === 'adjustment') {
+        if (tx.accountId === 'savings') { const dir = tx.direction === 'subtract' ? -1 : 1; bal -= dir * amt; }
+      } else if (tx.type === 'investment_contrib') {
+        if (tx.accountId === 'savings') bal += amt;
+      } else if (tx.type === 'investment_redemption') {
+        if (tx.accountId === 'savings') bal -= amt;
+      }
+    });
+    return bal;
+  }
+
+  // Residue routed to savings for a given month index = surplus − all investment allocations.
+  function residueForMonth(i) {
+    let scheduledInv = 0, oneTimeInv = 0;
+    (p.investments || []).forEach(inv => {
+      const k = inv.id + '_' + inv.name;
+      const val = (p.contribPerMonth[k] || [])[i] || 0;
+      if (inv.monthlyContribution > 0) scheduledInv += val;
+      else oneTimeInv += val;
+    });
+    return (p.surplus[i] || 0) - scheduledInv - oneTimeInv;
+  }
+
+  const chain = new Array(n).fill(0);
+  let running = null;
+  for (let i = 0; i < n; i++) {
+    const ym = isos[i];
+    if (ym < nowYM) {
+      // Past: true reverse-walked closing balance
+      chain[i] = savingsAtEndOfMonth(ym);
+      running = chain[i];
+    } else {
+      // Current or future: prior balance grows by one month's interest, plus residue
+      let prev;
+      if (running !== null) {
+        prev = running;
+      } else {
+        const [cy, cm] = ym.split('-').map(Number);
+        let py = cy, pm = cm - 1; if (pm < 1) { pm = 12; py--; }
+        prev = savingsAtEndOfMonth(py + '-' + String(pm).padStart(2, '0'));
+      }
+      chain[i] = prev * (1 + cashRateMonthly) + residueForMonth(i);
+      running = chain[i];
+    }
+  }
+  return chain;
+}
+
 function renderBudget() {
   const start = state.budgetStart || state.horizonStart;
   const end   = state.budgetEnd   || state.horizonEnd;
@@ -5538,16 +5619,17 @@ function renderBudget() {
 
   const _eomSavingsChain = new Array(n).fill(0);
   let _eomRunning = null;
+  // Monthly cash interest rate (4% p.a. compounded monthly), same as the engine's savings math.
+  const _cashRateMonthly = Math.pow(1 + (Number(state.cashRate) || 0.04), 1 / 12) - 1;
   for (let i = 0; i < n; i++) {
     const ym = isos[sliceFrom + i];
     if (_isPast(i)) {
       _eomSavingsChain[i] = _savingsAtEndOfMonth(ym);
       _eomRunning = _eomSavingsChain[i];
     } else if (_isCurrent(i)) {
-      // Current month: end-of-month SAVINGS = start-of-month savings + this month's
-      // planned residue (surplus − investments), exactly like future months.
-      // (Previously this used a consolidated sav+sal−CC "liquidity" figure, which mixed
-      // accounts and diverged from how every other month's savings row is computed.)
+      // Current month: end-of-month SAVINGS = start-of-month savings, grown by one month's
+      // cash interest, plus this month's planned residue (surplus − investments). Same formula
+      // as future months and as the engine's savings series (prev × (1+mRate) + residue).
       let prev;
       if (_eomRunning !== null) {
         prev = _eomRunning;                       // running chain from the prior (past) month
@@ -5559,11 +5641,11 @@ function renderBudget() {
         const prevYM = py + '-' + String(pm).padStart(2, '0');
         prev = _savingsAtEndOfMonth(prevYM);
       }
-      _eomSavingsChain[i] = prev + _plannedTargetForFuture(i, ym);
+      _eomSavingsChain[i] = prev * (1 + _cashRateMonthly) + _plannedTargetForFuture(i, ym);
       _eomRunning = _eomSavingsChain[i];
     } else {
       const prev = _eomRunning !== null ? _eomRunning : (_eomSavingsChain[i - 1] || 0);
-      _eomSavingsChain[i] = prev + _plannedTargetForFuture(i, ym);
+      _eomSavingsChain[i] = prev * (1 + _cashRateMonthly) + _plannedTargetForFuture(i, ym);
       _eomRunning = _eomSavingsChain[i];
     }
   }
@@ -6303,12 +6385,19 @@ function renderNetWorth() {
   let _gapCumNW = 0;
   const cumGapNW = _overlaySurplusGap.map(g => (_gapCumNW += g));
 
-  // Build adjusted cash and net worth series for the chart (past = raw, current/future = corrected)
-  const adjustedCashSeries = p.cashSeries.map((v, i) => {
-    const ym = p.isos[i];
-    return ym < _nowYM ? v : v - _nwNetSavingsDeltaThruMonth(ym) - (cumGapNW[i] || 0);
+  // Cash component = the SHARED savings projection chain (same one the Projection sheet
+  // uses), so both pages always agree. This replaces the old adjustedCashSeries patches
+  // (_nwNetSavingsDeltaThruMonth / cumGapNW) which were a separate attempt to undo the
+  // engine's double-counting of past-month contributions. The shared chain is the single
+  // source of truth: it reverse-walks past months to true closing balances and projects
+  // forward with monthly cash interest + residue.
+  const adjustedCashSeries = projectSavingsChain(p);
+  // Net worth = investments (engine bal) + savings chain + liabilities, per month.
+  const adjustedNetWorth = p.isos.map((ym, i) => {
+    const inv = (p.investments || []).reduce((a, v) => a + ((p.bal[v.id + '_' + v.name] || [])[i] || 0), 0);
+    const liab = p.liabSeries[i] || 0;
+    return inv + adjustedCashSeries[i] + liab;
   });
-  const adjustedNetWorth = p.netWorth.map((v, i) => v - (p.cashSeries[i] - adjustedCashSeries[i]));
 
   const nwAtDate = adjustedNetWorth[idx] || 0;
   const cashAtDate = adjustedCashSeries[idx] || 0;
