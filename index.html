@@ -991,6 +991,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   align-items: center;
   justify-content: center;
   padding: 16px;
+  overflow-y: auto;   /* safety: if the modal ever exceeds the viewport, the overlay scrolls so the footer stays reachable */
   opacity: 0;
   transition: opacity var(--motion-emphasized);
 }
@@ -1001,7 +1002,11 @@ tr:hover td { background: rgba(255,255,255,0.01); }
   border-radius: var(--radius-xl);
   width: 100%;
   max-width: 460px;
+  /* Cap height to the viewport so the pinned footer is always visible. Use dvh
+     (dynamic viewport height) so desktop browser chrome / zoom doesn't push the
+     footer below the fold; vh is the fallback for older engines. */
   max-height: 90vh;
+  max-height: 90dvh;
   /* Flex column so header + scrollable body + pinned footer layout works.
      Body grows and scrolls, footer stays at the bottom of the modal frame
      always visible regardless of how tall the content gets. */
@@ -1974,7 +1979,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.52';
+const APP_VERSION = '2026.05.04.55';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3025,10 +3030,16 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
       const idx = findIdx(p.month);
       if (idx >= 0) {
         const cost = Number(p.cost) || 0;
-        const downPct = Number(p.downPct) || 0;
         const loanYears = Number(p.loanYears) || 0;
         const loanRate = Number(p.loanRate) || 0;
-        const downPayment = cost * (downPct / 100);
+        // Down payment can be entered as a percentage of cost or an absolute amount.
+        let downPayment;
+        if ((p.downMode || 'pct') === 'amt') {
+          downPayment = Number(p.downAmount) || 0;
+        } else {
+          downPayment = cost * ((Number(p.downPct) || 0) / 100);
+        }
+        downPayment = Math.min(Math.max(0, downPayment), cost);
         const loanAmt = cost - downPayment;
         // Down payment row + delta
         if (downPayment > 0) {
@@ -3068,7 +3079,6 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
     } else if (sc.type === 'kid') {
       const idx = findIdx(p.startMonth);
       if (idx >= 0) {
-        const monthlyCost = Number(p.monthlyCost) || 0;
         const lumpSum = Number(p.lumpSum) || 0;
         if (lumpSum > 0) {
           const lumpRow = new Array(n).fill(0);
@@ -3076,15 +3086,32 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
           expenseDelta[idx] += lumpSum;
           scRows.push({ label: 'Upfront cost', kind: 'expense', values: lumpRow });
         }
-        if (monthlyCost > 0) {
+        // Age-banded monthly costs. Each band: { maxAge, amount } meaning "applies while
+        // the child's age (in years) is < maxAge". Bands are checked in order. If the user
+        // hasn't configured bands, fall back to the flat monthlyCost (legacy behavior).
+        // Amounts grow at the expense rate, compounding annually from the arrival year.
+        const bands = Array.isArray(p.ageBands) && p.ageBands.length ? p.ageBands : null;
+        const flat = Number(p.monthlyCost) || 0;
+        if (bands || flat > 0) {
           const monthlyRow = new Array(n).fill(0);
           for (let i = idx; i < n; i++) {
-            const yrs = Math.floor((i - idx) / 12);
-            const grown = monthlyCost * Math.pow(1 + expenseGrowth, yrs);
-            monthlyRow[i] = grown;
-            expenseDelta[i] += grown;
+            const monthsSince = i - idx;
+            const ageYears = Math.floor(monthsSince / 12);
+            let baseAmt = 0;
+            if (bands) {
+              // find the first band whose maxAge is greater than the child's current age
+              const b = bands.find(bd => ageYears < (Number(bd.maxAge) || 0));
+              baseAmt = b ? (Number(b.amount) || 0) : 0; // past the last band → 0 (child independent)
+            } else {
+              baseAmt = flat;
+            }
+            if (baseAmt > 0) {
+              const grown = baseAmt * Math.pow(1 + expenseGrowth, ageYears);
+              monthlyRow[i] = grown;
+              expenseDelta[i] += grown;
+            }
           }
-          scRows.push({ label: 'Monthly cost (with growth)', kind: 'expense', values: monthlyRow });
+          scRows.push({ label: bands ? 'Child cost (age-based, with growth)' : 'Monthly cost (with growth)', kind: 'expense', values: monthlyRow });
         }
       }
     } else if (sc.type === 'retirement') {
@@ -6539,9 +6566,9 @@ function renderLiquidity() {
 // ----- Scenarios: decision-tree presets -----
 
 const SCENARIO_TEMPLATES = [
-  { type:'house', label:'Buy a house', icon:'🏠', desc:'Down payment + EMI from a chosen month.', color:'#6a9fb5' },
+  { type:'house', label:'Major purchase', icon:'🏷️', desc:'Land, house, car, etc. — down payment + EMI, with a built-in EMI calculator.', color:'#6a9fb5' },
   { type:'sabbatical', label:'Take a sabbatical', icon:'🌴', desc:'Pause income for a stretch of months.', color:'#7fb069' },
-  { type:'kid', label:'Have a child', icon:'👶', desc:'Recurring monthly cost (and an optional lump sum).', color:'var(--accent)' },
+  { type:'kid', label:'Have a child', icon:'👶', desc:'Age-based monthly costs (India estimates, editable) + optional upfront cost.', color:'var(--accent)' },
   { type:'retirement', label:'Retire early', icon:'🏖️', desc:'Income stops; expenses optionally reduced.', color:'#b58ac4' },
   { type:'custom', label:'Custom', icon:'✦', desc:'Free-form one-offs and a recurring expense bump.', color:'#e0a868' }
 ];
@@ -6550,9 +6577,15 @@ function defaultParamsForType(type) {
   const today = new Date();
   const yyyy = today.getFullYear();
   const futureIso = (yyyy + 3) + '-' + String(today.getMonth() + 1).padStart(2, '0');
-  if (type === 'house')      return { month: futureIso, cost: 8000000, downPct: 20, loanYears: 20, loanRate: 0.085 };
+  if (type === 'house')      return { month: futureIso, purchaseKind: 'house', cost: 8000000, downMode: 'pct', downPct: 20, downAmount: 0, loanYears: 20, loanRate: 0.085 };
   if (type === 'sabbatical') return { startMonth: futureIso, months: 6, partnerWorks: state.mode === 'partner' };
-  if (type === 'kid')        return { startMonth: futureIso, monthlyCost: 25000, lumpSum: 100000 };
+  if (type === 'kid')        return { startMonth: futureIso, lumpSum: 100000, monthlyCost: 0, ageBands: [
+    { maxAge: 3,  amount: 18000, label: '0–3 (infant/toddler)' },
+    { maxAge: 6,  amount: 22000, label: '3–6 (preschool)' },
+    { maxAge: 15, amount: 28000, label: '6–15 (school)' },
+    { maxAge: 18, amount: 35000, label: '15–18 (senior school)' },
+    { maxAge: 22, amount: 45000, label: '18–22 (higher ed)' }
+  ] };
   if (type === 'retirement') return { startMonth: (yyyy + 20) + '-' + String(today.getMonth() + 1).padStart(2, '0'), expenseReductionPct: 30 };
   if (type === 'custom')     return { incomeOneOffs: [], expenseOneOffs: [], monthlyExpenseStart: '', monthlyExpenseAmount: 0, monthlyIncomeStart: '', monthlyIncomeAmount: 0 };
   return {};
@@ -6567,11 +6600,22 @@ function defaultNameForType(type) {
 function scenarioSummary(sc) {
   const p = sc.params || {};
   if (sc.type === 'house') {
-    const cost = Number(p.cost)||0, downPct = Number(p.downPct)||0;
-    return `${p.month} · ${fmtMoney(cost,true)} (${downPct}% down, ${p.loanYears||0}yr @ ${((p.loanRate||0)*100).toFixed(2)}%)`;
+    const cost = Number(p.cost)||0;
+    const kindLabel = { house:'🏠', land:'🌳', car:'🚗', other:'🏷️' }[p.purchaseKind] || '🏷️';
+    let downStr;
+    if ((p.downMode||'pct') === 'amt') downStr = `${fmtMoney(Number(p.downAmount)||0,true)} down`;
+    else downStr = `${Number(p.downPct)||0}% down`;
+    return `${kindLabel} ${p.month} · ${fmtMoney(cost,true)} (${downStr}, ${p.loanYears||0}yr @ ${((p.loanRate||0)*100).toFixed(2)}%)`;
   }
   if (sc.type === 'sabbatical') return `${p.startMonth} · ${p.months||0} months${p.partnerWorks?' · partner works':''}`;
-  if (sc.type === 'kid')        return `${p.startMonth} · ${fmtMoney(p.monthlyCost||0,true)}/mo${p.lumpSum?' · '+fmtMoney(p.lumpSum,true)+' upfront':''}`;
+  if (sc.type === 'kid') {
+    if (Array.isArray(p.ageBands) && p.ageBands.length) {
+      const first = p.ageBands[0];
+      const toAge = p.ageBands[p.ageBands.length - 1].maxAge;
+      return `${p.startMonth} · from ${fmtMoney(first.amount||0,true)}/mo · age-based to ${toAge}${p.lumpSum?' · '+fmtMoney(p.lumpSum,true)+' upfront':''}`;
+    }
+    return `${p.startMonth} · ${fmtMoney(p.monthlyCost||0,true)}/mo${p.lumpSum?' · '+fmtMoney(p.lumpSum,true)+' upfront':''}`;
+  }
   if (sc.type === 'retirement') return `${p.startMonth} · expenses −${p.expenseReductionPct||0}%`;
   if (sc.type === 'custom') {
     const parts = [];
@@ -6632,15 +6676,34 @@ function renderScenarioFields(sc) {
   const cur = currencySymbol();
   const nameField = `<div class="field" style="margin-bottom:14px;"><label>Scenario name</label><input type="text" data-sc-field="name" value="${escapeHtml(sc.name||'')}" /></div>`;
   if (sc.type === 'house') {
+    const kinds = [['house','🏠 House'],['land','🌳 Land'],['car','🚗 Car'],['other','🏷️ Other']];
+    const kindSel = p.purchaseKind || 'house';
+    const downMode = p.downMode || 'pct';
     return nameField + `
+      <div class="field" style="margin-bottom:10px;"><label>What are you buying?</label>
+        <div class="sc-kind-chips" style="display:flex;flex-wrap:wrap;gap:6px;">
+          ${kinds.map(([k,lbl]) => `<button type="button" class="sc-kind-chip${k===kindSel?' on':''}" data-sc-kind="${k}" style="padding:7px 12px;border:1px solid ${k===kindSel?'var(--gold)':'var(--line)'};border-radius:16px;background:${k===kindSel?'var(--accent-glow)':'var(--bg-card)'};color:${k===kindSel?'var(--gold-bright)':'var(--ink-dim)'};cursor:pointer;font-size:13px;font-family:'DM Sans',sans-serif;">${lbl}</button>`).join('')}
+        </div>
+        <input type="hidden" data-sc-param="purchaseKind" value="${kindSel}" />
+      </div>
       <div class="grid-2" style="gap:10px;">
         <div class="field"><label>Purchase month</label><input type="month" data-sc-param="month" value="${p.month||''}" /></div>
-        <div class="field"><label>Total cost</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-sc-param="cost" min="0" step="any" value="${p.cost||0}" /></div></div>
-        <div class="field"><label>Down payment</label><div class="inline-prefix" data-prefix="%"><input type="number" data-sc-param="downPct" min="0" max="100" step="any" value="${p.downPct||0}" /></div></div>
-        <div class="field"><label>Loan tenure (years)</label><input type="number" data-sc-param="loanYears" min="0" step="1" value="${p.loanYears||0}" /></div>
-        <div class="field" style="grid-column:1 / -1;"><label>Loan rate (% p.a.)</label><input type="number" data-sc-param="loanRate" min="0" max="50" step="0.05" value="${((p.loanRate||0)*100).toFixed(2)}" /></div>
+        <div class="field"><label>Total cost</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-sc-param="cost" min="0" step="any" value="${p.cost||0}" data-emi-input /></div></div>
       </div>
-      <div style="margin-top:12px;font-size:12px;color:var(--ink-muted);font-style:italic;font-family:'Fraunces',serif;">Down payment lands as a one-off expense in the purchase month. The EMI runs for the full tenure starting that month.</div>`;
+      <div class="field" style="margin-top:4px;"><label>Down payment
+        <span class="sc-down-toggle" style="margin-left:8px;font-size:11px;">
+          <button type="button" class="sc-down-mode${downMode==='pct'?' on':''}" data-sc-down-mode="pct" style="padding:2px 8px;border:1px solid ${downMode==='pct'?'var(--gold)':'var(--line)'};border-radius:10px 0 0 10px;background:${downMode==='pct'?'var(--accent-glow)':'var(--bg-card)'};color:${downMode==='pct'?'var(--gold-bright)':'var(--ink-dim)'};cursor:pointer;">%</button><button type="button" class="sc-down-mode${downMode==='amt'?' on':''}" data-sc-down-mode="amt" style="padding:2px 8px;border:1px solid ${downMode==='amt'?'var(--gold)':'var(--line)'};border-left:none;border-radius:0 10px 10px 0;background:${downMode==='amt'?'var(--accent-glow)':'var(--bg-card)'};color:${downMode==='amt'?'var(--gold-bright)':'var(--ink-dim)'};cursor:pointer;">${cur}</button>
+        </span>
+      </label>
+        <div class="inline-prefix" data-prefix="${downMode==='pct'?'%':cur}" id="scDownWrap"><input type="number" data-sc-param="${downMode==='pct'?'downPct':'downAmount'}" min="0" ${downMode==='pct'?'max="100"':''} step="any" value="${downMode==='pct'?(p.downPct||0):(p.downAmount||0)}" data-emi-input /></div>
+        <input type="hidden" data-sc-param="downMode" value="${downMode}" />
+      </div>
+      <div class="grid-2" style="gap:10px;margin-top:4px;">
+        <div class="field"><label>Loan tenure (years)</label><input type="number" data-sc-param="loanYears" min="0" step="1" value="${p.loanYears||0}" data-emi-input /></div>
+        <div class="field"><label>Loan rate (% p.a.)</label><input type="number" data-sc-param="loanRate" min="0" max="50" step="0.05" value="${((p.loanRate||0)*100).toFixed(2)}" data-emi-input data-emi-rate /></div>
+      </div>
+      <div id="scEmiPreview" style="margin-top:14px;padding:14px 16px;background:var(--accent-soft);border:1px solid var(--line);border-radius:10px;font-size:13px;"></div>
+      <div style="margin-top:10px;font-size:12px;color:var(--ink-muted);font-style:italic;font-family:'Fraunces',serif;">Down payment lands as a one-off expense in the purchase month. The EMI runs for the full tenure starting that month, then stops automatically.</div>`;
   }
   if (sc.type === 'sabbatical') {
     return nameField + `
@@ -6652,13 +6715,28 @@ function renderScenarioFields(sc) {
       <div style="margin-top:12px;font-size:12px;color:var(--ink-muted);font-style:italic;font-family:'Fraunces',serif;">Income drops to zero (or roughly half if your partner works) for the duration. Expenses, EMIs, and contributions continue.</div>`;
   }
   if (sc.type === 'kid') {
+    const bands = Array.isArray(p.ageBands) && p.ageBands.length ? p.ageBands : [
+      { maxAge: 3, amount: 18000, label: '0–3 (infant/toddler)' },
+      { maxAge: 6, amount: 22000, label: '3–6 (preschool)' },
+      { maxAge: 15, amount: 28000, label: '6–15 (school)' },
+      { maxAge: 18, amount: 35000, label: '15–18 (senior school)' },
+      { maxAge: 22, amount: 45000, label: '18–22 (higher ed)' }
+    ];
+    const bandRows = bands.map((b, i) => `
+      <div class="grid-2" data-kid-band="${i}" style="gap:8px;align-items:end;margin-bottom:6px;">
+        <div class="field"><label style="font-size:11px;">${escapeHtml(b.label || ('band ' + (i+1)))}<br><span style="color:var(--ink-muted);">until age ${b.maxAge}</span></label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-kid-band-amount="${i}" min="0" step="any" value="${b.amount||0}" /></div></div>
+        <div class="field"><label style="font-size:11px;">until age</label><input type="number" data-kid-band-maxage="${i}" min="0" max="30" step="1" value="${b.maxAge||0}" /></div>
+      </div>`).join('');
     return nameField + `
       <div class="grid-2" style="gap:10px;">
-        <div class="field"><label>Arrival month</label><input type="month" data-sc-param="startMonth" value="${p.startMonth||''}" /></div>
-        <div class="field"><label>Monthly cost increase</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-sc-param="monthlyCost" min="0" step="any" value="${p.monthlyCost||0}" /></div></div>
-        <div class="field" style="grid-column:1 / -1;"><label>One-time cost (delivery, setup, etc.) <span class="opt">optional</span></label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-sc-param="lumpSum" min="0" step="any" value="${p.lumpSum||0}" /></div></div>
+        <div class="field"><label>Arrival month (age 0)</label><input type="month" data-sc-param="startMonth" value="${p.startMonth||''}" /></div>
+        <div class="field"><label>One-time cost (delivery, setup) <span class="opt">optional</span></label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-sc-param="lumpSum" min="0" step="any" value="${p.lumpSum||0}" /></div></div>
       </div>
-      <div style="margin-top:12px;font-size:12px;color:var(--ink-muted);font-style:italic;font-family:'Fraunces',serif;">The recurring cost grows yearly at your expense growth rate.</div>`;
+      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin:14px 0 4px;">Monthly cost by child's age <span style="color:var(--ink-muted);font-size:11px;">— India urban estimates, editable</span></div>
+      <div id="scKidBands">${bandRows}</div>
+      <div id="scKidPreview" style="margin-top:12px;padding:12px 14px;background:var(--accent-soft);border:1px solid var(--line);border-radius:10px;font-size:12.5px;"></div>
+      <input type="hidden" data-sc-param="monthlyCost" value="0" />
+      <div style="margin-top:10px;font-size:11.5px;color:var(--ink-muted);font-style:italic;font-family:'Fraunces',serif;">Costs apply by the child's age and grow yearly at your expense rate. Defaults are urban middle/upper-middle-class ballparks (private schooling) — adjust to your situation. After the last band's age, the cost stops.</div>`;
   }
   if (sc.type === 'retirement') {
     return nameField + `
@@ -6744,19 +6822,113 @@ function bindScenarioFieldHandlers(sc) {
       bindScenarioFieldHandlers(sc);
     });
   });
-  // Custom: delete-row handler — same ordering
-  document.querySelectorAll('#scEditFields [data-sc-list-del]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const row = btn.closest('[data-sc-list]');
-      const which = row.dataset.scList;
-      const idx = Number(row.dataset.scListIdx);
-      readScenarioEditFields(sc);
-      if (sc.params && Array.isArray(sc.params[which])) sc.params[which].splice(idx, 1);
-      const fields = document.getElementById('scEditFields');
-      fields.innerHTML = renderScenarioFields(sc);
-      bindScenarioFieldHandlers(sc);
+  // ── Major purchase (house) scenario: live EMI preview + pickers ──
+  const emiPreview = document.getElementById('scEmiPreview');
+  if (emiPreview) {
+    const cur = currencySymbol();
+    const recomputeEmi = () => {
+      const wrap = document.getElementById('scEditFields');
+      const cost = Number(wrap.querySelector('[data-sc-param="cost"]')?.value) || 0;
+      const downMode = wrap.querySelector('[data-sc-param="downMode"]')?.value || 'pct';
+      let downPayment = 0;
+      if (downMode === 'pct') {
+        const pct = Number(wrap.querySelector('[data-sc-param="downPct"]')?.value) || 0;
+        downPayment = cost * (pct / 100);
+      } else {
+        downPayment = Number(wrap.querySelector('[data-sc-param="downAmount"]')?.value) || 0;
+      }
+      downPayment = Math.min(downPayment, cost);
+      const loanAmt = Math.max(0, cost - downPayment);
+      const years = Number(wrap.querySelector('[data-sc-param="loanYears"]')?.value) || 0;
+      const ratePct = Number(wrap.querySelector('[data-sc-param="loanRate"]')?.value) || 0;
+      const rate = ratePct / 100;
+      if (loanAmt <= 0 || years <= 0) {
+        emiPreview.innerHTML = `<div style="color:var(--ink-muted);font-style:italic;">Enter cost, tenure and rate to see the EMI.</div>` +
+          (downPayment > 0 ? `<div style="margin-top:6px;">Down payment: <strong>${fmtMoney(downPayment)}</strong> · Paid in full, no loan.</div>` : '');
+        return;
+      }
+      const emi = computeEMI(loanAmt, rate, years);
+      const totalPaid = emi * years * 12;
+      const totalInterest = totalPaid - loanAmt;
+      emiPreview.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+          <span style="color:var(--ink-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;">Estimated EMI</span>
+          <span style="font-size:20px;font-weight:700;color:var(--gold-bright);font-family:'JetBrains Mono',monospace;">${fmtMoney(emi)}/mo</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;font-size:12px;color:var(--ink-dim);">
+          <span>Down payment</span><span style="text-align:right;">${fmtMoney(downPayment)}</span>
+          <span>Loan amount</span><span style="text-align:right;">${fmtMoney(loanAmt)}</span>
+          <span>Tenure</span><span style="text-align:right;">${years} yr (${years*12} EMIs)</span>
+          <span>Total interest</span><span style="text-align:right;color:#e06060;">${fmtMoney(totalInterest)}</span>
+          <span>Total outflow</span><span style="text-align:right;">${fmtMoney(downPayment + totalPaid)}</span>
+        </div>`;
+    };
+    document.querySelectorAll('#scEditFields [data-emi-input]').forEach(inp => {
+      inp.addEventListener('input', recomputeEmi);
     });
-  });
+    // Purchase-kind chips
+    document.querySelectorAll('#scEditFields [data-sc-kind]').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const k = chip.dataset.scKind;
+        const hidden = document.querySelector('#scEditFields [data-sc-param="purchaseKind"]');
+        if (hidden) hidden.value = k;
+        document.querySelectorAll('#scEditFields [data-sc-kind]').forEach(c => {
+          const on = c.dataset.scKind === k;
+          c.style.border = '1px solid ' + (on ? 'var(--gold)' : 'var(--line)');
+          c.style.background = on ? 'var(--accent-glow)' : 'var(--bg-card)';
+          c.style.color = on ? 'var(--gold-bright)' : 'var(--ink-dim)';
+        });
+      });
+    });
+    // Down-payment mode toggle (% vs ₹) — re-render to swap the bound param + prefix
+    document.querySelectorAll('#scEditFields [data-sc-down-mode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        readScenarioEditFields(sc);
+        sc.params = sc.params || {};
+        sc.params.downMode = btn.dataset.scDownMode;
+        const fields = document.getElementById('scEditFields');
+        fields.innerHTML = renderScenarioFields(sc);
+        bindScenarioFieldHandlers(sc);
+      });
+    });
+    recomputeEmi(); // initial paint
+  }
+
+  // ── Kid scenario: live lifetime-cost preview ──
+  const kidPreview = document.getElementById('scKidPreview');
+  if (kidPreview) {
+    const recomputeKid = () => {
+      const w = document.getElementById('scEditFields');
+      const bandEls = w.querySelectorAll('#scKidBands [data-kid-band]');
+      const bands = [];
+      bandEls.forEach((row, i) => {
+        bands.push({
+          maxAge: Number(row.querySelector(`[data-kid-band-maxage="${i}"]`)?.value) || 0,
+          amount: Number(row.querySelector(`[data-kid-band-amount="${i}"]`)?.value) || 0
+        });
+      });
+      // Estimate total nominal spend to the last band's age (no growth, rough), plus lump.
+      const lump = Number(w.querySelector('[data-sc-param="lumpSum"]')?.value) || 0;
+      let total = lump;
+      let prevAge = 0;
+      bands.forEach(b => {
+        const yrs = Math.max(0, (b.maxAge || 0) - prevAge);
+        total += b.amount * 12 * yrs;
+        prevAge = b.maxAge || prevAge;
+      });
+      const toAge = bands.length ? bands[bands.length - 1].maxAge : 0;
+      kidPreview.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+          <span style="color:var(--ink-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;">Est. total to age ${toAge}</span>
+          <span style="font-size:18px;font-weight:700;color:var(--gold-bright);font-family:'JetBrains Mono',monospace;">${fmtMoney(total, true)}</span>
+        </div>
+        <div style="margin-top:4px;color:var(--ink-muted);font-size:11px;font-style:italic;">Nominal (excludes annual growth, which the projection applies). Growth makes the real figure higher.</div>`;
+    };
+    document.querySelectorAll('#scKidBands input, #scEditFields [data-sc-param="lumpSum"]').forEach(inp => {
+      inp.addEventListener('input', recomputeKid);
+    });
+    recomputeKid();
+  }
 }
 
 function readScenarioEditFields(sc) {
@@ -6775,6 +6947,23 @@ function readScenarioEditFields(sc) {
       sc.params[key] = input.value;
     }
   });
+  // Kid scenario: read age-band rows into sc.params.ageBands
+  const kidBandsWrap = wrap.querySelector('#scKidBands');
+  if (kidBandsWrap) {
+    const bandEls = kidBandsWrap.querySelectorAll('[data-kid-band]');
+    if (bandEls.length) {
+      const labels = ['0–3 (infant/toddler)','3–6 (preschool)','6–15 (school)','15–18 (senior school)','18–22 (higher ed)'];
+      const arr = [];
+      bandEls.forEach((row, i) => {
+        const amount = Number(row.querySelector(`[data-kid-band-amount="${i}"]`)?.value) || 0;
+        const maxAge = Number(row.querySelector(`[data-kid-band-maxage="${i}"]`)?.value) || 0;
+        const existingLabel = (sc.params.ageBands && sc.params.ageBands[i] && sc.params.ageBands[i].label) || labels[i] || ('band ' + (i+1));
+        arr.push({ maxAge, amount, label: existingLabel });
+      });
+      sc.params.ageBands = arr;
+    }
+  }
+  // Toggle switches (e.g. sabbatical "partner works")
   wrap.querySelectorAll('.toggle[data-sc-toggle]').forEach(tog => {
     sc.params[tog.dataset.scToggle] = tog.classList.contains('on');
   });
@@ -6834,22 +7023,28 @@ function commitScenarioToBase(scId) {
   const skipped = [];
 
   if (sc.type === 'house') {
-    if (p.month && Number(p.cost) > 0 && Number(p.downPct) >= 0) {
+    if (p.month && Number(p.cost) > 0) {
       const cost = Number(p.cost);
-      const downPct = Number(p.downPct);
-      const down = cost * (downPct / 100);
+      let down;
+      if ((p.downMode || 'pct') === 'amt') {
+        down = Number(p.downAmount) || 0;
+      } else {
+        down = cost * ((Number(p.downPct) || 0) / 100);
+      }
+      down = Math.min(Math.max(0, down), cost);
       const loanAmt = cost - down;
+      const kindLabel = sc.name || ({ house:'House', land:'Land', car:'Car', other:'Purchase' }[p.purchaseKind] || 'Purchase');
       if (down > 0) {
-        pending.expenseOneOffs.push({ month: p.month, amount: down, note: (sc.name || 'House') + ' · down payment', repeat: false });
+        pending.expenseOneOffs.push({ month: p.month, amount: down, note: kindLabel + ' · down payment', repeat: false });
         committed.push(`Down payment ${fmtMoney(down, true)} as one-off expense (${p.month})`);
       }
       if (loanAmt > 0 && Number(p.loanYears) > 0) {
         const emi = computeEMI(loanAmt, Number(p.loanRate) || 0, Number(p.loanYears));
-        pending.emis.push({ name: (sc.name || 'House') + ' · EMI', amount: Math.round(emi), startMonth: p.month, months: Number(p.loanYears) * 12 });
+        pending.emis.push({ name: kindLabel + ' · EMI', amount: Math.round(emi), startMonth: p.month, months: Number(p.loanYears) * 12 });
         committed.push(`EMI ${fmtMoney(Math.round(emi), true)}/mo for ${Number(p.loanYears) * 12} months`);
       }
     } else {
-      skipped.push('House parameters incomplete — nothing to commit.');
+      skipped.push('Purchase parameters incomplete — nothing to commit.');
     }
   } else if (sc.type === 'sabbatical') {
     if (p.startMonth && Number(p.months) > 0) {
@@ -6882,7 +7077,9 @@ function commitScenarioToBase(scId) {
       pending.expenseOneOffs.push({ month: p.startMonth, amount: Number(p.lumpSum), note: (sc.name || 'Child') + ' · upfront cost', repeat: false });
       committed.push(`Upfront cost ${fmtMoney(Number(p.lumpSum), true)} as one-off expense (${p.startMonth})`);
     }
-    if (Number(p.monthlyCost) > 0) {
+    if (Array.isArray(p.ageBands) && p.ageBands.length) {
+      skipped.push(`Age-based monthly costs can't auto-commit (they change as the child grows). They remain modeled in the projection/scenario; to bake into actuals, raise an expense category manually via Edit my inputs.`);
+    } else if (Number(p.monthlyCost) > 0) {
       skipped.push(`Recurring monthly cost ${fmtMoney(p.monthlyCost, true)} cannot auto-commit. Add it via Edit my inputs → Expenses (raise a category like Family).`);
     }
   } else if (sc.type === 'retirement') {
