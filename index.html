@@ -326,6 +326,25 @@ input::placeholder { color: var(--ink-muted); }
 }
 .sc-timeline-btn:hover { background: var(--accent-soft); border-color: var(--gold); color: var(--gold-bright); }
 .sc-timeline-btn.has-events { border-color: var(--gold); color: var(--gold-bright); background: var(--accent-soft); }
+/* ── Instruments page ── */
+.inst-section-title { font-family: 'Fraunces', serif; font-style: italic; font-size: 18px; color: var(--gold-bright); margin: 0 0 12px; }
+.inst-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.inst-card { background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 16px; }
+.inst-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
+.inst-name { font-weight: 600; font-size: 15px; display: flex; align-items: center; }
+.inst-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; flex: 0 0 auto; }
+.inst-badges { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+.inst-badge { font-size: 10px; padding: 3px 8px; border-radius: 10px; white-space: nowrap; letter-spacing: 0.03em; }
+.inst-badge.active { background: var(--accent-soft); color: var(--accent); }
+.inst-badge.closing { background: rgba(224,96,96,0.12); color: #e06060; }
+.inst-badge.changed { background: var(--accent-soft); color: var(--gold-bright); }
+.inst-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.inst-fields .field:first-child { grid-column: 1 / -1; }
+.inst-actions { display: flex; gap: 8px; }
+.inst-timeline-btn { flex: 1; font-size: 13px; padding: 8px; }
+.inst-empty { color: var(--ink-muted); font-size: 14px; font-style: italic; }
+.inst-empty a { color: var(--gold-bright); }
+@media (max-width: 768px) { .inst-grid { grid-template-columns: 1fr; } }
 .add-btn { background: transparent; border: 1px dashed var(--line); color: var(--ink-dim); padding: 10px; border-radius: 6px; cursor: pointer; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 500; margin-top: 4px; transition: all 0.15s; }
 .add-btn:hover { border-color: var(--gold); color: var(--gold-bright); border-style: solid; }
 .subsection { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line-soft); }
@@ -1618,6 +1637,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     <div class="nav-label">Analysis</div>
     <div class="nav-item" data-target="scenarios"><span class="dot"></span>Scenarios</div>
     <div class="nav-label">Configure</div>
+    <div class="nav-item" data-target="instruments"><span class="dot"></span>Instruments</div>
     <div class="nav-item" data-target="settings"><span class="dot"></span>Rates &amp; Assumptions</div>
     <div class="nav-item" data-target="editData"><span class="dot"></span>Edit my inputs</div>
   </aside>
@@ -1786,6 +1806,12 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       </div>
     </section>
 
+    <section class="section" id="instruments">
+      <h1 class="section-title">Your <em>instruments</em>.</h1>
+      <p class="section-sub">Manage your investments and loans — adjust amounts, schedule step-ups, pauses, or close them out. Changes save and recompute instantly. To add a new instrument, use Edit my inputs.</p>
+      <div id="instrumentsBody"></div>
+    </section>
+
     <section class="section" id="editData">
       <h1 class="section-title">Edit your <em>inputs</em>.</h1>
       <p class="section-sub">Tap any card to jump straight to that section. Your other answers stay put — only the section you edit changes.</p>
@@ -1816,6 +1842,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     <div class="drawer-label">Analysis</div>
     <div class="drawer-item" data-target="scenarios">Scenarios</div>
     <div class="drawer-label">Configure</div>
+    <div class="drawer-item" data-target="instruments">Instruments</div>
     <div class="drawer-item" data-target="settings">Rates &amp; Assumptions</div>
     <div class="drawer-item" data-target="editData">Edit my inputs</div>
     <div class="drawer-label">Appearance</div>
@@ -2012,7 +2039,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.57';
+const APP_VERSION = '2026.05.04.58';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -7006,9 +7033,22 @@ function renderTimelineFields() {
 function saveTimelineEditor() {
   const ctx = _timelineCtx;
   if (!ctx) return;
-  // sort + persist onto the row; readEMIs/readInvestments will pick it up, then full recompute.
-  ctx.row._events = ctx.events.slice().sort((a, b) => (a.month||'') < (b.month||'') ? -1 : 1);
-  if (ctx.refreshBadge) ctx.refreshBadge();
+  const sorted = ctx.events.slice().sort((a, b) => (a.month||'') < (b.month||'') ? -1 : 1);
+  if (ctx.stateTarget) {
+    // Instruments page: write directly to the state object, persist, recompute, re-render.
+    ctx.stateTarget.events = sorted;
+    scheduleSave();
+    closeScModal('timelineModal');
+    _timelineCtx = null;
+    if (typeof renderAll === 'function') renderAll();
+    if (typeof renderInstruments === 'function') renderInstruments();
+    return;
+  }
+  // Edit-my-inputs page: write onto the DOM row; readEMIs/readInvestments pick it up on Save.
+  if (ctx.row) {
+    ctx.row._events = sorted;
+    if (ctx.refreshBadge) ctx.refreshBadge();
+  }
   closeScModal('timelineModal');
   _timelineCtx = null;
 }
@@ -7754,6 +7794,7 @@ function wireDashboard() {
     'networth':      renderNetWorth,
     'scenarios':     renderScenarios,
     'settings':      renderSettings,
+    'instruments':   () => { if (typeof renderInstruments === 'function') renderInstruments(); },
     'editData':      () => { if (typeof renderEditGrid === 'function') renderEditGrid(); }
   };
   function activateSection(targetId) {
@@ -7891,6 +7932,111 @@ function wireDashboard() {
 }
 
 // Build the Edit-my-inputs card grid (jump-direct-to-section)
+// ─── Instruments page: manage existing investments & EMIs (immediate-save) ──────
+function _instrumentStatusBadge(events, kind) {
+  const evs = Array.isArray(events) ? events.slice().sort((a,b)=>(a.month||'')<(b.month||'')?-1:1) : [];
+  if (!evs.length) return '<span class="inst-badge active">Active</span>';
+  const closeEv = evs.find(e => e.type === 'close');
+  const parts = [];
+  if (closeEv) parts.push(`<span class="inst-badge closing">Closes ${closeEv.month}</span>`);
+  const others = evs.filter(e => e.type !== 'close');
+  if (others.length) {
+    const labelMap = { setAmount: 'step', pause: 'pause', resume: 'resume' };
+    parts.push(`<span class="inst-badge changed">${others.length} change${others.length>1?'s':''}</span>`);
+  }
+  if (!parts.length) parts.push('<span class="inst-badge active">Active</span>');
+  return parts.join(' ');
+}
+
+function renderInstruments() {
+  const body = document.getElementById('instrumentsBody');
+  if (!body) return;
+  const cur = currencySymbol();
+  const invs = state.investments || [];
+  const emis = state.emis || [];
+
+  const invCards = invs.map((inv, i) => `
+    <div class="inst-card" data-inst-kind="investment" data-inst-idx="${i}">
+      <div class="inst-card-head">
+        <div class="inst-name"><span class="inst-dot" style="background:${inv.color||'var(--accent)'};"></span>${escapeHtml(inv.name)}</div>
+        <div class="inst-badges">${_instrumentStatusBadge(inv.events, 'investment')}</div>
+      </div>
+      <div class="inst-fields">
+        <div class="field"><label>Current balance</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" min="0" step="any" value="${inv.balance||0}" data-inst-field="balance" /></div></div>
+        <div class="field"><label>Monthly contribution</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" min="0" step="any" value="${inv.monthlyContribution||0}" data-inst-field="monthlyContribution" /></div></div>
+        <div class="field"><label>Return rate (% p.a.)</label><input type="number" min="0" max="50" step="0.05" value="${((inv.rate||0)*100).toFixed(2)}" data-inst-field="rate" /></div>
+      </div>
+      <div class="inst-actions">
+        <button class="btn ghost inst-timeline-btn" data-inst-timeline>Manage timeline${(inv.events||[]).length?` · ${(inv.events||[]).length}`:''}</button>
+      </div>
+    </div>`).join('');
+
+  const emiCards = emis.map((e, i) => `
+    <div class="inst-card" data-inst-kind="emi" data-inst-idx="${i}">
+      <div class="inst-card-head">
+        <div class="inst-name"><span class="inst-dot" style="background:#e06060;"></span>${escapeHtml(e.name)}</div>
+        <div class="inst-badges">${_instrumentStatusBadge(e.events, 'emi')}</div>
+      </div>
+      <div class="inst-fields">
+        <div class="field"><label>Monthly EMI</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" min="0" step="any" value="${e.amount||0}" data-inst-field="amount" /></div></div>
+        <div class="field"><label>Start month</label><input type="month" value="${e.startMonth||''}" data-inst-field="startMonth" /></div>
+        <div class="field"><label>Months (term)</label><input type="number" min="1" step="1" value="${e.months||0}" data-inst-field="months" /></div>
+      </div>
+      <div class="inst-actions">
+        <button class="btn ghost inst-timeline-btn" data-inst-timeline>Manage timeline${(e.events||[]).length?` · ${(e.events||[]).length}`:''}</button>
+      </div>
+    </div>`).join('');
+
+  body.innerHTML = `
+    <div class="inst-section-title">Investments</div>
+    ${invs.length ? `<div class="inst-grid">${invCards}</div>` : `<p class="inst-empty">No investments yet. Add them in <a href="#" data-goto-edit>Edit my inputs</a>.</p>`}
+    <div class="inst-section-title" style="margin-top:28px;">Loans &amp; EMIs</div>
+    ${emis.length ? `<div class="inst-grid">${emiCards}</div>` : `<p class="inst-empty">No EMIs yet. Add them in <a href="#" data-goto-edit>Edit my inputs</a>.</p>`}
+  `;
+
+  // Immediate-save field edits
+  body.querySelectorAll('.inst-card').forEach(card => {
+    const kind = card.dataset.instKind;
+    const idx = Number(card.dataset.instIdx);
+    const target = kind === 'investment' ? state.investments[idx] : state.emis[idx];
+    if (!target) return;
+    card.querySelectorAll('[data-inst-field]').forEach(input => {
+      input.addEventListener('change', () => {
+        const f = input.dataset.instField;
+        let v = input.value;
+        if (f === 'rate') target.rate = (Number(v)||0)/100;
+        else if (f === 'startMonth') target.startMonth = v;
+        else target[f] = Number(v)||0;
+        scheduleSave();
+        renderAll();        // recompute Projection + Net Worth instantly
+      });
+    });
+    // Timeline button — reuse the Phase 1 editor, but operate on the state object directly.
+    const tbtn = card.querySelector('[data-inst-timeline]');
+    if (tbtn) tbtn.addEventListener('click', () => openTimelineEditorForState(kind, target));
+  });
+
+  body.querySelectorAll('[data-goto-edit]').forEach(a => {
+    a.addEventListener('click', (e) => { e.preventDefault(); activateSection('editData'); });
+  });
+}
+
+// Open the timeline editor bound directly to a state object (Instruments page variant).
+// On save, writes events back to the state object, persists, recomputes, re-renders the page.
+function openTimelineEditorForState(kind, instrument) {
+  _timelineCtx = {
+    kind,
+    row: null,                 // no DOM row here; we persist to state directly
+    events: (instrument.events || []).slice(),
+    refreshBadge: null,
+    stateTarget: instrument
+  };
+  const label = instrument.name || (kind === 'emi' ? 'EMI' : 'Investment');
+  document.getElementById('timelineTitle').textContent = 'Timeline · ' + label;
+  renderTimelineFields();
+  openScModal('timelineModal');
+}
+
 function renderEditGrid() {
   const grid = document.getElementById('editGrid');
   if (!grid) return;
