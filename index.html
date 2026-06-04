@@ -2076,7 +2076,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.61';
+const APP_VERSION = '2026.05.04.62';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -8020,44 +8020,81 @@ function _instrumentStatusBadge(events, kind) {
 
 // ─── EMI / Loan Payoff Calculator ──────────────────────────────────────────────
 // Pure amortization helpers.
-function _emiMonthsToClose(principal, emi, monthlyRate) {
-  if (principal <= 0) return 0;
-  if (monthlyRate <= 0) return emi > 0 ? principal / emi : Infinity;
-  if (emi <= principal * monthlyRate) return Infinity; // EMI doesn't cover interest
-  return -Math.log(1 - (principal * monthlyRate) / emi) / Math.log(1 + monthlyRate);
+// Add k calendar months to a YYYY-MM, return YYYY-MM.
+function _emiShiftYM(ym, k) {
+  let [y, m] = ym.split('-').map(Number);
+  const total = (y * 12 + (m - 1)) + k;
+  const ny = Math.floor(total / 12);
+  const nm = (total % 12) + 1;
+  return ny + '-' + String(nm).padStart(2, '0');
 }
-// Simulate amortization; returns schedule + totals. Optional one-time lump at lumpMonth (0-based).
-function _emiSimulate(principal, emi, monthlyRate, lumpSum, lumpMonth) {
+function _emiCurrentYM() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
+function _emiFmtYM(ym) {
+  if (!ym) return '';
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(y, m-1, 1).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+}
+
+// Simulate amortization over calendar months.
+// opts: { startYM, lump:{amount, ym}, stepUp:{pct, fromYM, annual:true} }
+// Returns { months, closeYM, totalInterest, totalPaid, sched:[{ ym, opening, emi, interest, principal, closing, prepay }] }.
+function _emiSimulate(principal, emi, monthlyRate, opts) {
+  opts = opts || {};
+  const startYM = opts.startYM || _emiCurrentYM();
+  const lump = opts.lump && opts.lump.amount > 0 ? opts.lump : null;
+  const step = opts.stepUp && opts.stepUp.pct > 0 && opts.stepUp.fromYM ? opts.stepUp : null;
   const sched = [];
-  let bal = principal, months = 0, totalInterest = 0, totalPaid = 0;
+  let bal = principal, k = 0, totalInterest = 0, totalPaid = 0;
   const cap = 1200;
-  while (bal > 0.5 && months < cap) {
+  let lastStepYM = step ? step.fromYM : null;
+  let curEmi = emi;
+  while (bal > 0.5 && k < cap) {
+    const ym = _emiShiftYM(startYM, k);
+    // Apply step-up: first time we reach fromYM, bump; if annual, bump again every 12 months after.
+    if (step) {
+      if (ym === step.fromYM) {
+        curEmi = emi * (1 + step.pct / 100);
+      } else if (step.annual && ym > step.fromYM) {
+        // bump on each anniversary of fromYM
+        const monthsSinceStep = (parseInt(ym.split('-')[0])*12 + parseInt(ym.split('-')[1])) - (parseInt(step.fromYM.split('-')[0])*12 + parseInt(step.fromYM.split('-')[1]));
+        if (monthsSinceStep > 0 && monthsSinceStep % 12 === 0) {
+          curEmi = emi * Math.pow(1 + step.pct / 100, 1 + monthsSinceStep / 12);
+        }
+      }
+    }
     let openingExtra = 0;
-    if (lumpSum > 0 && months === (lumpMonth || 0)) {
-      const applied = Math.min(lumpSum, bal);
+    if (lump && ym === lump.ym) {
+      const applied = Math.min(lump.amount, bal);
       bal -= applied; totalPaid += applied; openingExtra = applied;
-      if (bal <= 0.5) { sched.push({ m: months+1, opening: bal+applied, emi: applied, interest: 0, principal: applied, closing: 0, prepay: applied }); months++; break; }
+      if (bal <= 0.5) { sched.push({ ym, opening: bal + applied, emi: applied, interest: 0, principal: applied, closing: 0, prepay: applied }); k++; break; }
     }
     const interest = bal * monthlyRate;
-    let principalPaid = emi - interest;
-    if (principalPaid <= 0) return { months: Infinity, totalInterest: Infinity, totalPaid: Infinity, sched: [] };
+    let principalPaid = curEmi - interest;
+    if (principalPaid <= 0) return { months: Infinity, closeYM: null, totalInterest: Infinity, totalPaid: Infinity, sched: [] };
     const opening = bal;
     if (principalPaid >= bal) {
       const finalPay = bal + interest;
       totalPaid += finalPay; totalInterest += interest;
-      sched.push({ m: months+1, opening, emi: finalPay, interest, principal: bal, closing: 0, prepay: openingExtra });
-      bal = 0; months++; break;
+      sched.push({ ym, opening, emi: finalPay, interest, principal: bal, closing: 0, prepay: openingExtra });
+      bal = 0; k++; break;
     }
-    bal -= principalPaid; totalPaid += emi; totalInterest += interest;
-    sched.push({ m: months+1, opening, emi, interest, principal: principalPaid, closing: bal, prepay: openingExtra });
-    months++;
+    bal -= principalPaid; totalPaid += curEmi; totalInterest += interest;
+    sched.push({ ym, opening, emi: curEmi, interest, principal: principalPaid, closing: bal, prepay: openingExtra });
+    k++;
   }
-  return { months, totalInterest, totalPaid, sched };
+  const closeYM = sched.length ? sched[sched.length - 1].ym : startYM;
+  return { months: k, closeYM, totalInterest, totalPaid, sched };
 }
-function _emiAddMonths(n) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + Math.ceil(n)); return d; }
-function _emiFmtDate(d) { return d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }); }
 
-let _emiCalcState = { loanId: '', principal: 0, roiPct: 8.5, baselineEmi: 0, newEmi: 0, lumpSum: 0, lumpMonth: 0, showTable: false };
+// Closed-form months-to-close (no step-up/lump) for quick baseline comparisons.
+function _emiMonthsClosedForm(principal, emi, monthlyRate) {
+  if (principal <= 0) return 0;
+  if (monthlyRate <= 0) return emi > 0 ? principal / emi : Infinity;
+  if (emi <= principal * monthlyRate) return Infinity;
+  return -Math.log(1 - (principal * monthlyRate) / emi) / Math.log(1 + monthlyRate);
+}
+
+let _emiCalcState = { loanId: '', principal: 0, roiPct: 8.5, baselineEmi: 0, newEmi: 0, lumpSum: 0, lumpYM: '', stepPct: 0, stepFromYM: '', showTable: false };
 
 function renderEmiCalc() {
   const body = document.getElementById('emiCalcBody');
@@ -8066,6 +8103,10 @@ function renderEmiCalc() {
   const emis = state.emis || [];
   const loanOpts = ['<option value="">Custom loan</option>']
     .concat(emis.map((e,i)=>`<option value="${i}">${escapeHtml(e.name)}</option>`)).join('');
+
+  const nowYM = _emiCurrentYM();
+  const lumpYM = _emiCalcState.lumpYM || _emiShiftYM(nowYM, 1);
+  const stepFromYM = _emiCalcState.stepFromYM || _emiShiftYM(nowYM, 12);
 
   body.innerHTML = `
     <div class="emi-calc-grid">
@@ -8078,14 +8119,19 @@ function renderEmiCalc() {
         <div class="field"><label>New EMI to test</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" id="emiNew" min="0" step="any" value="${_emiCalcState.newEmi||''}" placeholder="e.g. 52000" /></div></div>
         <div class="grid-2" style="gap:10px;">
           <div class="field"><label>One-time prepayment <span class="opt">optional</span></label><div class="inline-prefix" data-prefix="${cur}"><input type="number" id="emiLump" min="0" step="any" value="${_emiCalcState.lumpSum||''}" /></div></div>
-          <div class="field"><label>In month #</label><input type="number" id="emiLumpMonth" min="1" step="1" value="${_emiCalcState.lumpMonth?(_emiCalcState.lumpMonth+1):1}" /></div>
+          <div class="field"><label>Prepayment month</label><input type="month" id="emiLumpYM" value="${lumpYM}" /></div>
         </div>
+        <div class="grid-2" style="gap:10px;">
+          <div class="field"><label>Annual EMI step-up % <span class="opt">optional</span></label><input type="number" id="emiStepPct" min="0" max="100" step="0.5" value="${_emiCalcState.stepPct||''}" placeholder="e.g. 5" /></div>
+          <div class="field"><label>Step-up from</label><input type="month" id="emiStepFromYM" value="${stepFromYM}" /></div>
+        </div>
+        <button class="btn" id="emiCalcBtn" style="margin-top:8px;width:100%;">Calculate</button>
       </div>
       <div id="emiCalcResult" class="emi-calc-result"></div>
     </div>
     <div id="emiCalcTableWrap" style="margin-top:18px;"></div>
     <div style="margin-top:16px;font-size:12px;color:var(--ink-muted);font-style:italic;font-family:'Fraunces',serif;line-height:1.6;">
-      Assumes reducing-balance amortization. Prepayments here reduce the tenure (EMI unchanged), which maximises interest saved. Confirm any prepayment penalty with your lender, and remember early payoff reduces 80C / Section&nbsp;24 tax benefits if it's a home loan.
+      Assumes reducing-balance amortization. Prepayments here reduce the tenure (EMI unchanged), which maximises interest saved. An annual step-up raises the EMI by the chosen % on each anniversary of the step-up month. Confirm any prepayment penalty with your lender, and remember early payoff reduces 80C / Section&nbsp;24 tax benefits if it's a home loan.
     </div>`;
 
   const $ = id => document.getElementById(id);
@@ -8113,12 +8159,16 @@ function renderEmiCalc() {
     _emiCalcState.baselineEmi = Number($('emiBaseline').value) || 0;
     _emiCalcState.newEmi = Number($('emiNew').value) || 0;
     _emiCalcState.lumpSum = Number($('emiLump').value) || 0;
-    _emiCalcState.lumpMonth = Math.max(0, (Number($('emiLumpMonth').value) || 1) - 1);
+    _emiCalcState.lumpYM = $('emiLumpYM').value || '';
+    _emiCalcState.stepPct = Number($('emiStepPct').value) || 0;
+    _emiCalcState.stepFromYM = $('emiStepFromYM').value || '';
     _emiCalcRecompute();
   };
-  ['emiPrincipal','emiRoi','emiBaseline','emiNew','emiLump','emiLumpMonth'].forEach(id => {
+  ['emiPrincipal','emiRoi','emiBaseline','emiNew','emiLump','emiLumpYM','emiStepPct','emiStepFromYM'].forEach(id => {
     const el = $(id); if (el) el.addEventListener('input', readInputs);
   });
+  const calcBtn = $('emiCalcBtn');
+  if (calcBtn) calcBtn.addEventListener('click', readInputs);
   _emiCalcRecompute();
 }
 
@@ -8139,8 +8189,12 @@ function _emiCalcRecompute() {
     return;
   }
 
-  const base = _emiSimulate(P, baseEmi || newEmi, r, 0, 0);
-  const test = _emiSimulate(P, newEmi, r, s.lumpSum, s.lumpMonth);
+  const base = _emiSimulate(P, baseEmi || newEmi, r, { startYM: _emiCurrentYM() });
+  const test = _emiSimulate(P, newEmi, r, {
+    startYM: _emiCurrentYM(),
+    lump: (s.lumpSum > 0 && s.lumpYM) ? { amount: s.lumpSum, ym: s.lumpYM } : null,
+    stepUp: (s.stepPct > 0 && s.stepFromYM) ? { pct: s.stepPct, fromYM: s.stepFromYM, annual: true } : null
+  });
 
   if (test.months === Infinity) {
     resultEl.innerHTML = `<div class="card" style="color:#e06060;">An EMI of ${fmtMoney(newEmi)} doesn't cover the monthly interest (${fmtMoney(P*r)}). Increase the EMI.</div>`;
@@ -8148,21 +8202,22 @@ function _emiCalcRecompute() {
     return;
   }
 
-  const closeDate = _emiFmtDate(_emiAddMonths(test.months));
+  const closeLabel = _emiFmtYM(test.closeYM);
   const monthsSaved = (base.months !== Infinity) ? (base.months - test.months) : null;
   const interestSaved = (base.totalInterest !== Infinity) ? (base.totalInterest - test.totalInterest) : null;
 
   resultEl.innerHTML = `
     <div class="card">
       <div class="emi-res-head">
-        <div><div class="emi-res-label">Closes in</div><div class="emi-res-big">${test.months} <span>months</span></div><div class="emi-res-sub">around ${closeDate}</div></div>
+        <div><div class="emi-res-label">Closes by</div><div class="emi-res-big">${closeLabel}</div><div class="emi-res-sub">${test.months} EMIs from now</div></div>
         <div style="text-align:right;"><div class="emi-res-label">Total interest</div><div class="emi-res-big" style="color:#e06060;">${fmtMoney(test.totalInterest, true)}</div><div class="emi-res-sub">paid ${fmtMoney(test.totalPaid, true)} total</div></div>
       </div>
       ${(monthsSaved!=null && (monthsSaved>0 || interestSaved>0)) ? `
         <div class="emi-res-saved">
-          vs your ${fmtMoney(baseEmi||newEmi, true)} EMI: <strong>${monthsSaved>0?monthsSaved+' months':'—'}</strong> sooner · <strong>${fmtMoney(Math.max(0,interestSaved||0), true)}</strong> interest saved
+          vs your ${fmtMoney(baseEmi||newEmi, true)} EMI (closes ${_emiFmtYM(base.closeYM)}): <strong>${monthsSaved>0?monthsSaved+' months':'—'}</strong> sooner · <strong>${fmtMoney(Math.max(0,interestSaved||0), true)}</strong> interest saved
         </div>` : ''}
-      ${s.lumpSum>0 ? `<div class="emi-res-saved" style="background:var(--accent-soft);">Includes a one-time prepayment of ${fmtMoney(s.lumpSum, true)} in month ${s.lumpMonth+1}.</div>` : ''}
+      ${s.lumpSum>0 && s.lumpYM ? `<div class="emi-res-saved" style="background:var(--accent-soft);">Includes a one-time prepayment of ${fmtMoney(s.lumpSum, true)} in ${_emiFmtYM(s.lumpYM)}.</div>` : ''}
+      ${s.stepPct>0 && s.stepFromYM ? `<div class="emi-res-saved" style="background:var(--accent-soft);">Includes an annual EMI step-up of ${s.stepPct}% from ${_emiFmtYM(s.stepFromYM)}.</div>` : ''}
       <div class="emi-res-actions">
         <button class="btn ghost" id="emiToggleTable">${_emiCalcState.showTable?'Hide':'Show'} amortization schedule</button>
         ${s.loanId!=='' ? `<button class="btn" id="emiApplyBtn">Apply to projection</button>` : `<span style="font-size:11.5px;color:var(--ink-muted);font-style:italic;align-self:center;">Load one of your loans to apply this to your plan.</span>`}
@@ -8174,7 +8229,7 @@ function _emiCalcRecompute() {
   if (toggle) toggle.addEventListener('click', () => { _emiCalcState.showTable = !_emiCalcState.showTable; _emiCalcRecompute(); });
 
   const applyBtn = document.getElementById('emiApplyBtn');
-  if (applyBtn) applyBtn.addEventListener('click', () => _emiApplyToProjection(test.months));
+  if (applyBtn) applyBtn.addEventListener('click', () => _emiApplyToProjection(test));
 
   const restoreBtn = document.getElementById('emiRestoreBtn');
   if (restoreBtn) restoreBtn.addEventListener('click', () => _emiRestoreOriginal());
@@ -8182,14 +8237,14 @@ function _emiCalcRecompute() {
   if (tableEl) {
     if (_emiCalcState.showTable) {
       const rows = test.sched.map(row => `<tr>
-        <td>${row.m}</td>
+        <td>${_emiFmtYM(row.ym)}</td>
         <td>${fmtMoney(row.opening, true)}</td>
-        <td>${fmtMoney(row.emi, true)}</td>
+        <td>${fmtMoney(row.emi, true)}${row.prepay>0?` <span style="color:var(--gold-bright);font-size:10px;">+prepay</span>`:''}</td>
         <td style="color:#e06060;">${fmtMoney(row.interest, true)}</td>
         <td>${fmtMoney(row.principal, true)}</td>
         <td>${fmtMoney(row.closing, true)}</td>
       </tr>`).join('');
-      tableEl.innerHTML = `<div class="card" style="overflow-x:auto;"><table class="emi-amort"><thead><tr><th>#</th><th>Opening</th><th>Payment</th><th>Interest</th><th>Principal</th><th>Closing</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      tableEl.innerHTML = `<div class="card" style="overflow-x:auto;max-height:480px;"><table class="emi-amort"><thead><tr><th>Month</th><th>Opening</th><th>Payment</th><th>Interest</th><th>Principal</th><th>Closing</th></tr></thead><tbody>${rows}</tbody></table></div>`;
     } else {
       tableEl.innerHTML = '';
     }
@@ -8215,27 +8270,38 @@ function _emiRestoreOriginal() {
   alert('Restored "' + e.name + '" to its original schedule.');
 }
 
-function _emiApplyToProjection(payoffMonths) {
+function _emiApplyToProjection(test) {
   const s = _emiCalcState;
   if (s.loanId === '') return;
   const e = state.emis[Number(s.loanId)];
   if (!e) return;
   const newEmi = s.newEmi || 0;
   if (newEmi <= 0) { alert('Enter a valid new EMI first.'); return; }
-  // current month
-  const d = new Date();
-  const nowYM = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-  // payoff month = now + payoffMonths
-  const pd = new Date(); pd.setDate(1); pd.setMonth(pd.getMonth() + Math.ceil(payoffMonths));
-  const closeYM = pd.getFullYear() + '-' + String(pd.getMonth()+1).padStart(2,'0');
+  const nowYM = _emiCurrentYM();
+  const closeYM = test && test.closeYM ? test.closeYM : _emiShiftYM(nowYM, Math.ceil((test&&test.months)||0));
 
-  const summary = `Apply to "${e.name}":\n\n• Set EMI to ${fmtMoney(newEmi)} from ${nowYM}\n• Loan closes around ${closeYM} (${Math.ceil(payoffMonths)} months)\n\nThis updates your Projection & Net Worth. You can Restore the original anytime from this button.`;
+  // Build the events this plan implies.
+  const newEvents = [];
+  newEvents.push({ type: 'setAmount', month: nowYM, amount: newEmi, source: 'emiCalc' });
+  // Annual step-up → a setAmount event on each anniversary up to the close month.
+  let stepNote = '';
+  if (s.stepPct > 0 && s.stepFromYM) {
+    let ym = s.stepFromYM;
+    let n = 1;
+    while (ym <= closeYM && n <= 40) {
+      const amt = Math.round(newEmi * Math.pow(1 + s.stepPct/100, n));
+      newEvents.push({ type: 'setAmount', month: ym, amount: amt, source: 'emiCalc' });
+      ym = _emiShiftYM(ym, 12); n++;
+    }
+    stepNote = `\n• Annual step-up ${s.stepPct}% from ${_emiFmtYM(s.stepFromYM)}`;
+  }
+  newEvents.push({ type: 'close', month: closeYM, source: 'emiCalc' });
+
+  const summary = `Apply to "${e.name}":\n\n• Set EMI to ${fmtMoney(newEmi)} from ${_emiFmtYM(nowYM)}${stepNote}\n• Loan closes by ${_emiFmtYM(closeYM)} (${(test&&test.months)||0} EMIs)\n\nNote: a one-time lump prepayment is not written as an EMI change — log it as a redemption/expense separately if you make it.\n\nThis updates your Projection & Net Worth. You can Restore the original anytime.`;
   if (!confirm(summary)) return;
 
-  // Remove any prior emiCalc-applied events, then add the new ones (tagged).
   e.events = (e.events || []).filter(ev => ev.source !== 'emiCalc');
-  e.events.push({ type: 'setAmount', month: nowYM, amount: newEmi, source: 'emiCalc' });
-  e.events.push({ type: 'close', month: closeYM, source: 'emiCalc' });
+  e.events.push(...newEvents);
   e.events.sort((a,b)=>(a.month||'')<(b.month||'')?-1:1);
   scheduleSave();
   if (typeof renderAll === 'function') renderAll();
