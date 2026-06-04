@@ -313,6 +313,19 @@ input::placeholder { color: var(--ink-muted); }
   transition: background-color var(--motion-quick), border-color var(--motion-quick), color var(--motion-quick);
 }
 .del-btn:hover { background: rgba(224,96,96,0.10); border-color: var(--red); color: var(--red); }
+.sc-timeline-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-muted);
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  transition: background-color var(--motion-quick), border-color var(--motion-quick), color var(--motion-quick);
+}
+.sc-timeline-btn:hover { background: var(--accent-soft); border-color: var(--gold); color: var(--gold-bright); }
+.sc-timeline-btn.has-events { border-color: var(--gold); color: var(--gold-bright); background: var(--accent-soft); }
 .add-btn { background: transparent; border: 1px dashed var(--line); color: var(--ink-dim); padding: 10px; border-radius: 6px; cursor: pointer; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 500; margin-top: 4px; transition: all 0.15s; }
 .add-btn:hover { border-color: var(--gold); color: var(--gold-bright); border-style: solid; }
 .subsection { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line-soft); }
@@ -1742,6 +1755,19 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       </div>
     </div>
 
+    <div class="tx-modal-overlay" id="timelineModal">
+      <div class="tx-modal" style="max-width:520px;">
+        <div class="tx-modal-head"><div class="tx-modal-title" id="timelineTitle">Manage timeline</div><button class="tx-modal-close" data-timeline-close>×</button></div>
+        <div class="tx-modal-body">
+          <div id="timelineFields"></div>
+        </div>
+        <div class="tx-modal-foot">
+          <button class="btn ghost" data-timeline-close>Cancel</button>
+          <button class="btn" id="timelineSave">Save timeline</button>
+        </div>
+      </div>
+    </div>
+
     <section class="section" id="settings">
       <h1 class="section-title">Rates &amp; <em>assumptions</em>.</h1>
       <p class="section-sub">Every return rate governing the projection. Change any figure — everything recomputes.</p>
@@ -1986,7 +2012,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.56';
+const APP_VERSION = '2026.05.04.57';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -2205,7 +2231,15 @@ function migrateState(s) {
     delete s.lastAutoSweepThrough;
   }
 
-  s.schemaVersion = 10;
+  // Schema v11: instrument lifecycle. EMIs and investments gain an optional `events`
+  // array (effective-dated changes: setAmount / pause / resume / close). No data
+  // transformation needed — just ensure the field is a valid array where present.
+  if ((s.schemaVersion || 0) < 11) {
+    (s.investments || []).forEach(inv => { if (!Array.isArray(inv.events)) inv.events = []; });
+    (s.emis || []).forEach(e => { if (!Array.isArray(e.events)) e.events = []; });
+  }
+
+  s.schemaVersion = 11;
   return s;
 }
 
@@ -3299,7 +3333,14 @@ function addEmiRow(data={}) {
   const row = document.createElement('div');
   row.className = 'rep-row emi';
   if (data.id) row.setAttribute('data-emi-id', data.id);
-  row.innerHTML = `<div class="field"><label>Name</label><input type="text" data-field="name" placeholder="e.g. Home loan" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Monthly EMI</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="amount" min="0" step="any" value="${data.amount||''}" /></div></div><div class="field"><label>Start Month</label><input type="month" data-field="startMonth" value="${data.startMonth||state.horizonStart}" /></div><div class="field"><label>Months Left</label><input type="number" data-field="months" min="1" step="1" value="${data.months||''}" placeholder="e.g. 24" /></div><button class="del-btn" title="Remove">×</button>`;
+  row.innerHTML = `<div class="field"><label>Name</label><input type="text" data-field="name" placeholder="e.g. Home loan" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Monthly EMI</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="amount" min="0" step="any" value="${data.amount||''}" /></div></div><div class="field"><label>Start Month</label><input type="month" data-field="startMonth" value="${data.startMonth||state.horizonStart}" /></div><div class="field"><label>Months Left</label><input type="number" data-field="months" min="1" step="1" value="${data.months||''}" placeholder="e.g. 24" /></div><button class="sc-timeline-btn" type="button" title="Manage timeline (step-up / close early)" data-timeline-kind="emi">⋯</button><button class="del-btn" title="Remove">×</button>`;
+  const tbtn = row.querySelector('.sc-timeline-btn');
+  row._events = Array.isArray(data.events) ? data.events.slice() : [];
+  if (tbtn) {
+    const refreshBadge = () => { tbtn.classList.toggle('has-events', (row._events||[]).length > 0); };
+    refreshBadge();
+    tbtn.addEventListener('click', () => openTimelineEditor('emi', row, refreshBadge));
+  }
   row.querySelector('.del-btn').addEventListener('click', () => row.remove());
   document.getElementById('emiList').appendChild(row);
 }
@@ -3331,10 +3372,19 @@ function addInvestmentRow(data={}) {
   const cmToggle = row.querySelector('.toggle[data-field="compoundsMonthly"]');
   if (cmToggle) cmToggle.querySelector('.switch').addEventListener('click', () => cmToggle.classList.toggle('on'));
   if (!nameInput.value.trim()) nameInput.value = INSTRUMENT_TEMPLATES.find(t=>t.id===invId)?.name || '';
+  row._events = Array.isArray(data.events) ? data.events.slice() : [];
+  const tlBtn = document.createElement('button');
+  tlBtn.className = 'sc-timeline-btn'; tlBtn.type = 'button'; tlBtn.innerHTML = '⋯';
+  tlBtn.title = 'Manage timeline (step-up / pause / close & redeem)';
+  const refreshBadge = () => { tlBtn.classList.toggle('has-events', (row._events||[]).length > 0); };
+  refreshBadge();
+  tlBtn.addEventListener('click', () => openTimelineEditor('investment', row, refreshBadge));
   const del = document.createElement('button');
   del.className = 'del-btn'; del.innerHTML = '×'; del.title = 'Remove';
   del.addEventListener('click', () => row.remove());
-  row.insertBefore(del, row.querySelector('input[type="hidden"]'));
+  const hidden = row.querySelector('input[type="hidden"]');
+  row.insertBefore(tlBtn, hidden);
+  row.insertBefore(del, hidden);
   document.getElementById('investmentList').appendChild(row);
 }
 
@@ -3405,7 +3455,8 @@ function readEMIs() {
         const match = (state.emis || []).find(e => e.id && (e.name||'').toLowerCase() === name.toLowerCase());
         id = match ? match.id : ('emi_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6));
       }
-      result.push({ id, name, amount, startMonth, months });
+      const events = Array.isArray(row._events) ? row._events : [];
+      result.push({ id, name, amount, startMonth, months, events });
     }
   });
   return result;
@@ -3423,7 +3474,11 @@ function readInvestments() {
     const liquid = (row.querySelector('.toggle[data-field="liquid"]')||{}).classList?.contains('on') || false;
     const compoundsMonthly = (row.querySelector('.toggle[data-field="compoundsMonthly"]')||{}).classList?.contains('on') || false;
     const tmpl = INSTRUMENT_TEMPLATES.find(t => t.id === id) || INSTRUMENT_TEMPLATES[0];
-    if (name) result.push({ id, name, balance, monthlyContribution, rate, liquid, compoundsMonthly, color: tmpl.color });
+    if (name) {
+      // Lifecycle events are stored on the row element (edited via the timeline panel).
+      const events = Array.isArray(row._events) ? row._events : [];
+      result.push({ id, name, balance, monthlyContribution, rate, liquid, compoundsMonthly, color: tmpl.color, events });
+    }
   });
   return result;
 }
@@ -3819,6 +3874,45 @@ function updatePreviewBanner() {
   document.getElementById('previewScenariosList').textContent = names.length ? names.join(' + ') : '—';
 }
 
+// Resolve an instrument's lifecycle events into per-month directives over a horizon.
+// Given a sorted `events` array and the months meta, returns for each month index:
+//   { amount: <contribution/EMI this month>, active: <bool>, closeRedeem: <bool just at close month> }
+// Semantics: walk months; apply any event whose month <= current month, in order.
+//   setAmount → amount; pause → amount 0; resume → amount (or keep base); close → active false,
+//   amount 0, and flag the close month for redemption (investments).
+// baseAmount is the instrument's default monthly contribution / EMI amount.
+function resolveInstrumentTimeline(events, months, baseAmount) {
+  const n = months.length;
+  const out = new Array(n);
+  const evs = Array.isArray(events) ? events.slice().filter(e => e && e.month).sort((a, b) => a.month < b.month ? -1 : 1) : [];
+  // Find a close event, if any.
+  const closeEv = evs.find(e => e.type === 'close');
+  const closeMonth = closeEv ? closeEv.month : null;
+  let amount = Number(baseAmount) || 0;
+  let evIdx = 0;
+  for (let i = 0; i < n; i++) {
+    const ym = months[i].iso;
+    // apply non-close events effective on/before this month
+    while (evIdx < evs.length && evs[evIdx].month <= ym) {
+      const ev = evs[evIdx];
+      if (ev.type === 'setAmount') amount = Number(ev.amount) || 0;
+      else if (ev.type === 'pause') amount = 0;
+      else if (ev.type === 'resume') amount = ev.amount != null ? (Number(ev.amount) || 0) : amount;
+      // close handled separately below
+      evIdx++;
+    }
+    const isClosed = closeMonth != null && ym >= closeMonth;
+    const closeHere = closeMonth != null && ym === closeMonth;
+    out[i] = {
+      amount: isClosed ? 0 : amount,
+      active: !isClosed,
+      closeHere,           // true only on the exact close month within the horizon
+      closedBefore: closeMonth != null && closeMonth < ym && i === 0 // close predates window
+    };
+  }
+  return out;
+}
+
 function runProjection(overrides={}) {
   const horizonStart = overrides.horizonStart || state.horizonStart;
   let horizonEnd = overrides.horizonEnd || state.horizonEnd;
@@ -4049,8 +4143,18 @@ function runProjection(overrides={}) {
   (state.emis||[]).forEach(e => {
     const startIdx = months.findIndex(m => m.iso >= e.startMonth);
     if (startIdx < 0) return;
-    const endIdx = Math.min(n - 1, startIdx + e.months - 1);
-    for (let i = startIdx; i <= endIdx; i++) emiMonthly[i] += e.amount;
+    const naturalEndIdx = Math.min(n - 1, startIdx + e.months - 1);
+    if (Array.isArray(e.events) && e.events.length) {
+      // Lifecycle events present: derive the per-month EMI amount (step-up/down via setAmount,
+      // early termination via close). The natural term still caps it.
+      const tl = resolveInstrumentTimeline(e.events, months, e.amount);
+      for (let i = startIdx; i <= naturalEndIdx; i++) {
+        if (!tl[i].active) break;          // closed early → stop entirely
+        emiMonthly[i] += tl[i].amount;
+      }
+    } else {
+      for (let i = startIdx; i <= naturalEndIdx; i++) emiMonthly[i] += e.amount;
+    }
   });
 
   // ---- BASE SERIES (pre-scenario) ----
@@ -4105,6 +4209,15 @@ function runProjection(overrides={}) {
   const salaryAcc  = accounts.find(a => a.id === 'salary');
   const cashContribSeries = new Array(n);
 
+  // Per-investment lifecycle timeline (events: setAmount/pause/resume/close).
+  // Resolved once over the horizon; drives contribution + close-redemption per month.
+  const invTimeline = {};
+  investments.forEach(inv => {
+    invTimeline[inv.id + '_' + inv.name] = resolveInstrumentTimeline(inv.events, months, inv.monthlyContribution || 0);
+  });
+  // Redemption inflows per month (full balance moved to savings when an investment closes).
+  const redemptionInflow = new Array(n).fill(0);
+
   for (let i = 0; i < n; i++) {
     // Contribution multiplier: annual step-up only (expGrowthMul already encodes the annual
     // bracket — no additional monthly rate is applied to contributions here).
@@ -4113,13 +4226,27 @@ function runProjection(overrides={}) {
     let monthInvestContrib = 0;
     investments.forEach(inv => {
       const k = inv.id + '_' + inv.name;
+      const tl = invTimeline[k][i];
       // Compound the BALANCE at the investment rate monthly.
       const mRate = Math.pow(1 + Math.max(0, inv.rate), 1/12) - 1;
-      // Contribution is constant within each annual bracket (linear accumulation).
-      const contrib = (inv.monthlyContribution || 0) * contribMul;
+      // Contribution this month comes from the lifecycle timeline (honors step-up/pause/close),
+      // then scaled by the growth/scenario multiplier. Closed/paused months → 0.
+      const contrib = (tl.amount || 0) * contribMul;
       contribPerMonth[k].push(contrib);
       monthInvestContrib += contrib;
-      const newBal = invPrev[k] * (1 + mRate) + contrib;
+      let newBal;
+      if (tl.closeHere) {
+        // Close month: compound one last time + this month's contribution, then redeem the
+        // full balance into savings (inflow) and leave the investment at 0 going forward.
+        const beforeRedeem = invPrev[k] * (1 + mRate) + contrib;
+        redemptionInflow[i] += beforeRedeem;
+        newBal = 0;
+      } else if (!tl.active) {
+        // Closed in a prior month → stays at 0, no compounding, no contribution.
+        newBal = 0;
+      } else {
+        newBal = invPrev[k] * (1 + mRate) + contrib;
+      }
       bal[k].push(newBal);
       cumContrib[k] += contrib;
       contribSeries[k].push(cumContrib[k]);
@@ -4129,8 +4256,9 @@ function runProjection(overrides={}) {
     // Cash flow:
     //   Salary account receives inflows; settles dues + expenses.
     //   Month-end residue (surplus minus investment contributions) → savings ONLY.
+    //   Plus any investment redemption (a closed investment's balance) lands in savings.
     //   Salary account itself resets to opening balance (no accumulation, no double-counting).
-    const residual = surplus[i] - monthInvestContrib;
+    const residual = surplus[i] - monthInvestContrib + redemptionInflow[i];
     cashContribSeries[i] = residual;
 
     accounts.forEach(a => {
@@ -4175,7 +4303,7 @@ function runProjection(overrides={}) {
   const cumSurplus = []; let cs = 0;
   for (const s of surplus) { cs += s; cumSurplus.push(cs); }
 
-  return { months, labels:months.map(m=>m.label), isos:months.map(m=>m.iso), totalIncome, totalExpense, surplus, cumSurplus, emiMonthly, investments, bal, netWorth, contribSeries, contribPerMonth, accounts, accountBal, cashSeries, liabSeries, cashRate, salaryMul, expGrowthMul, p1Series, p2Series, oneOffIncSeries, expCategorySeries, oneOffExpSeries, cashContribSeries, growContrib, scenarioBreakdowns: scEffects.breakdowns };
+  return { months, labels:months.map(m=>m.label), isos:months.map(m=>m.iso), totalIncome, totalExpense, surplus, cumSurplus, emiMonthly, investments, bal, netWorth, contribSeries, contribPerMonth, accounts, accountBal, cashSeries, liabSeries, cashRate, salaryMul, expGrowthMul, p1Series, p2Series, oneOffIncSeries, expCategorySeries, oneOffExpSeries, cashContribSeries, growContrib, redemptionInflow, invTimeline, scenarioBreakdowns: scEffects.breakdowns };
 }
 
 // ---- PATCH: Fix runProjection for correct increment logic, cash balance, and opening balances ----
@@ -5019,7 +5147,8 @@ function projectSavingsChain(p) {
     return bal;
   }
 
-  // Residue routed to savings for a given month index = surplus − all investment allocations.
+  // Residue routed to savings for a given month index = surplus − all investment allocations
+  // + any investment redemption inflow (a closed investment's balance moving into savings).
   function residueForMonth(i) {
     let scheduledInv = 0, oneTimeInv = 0;
     (p.investments || []).forEach(inv => {
@@ -5028,7 +5157,8 @@ function projectSavingsChain(p) {
       if (inv.monthlyContribution > 0) scheduledInv += val;
       else oneTimeInv += val;
     });
-    return (p.surplus[i] || 0) - scheduledInv - oneTimeInv;
+    const redemption = (p.redemptionInflow || [])[i] || 0;
+    return (p.surplus[i] || 0) - scheduledInv - oneTimeInv + redemption;
   }
 
   const chain = new Array(n).fill(0);
@@ -6796,6 +6926,93 @@ function renderScenarioFields(sc) {
   return nameField;
 }
 
+// ─── Instrument timeline editor (Phase 1: lifecycle events) ────────────────────
+let _timelineCtx = null; // { kind, row, events:[], refreshBadge }
+
+function openTimelineEditor(kind, row, refreshBadge) {
+  const nameInput = row.querySelector('[data-field="name"]');
+  const label = (nameInput && nameInput.value.trim()) || (kind === 'emi' ? 'EMI' : 'Investment');
+  _timelineCtx = { kind, row, events: (row._events || []).slice(), refreshBadge };
+  document.getElementById('timelineTitle').textContent = 'Timeline · ' + label;
+  renderTimelineFields();
+  openScModal('timelineModal');
+}
+
+function renderTimelineFields() {
+  const ctx = _timelineCtx;
+  if (!ctx) return;
+  const cur = currencySymbol();
+  const isInv = ctx.kind === 'investment';
+  const evs = ctx.events.slice().sort((a, b) => (a.month || '') < (b.month || '') ? -1 : 1);
+  const typeLabels = { setAmount: 'Step up / down', pause: 'Pause', resume: 'Resume', close: isInv ? 'Close & redeem' : 'Close (end early)' };
+  const rows = evs.map((e, i) => {
+    const needsAmt = e.type === 'setAmount' || e.type === 'resume';
+    return `<div class="tl-event" data-tl-idx="${i}" style="display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);">
+      <span style="flex:0 0 auto;font-size:11px;padding:3px 8px;border-radius:10px;background:var(--accent-soft);color:var(--gold-bright);">${typeLabels[e.type]||e.type}</span>
+      <span style="flex:1;font-size:13px;color:var(--ink-dim);">${e.month||'—'}${needsAmt?' · '+fmtMoney(Number(e.amount)||0,true):''}</span>
+      <button type="button" class="del-btn" data-tl-del="${i}" style="position:static;width:24px;height:24px;">×</button>
+    </div>`;
+  }).join('');
+  document.getElementById('timelineFields').innerHTML = `
+    <div style="font-size:12.5px;color:var(--ink-muted);font-style:italic;font-family:'Fraunces',serif;margin-bottom:12px;">
+      Schedule changes over time. ${isInv ? 'Closing redeems the full balance into savings, then the investment ends.' : 'Closing ends the EMI early.'}
+    </div>
+    <div id="tlEventList" style="margin-bottom:14px;">${rows || '<div style="color:var(--ink-muted);font-size:13px;font-style:italic;padding:6px 0;">No changes scheduled yet.</div>'}</div>
+    <div style="border-top:1px solid var(--line);padding-top:14px;">
+      <div style="font-family:'Fraunces',serif;font-style:italic;color:var(--gold-bright);font-size:14px;margin-bottom:8px;">Add a change</div>
+      <div class="grid-2" style="gap:10px;">
+        <div class="field"><label>Type</label><select id="tlType">
+          <option value="setAmount">Step up / down to amount</option>
+          <option value="pause">Pause contributions</option>
+          <option value="resume">Resume at amount</option>
+          <option value="close">${isInv ? 'Close & redeem to savings' : 'Close (end early)'}</option>
+        </select></div>
+        <div class="field"><label>Effective month</label><input type="month" id="tlMonth" value="" /></div>
+        <div class="field" id="tlAmountWrap" style="grid-column:1 / -1;"><label>Amount</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" id="tlAmount" min="0" step="any" value="0" /></div></div>
+      </div>
+      <button class="btn ghost" type="button" id="tlAddBtn" style="margin-top:6px;">+ Add change</button>
+    </div>`;
+  // wire delete buttons
+  document.querySelectorAll('#tlEventList [data-tl-del]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.tlDel);
+      // because we sorted for display, map back by matching object
+      const sorted = ctx.events.slice().sort((a, b) => (a.month||'') < (b.month||'') ? -1 : 1);
+      const target = sorted[idx];
+      ctx.events = ctx.events.filter(e => e !== target);
+      renderTimelineFields();
+    });
+  });
+  // amount visibility depends on type
+  const typeSel = document.getElementById('tlType');
+  const amtWrap = document.getElementById('tlAmountWrap');
+  const syncAmt = () => { amtWrap.style.display = (typeSel.value === 'setAmount' || typeSel.value === 'resume') ? '' : 'none'; };
+  typeSel.addEventListener('change', syncAmt);
+  syncAmt();
+  document.getElementById('tlAddBtn').addEventListener('click', () => {
+    const type = typeSel.value;
+    const month = document.getElementById('tlMonth').value;
+    const amount = Number(document.getElementById('tlAmount').value) || 0;
+    if (!month) { alert('Pick an effective month for the change.'); return; }
+    if ((type === 'setAmount' || type === 'resume') && amount <= 0) { alert('Enter an amount greater than zero.'); return; }
+    if (type === 'close' && ctx.events.some(e => e.type === 'close')) { alert('There is already a close event. Remove it first to change the close month.'); return; }
+    const ev = { type, month };
+    if (type === 'setAmount' || type === 'resume') ev.amount = amount;
+    ctx.events.push(ev);
+    renderTimelineFields();
+  });
+}
+
+function saveTimelineEditor() {
+  const ctx = _timelineCtx;
+  if (!ctx) return;
+  // sort + persist onto the row; readEMIs/readInvestments will pick it up, then full recompute.
+  ctx.row._events = ctx.events.slice().sort((a, b) => (a.month||'') < (b.month||'') ? -1 : 1);
+  if (ctx.refreshBadge) ctx.refreshBadge();
+  closeScModal('timelineModal');
+  _timelineCtx = null;
+}
+
 function bindScenarioFieldHandlers(sc) {
   // Toggle handlers for sabbatical etc.
   document.querySelectorAll('#scEditFields .toggle[data-sc-toggle]').forEach(tog => {
@@ -7383,6 +7600,16 @@ function wireScenariosUI() {
     if (overlay) overlay.addEventListener('click', (e) => {
       if (e.target === overlay) { _scDraft = null; _scEditingId = null; closeScModal(id); }
     });
+  });
+  // Timeline editor modal handlers
+  const tlSave = document.getElementById('timelineSave');
+  if (tlSave) tlSave.addEventListener('click', saveTimelineEditor);
+  document.querySelectorAll('[data-timeline-close]').forEach(el => {
+    el.addEventListener('click', () => { _timelineCtx = null; closeScModal('timelineModal'); });
+  });
+  const tlOverlay = document.getElementById('timelineModal');
+  if (tlOverlay) tlOverlay.addEventListener('click', (e) => {
+    if (e.target === tlOverlay) { _timelineCtx = null; closeScModal('timelineModal'); }
   });
 }
 
