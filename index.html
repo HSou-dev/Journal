@@ -345,7 +345,12 @@ input::placeholder { color: var(--ink-muted); }
 .inst-empty { color: var(--ink-muted); font-size: 14px; font-style: italic; }
 .inst-empty a { color: var(--gold-bright); }
 .inst-history { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-.inst-hist-item { font-size: 11px; padding: 3px 8px; border-radius: 8px; background: var(--bg-elevated); color: var(--ink-dim); border: 1px solid var(--line); }
+.inst-hist-item { font-size: 11px; padding: 3px 6px 3px 8px; border-radius: 8px; background: var(--bg-elevated); color: var(--ink-dim); border: 1px solid var(--line); display: inline-flex; align-items: center; gap: 4px; }
+.inst-hist-del { background: transparent; border: none; color: var(--ink-muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; border-radius: 4px; }
+.inst-hist-del:hover { color: var(--red); background: rgba(224,96,96,0.12); }
+.inst-headline { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px; margin-bottom: 12px; background: var(--accent-soft); border-radius: 10px; }
+.inst-headline-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-muted); }
+.inst-headline-val { font-size: 18px; font-weight: 700; color: var(--gold-bright); font-family: 'JetBrains Mono', monospace; }
 .inst-action-btn { flex: 1; font-size: 13px; padding: 8px; }
 .inst-menu { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-lg); z-index: 1000; min-width: 210px; padding: 6px; }
 .inst-menu-item { display: block; width: 100%; text-align: left; background: transparent; border: none; color: var(--ink); padding: 9px 12px; border-radius: 7px; cursor: pointer; font-size: 13.5px; font-family: 'DM Sans', sans-serif; }
@@ -2045,7 +2050,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.59';
+const APP_VERSION = '2026.05.04.60';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -7045,10 +7050,28 @@ function saveTimelineEditor() {
     // Instruments page: write directly to the state object, persist, recompute, re-render.
     ctx.stateTarget.events = sorted;
     scheduleSave();
+    // If an investment now has a close event at/before the current month, materialize the
+    // full-balance redemption as a real Journal transaction (per the rule: events ≤ now
+    // become real). Future closes stay projection-only.
+    const nowYM = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
+    const closeEv = sorted.find(e => e.type === 'close');
+    const isInv = ctx.kind === 'investment';
     closeScModal('timelineModal');
+    const targetRef = ctx.stateTarget;
     _timelineCtx = null;
     if (typeof renderAll === 'function') renderAll();
     if (typeof renderInstruments === 'function') renderInstruments();
+    if (isInv && closeEv && closeEv.month <= nowYM && window.openTxModal) {
+      // Defer slightly so the timeline modal is fully closed before the tx modal opens.
+      setTimeout(() => {
+        window.openTxModal('investment_redemption', {
+          investmentId: targetRef.id,
+          amount: Number(targetRef.balance) || 0,
+          date: _todayISODate(),
+          accountId: (state.accounts.find(a=>a.id==='savings')?.id) || undefined
+        });
+      }, 120);
+    }
     return;
   }
   // Edit-my-inputs page: write onto the DOM row; readEMIs/readInvestments pick it up on Save.
@@ -7962,6 +7985,22 @@ function renderInstruments() {
   const invs = state.investments || [];
   const emis = state.emis || [];
 
+  // Projected balances/values for the CURRENT month from the engine, so the headline
+  // reflects today's value (growth + contributions to date), matching the Projection page.
+  let projInv = {}, projEmi = {}, curIdx = -1;
+  try {
+    const p = runProjection({ scenarios: activeScenariosForRender() });
+    const now = new Date();
+    const nowYM = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+    curIdx = p.isos.indexOf(nowYM);
+    if (curIdx < 0) curIdx = p.currentMonthIdx != null ? p.currentMonthIdx : 0;
+    (p.investments||[]).forEach(inv => {
+      const k = inv.id + '_' + inv.name;
+      projInv[k] = (p.bal[k] || [])[curIdx] || 0;
+    });
+    projEmi.emiMonthly = (p.emiMonthly || [])[curIdx] || 0;
+  } catch (e) { /* fall back to stored values */ }
+
   const evLabel = (e) => {
     const m = e.month || '';
     if (e.type === 'close') return `Close${m?' · '+m:''}`;
@@ -7973,17 +8012,28 @@ function renderInstruments() {
   const evHistory = (events) => {
     const evs = Array.isArray(events) ? events.slice().sort((a,b)=>(a.month||'')<(b.month||'')?-1:1) : [];
     if (!evs.length) return '';
-    return `<div class="inst-history">${evs.map(e => `<span class="inst-hist-item">${evLabel(e)}</span>`).join('')}</div>`;
+    // each item carries its original index for deletion (match by identity at delete time)
+    return `<div class="inst-history">${evs.map(e => {
+      const origIdx = events.indexOf(e);
+      return `<span class="inst-hist-item">${evLabel(e)}<button type="button" class="inst-hist-del" data-ev-idx="${origIdx}" title="Remove this change">×</button></span>`;
+    }).join('')}</div>`;
   };
 
-  const invCards = invs.map((inv, i) => `
+  const invCards = invs.map((inv, i) => {
+    const k = inv.id + '_' + inv.name;
+    const projected = projInv[k] != null ? projInv[k] : (inv.balance || 0);
+    return `
     <div class="inst-card" data-inst-kind="investment" data-inst-idx="${i}">
       <div class="inst-card-head">
         <div class="inst-name"><span class="inst-dot" style="background:${inv.color||'var(--accent)'};"></span>${escapeHtml(inv.name)}</div>
         <div class="inst-badges">${_instrumentStatusBadge(inv.events, 'investment')}</div>
       </div>
+      <div class="inst-headline">
+        <span class="inst-headline-label">Projected value now</span>
+        <span class="inst-headline-val">${fmtMoney(projected)}</span>
+      </div>
       <div class="inst-fields">
-        <div class="field"><label>Current balance</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" min="0" step="any" value="${inv.balance||0}" data-inst-field="balance" /></div></div>
+        <div class="field"><label>Starting balance</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" min="0" step="any" value="${inv.balance||0}" data-inst-field="balance" /></div></div>
         <div class="field"><label>Monthly contribution</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" min="0" step="any" value="${inv.monthlyContribution||0}" data-inst-field="monthlyContribution" /></div></div>
         <div class="field"><label>Return rate (% p.a.)</label><input type="number" min="0" max="50" step="0.05" value="${((inv.rate||0)*100).toFixed(2)}" data-inst-field="rate" /></div>
       </div>
@@ -7991,7 +8041,8 @@ function renderInstruments() {
       <div class="inst-actions">
         <button class="btn ghost inst-action-btn" data-inst-actions>Actions ▾</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   const emiCards = emis.map((e, i) => `
     <div class="inst-card" data-inst-kind="emi" data-inst-idx="${i}">
@@ -8031,7 +8082,21 @@ function renderInstruments() {
         else if (f === 'startMonth') target.startMonth = v;
         else target[f] = Number(v)||0;
         scheduleSave();
-        renderAll();        // recompute Projection + Net Worth instantly
+        renderAll();          // recompute Projection + Net Worth instantly
+        renderInstruments();  // refresh headline (projected value) on this page
+      });
+    });
+    // Delete a logged action (× on a history chip)
+    card.querySelectorAll('.inst-hist-del').forEach(btn => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const evIdx = Number(btn.dataset.evIdx);
+        if (Array.isArray(target.events) && evIdx >= 0 && evIdx < target.events.length) {
+          target.events.splice(evIdx, 1);
+          scheduleSave();
+          renderAll();
+          renderInstruments();
+        }
       });
     });
     // Actions menu (Redeem / Step up / Pause / Close)
@@ -8106,27 +8171,10 @@ function handleInstrumentAction(act, kind, idx) {
   }
 
   if (act === 'close') {
-    const eff = (prompt('Close month (YYYY-MM)? Leave as-is for this month.', nowYM) || nowYM).trim();
-    if (!/^\d{4}-\d{2}$/.test(eff)) { alert('Please use YYYY-MM format.'); return; }
-    target.events = (target.events || []).filter(e => e.type !== 'close');
-    target.events.push({ type: 'close', month: eff });
-    target.events.sort((a,b)=>(a.month||'')<(b.month||'')?-1:1);
-    scheduleSave();
-    if (kind === 'investment' && eff <= nowYM) {
-      // Materialize the redemption as a real Journal transaction now.
-      if (window.openTxModal) {
-        window.openTxModal('investment_redemption', {
-          investmentId: target.id,
-          amount: Number(target.balance) || 0,
-          date: _todayISODate(),
-          accountId: (state.accounts.find(a=>a.id==='savings')?.id) || undefined
-        });
-      }
-    } else if (kind === 'investment') {
-      alert('Scheduled to close in ' + eff + '. Its balance redeems into savings in the projection from that month (future close — no journal entry yet).');
-    }
-    if (typeof renderAll === 'function') renderAll();
-    renderInstruments();
+    // Open the timeline editor pre-set to a close event so the user picks the month via a
+    // proper calendar (month) input rather than a prompt. The auto-redeem (for current/past
+    // close months) is handled in saveTimelineEditor when the close event is committed.
+    openTimelineEditorForState(kind, target, 'close');
     return;
   }
 
