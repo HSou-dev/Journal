@@ -2113,7 +2113,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.65';
+const APP_VERSION = '2026.05.04.66';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -5255,6 +5255,8 @@ function projectSavingsChain(p) {
       } else if (tx.type === 'investment_contrib') {
         if (tx.accountId === 'savings') bal += amt;
       } else if (tx.type === 'investment_redemption') {
+        // Close-sourced redemptions are handled by the close event's redemptionInflow; skip here.
+        if (tx.source === 'instClose') return;
         if (tx.accountId === 'savings') bal -= amt;
       }
     });
@@ -5566,6 +5568,8 @@ function renderBudget() {
         const acc = (state.accounts || []).find(a => a.id === tx.accountId);
         if (acc && acc.id === 'savings') bal += amt;
       } else if (tx.type === 'investment_redemption') {
+        // Close-sourced redemptions don't touch savings (close event handles the money); skip.
+        if (tx.source === 'instClose') return;
         // Cash arrived at the destination account. If that was savings, reverse-walk subtracts.
         if (tx.accountId === 'savings') bal -= amt;
       }
@@ -5605,6 +5609,17 @@ function renderBudget() {
   // Reverse-walk investment balance: today's value − contributions made after monthYM, then undo growth.
   function _investmentAtEndOfMonth(inv, monthYM) {
     const k = inv.id + '_' + inv.name;
+    // If this investment has a close event, the close is the single source of truth:
+    //   - at/after the close month → 0
+    //   - before the close month → the engine's natural projected value (the close doesn't
+    //     touch earlier months, and inv.balance is no longer mutated by close redemptions).
+    // This avoids the reverse-walk mis-adding the close redemption into past months.
+    const closeEv = Array.isArray(inv.events) ? inv.events.find(e => e.type === 'close') : null;
+    if (closeEv && closeEv.month) {
+      if (monthYM >= closeEv.month) return 0;
+      const ei = p.isos.indexOf(monthYM);
+      if (ei >= 0 && p.bal[k]) return p.bal[k][ei] || 0;
+    }
     // Today's investment balance: the engine's value at the current-month-index, or final if today not in window.
     // We use the live engine output to define "today" — that already incorporates logged contributions
     // (via the actuals overlay we built earlier).
@@ -5693,6 +5708,7 @@ function renderBudget() {
     let total = 0;
     (state.transactions || []).forEach(tx => {
       if (tx.type !== 'investment_redemption') return;
+      if (tx.source === 'instClose') return; // close event already routes this to savings
       if (!tx.date || tx.date.slice(0, 7) !== ym) return;
       total += Number(tx.amount) || 0;
     });
@@ -8763,20 +8779,30 @@ function confirmInstrumentClose() {
   closeScModal('instCloseModal');
   _instCloseCtx = null;
 
-  // 2) For an investment closing now-or-earlier, log a REAL redemption transaction.
-  if (isInv && closeYM <= nowYM && window.openTxModal) {
-    setTimeout(() => {
-      window.openTxModal('investment_redemption', {
-        investmentId: target.id,
-        amount: redeemAmount,
-        date: _todayISODate(),
-        accountId: (state.accounts.find(a=>a.id==='savings')?.id) || undefined
-      });
-    }, 140);
+  // 2) For an investment closing now-or-earlier, create a REAL (but tagged) redemption
+  // transaction so it's visible in the Journal and instrument history. It is tagged
+  // source:'instClose' so the balance/cash math ignores it — the close event is the single
+  // money-mover (it redeems the full projected balance to savings and zeroes the instrument).
+  if (isInv && closeYM <= nowYM) {
+    const savingsAcc = (state.accounts || []).find(a => a.id === 'savings');
+    const tx = {
+      id: 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6),
+      type: 'investment_redemption',
+      investmentId: target.id,
+      amount: redeemAmount,
+      date: _todayISODate(),
+      accountId: savingsAcc ? savingsAcc.id : (state.accounts[0] && state.accounts[0].id),
+      note: 'Closed & redeemed · ' + (target.name || ''),
+      source: 'instClose'
+    };
+    state.transactions = state.transactions || [];
+    state.transactions.push(tx);
+    scheduleSave();
   }
 
   if (typeof renderAll === 'function') renderAll();
   if (typeof renderInstruments === 'function') renderInstruments();
+  if (typeof window.renderTodayPage === 'function') window.renderTodayPage();
 }
 
 // Open the timeline editor bound directly to a state object (Instruments page variant).
@@ -9164,7 +9190,11 @@ document.addEventListener('keydown', (e) => {
     } else if (tx.type === 'investment_redemption') {
       // Cash arrives at destination account; investment balance decreases by the redeemed
       // amount. Both sides are mutated live so the projection starts from corrected values.
-      // The investment balance can't go below 0 — we clamp defensively.
+      // EXCEPTION: a redemption created by "close & redeem all" (source:'instClose') is only a
+      // visible Journal record — the close lifecycle event is the single money-mover (it
+      // redeems the full projected balance to savings and zeroes the instrument). Applying the
+      // balance/cash delta here too would double-count, so we skip both sides for it.
+      if (tx.source === 'instClose') return;
       const acc = (state.accounts || []).find(a => a.id === tx.accountId);
       if (acc) acc.openingBalance += sign * tx.amount;
       const inv = (state.investments || []).find(i => i.id === tx.investmentId);
