@@ -2113,7 +2113,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.69';
+const APP_VERSION = '2026.05.04.70';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -8833,6 +8833,10 @@ function confirmInstrumentClose() {
     };
     state.transactions = state.transactions || [];
     state.transactions.push(tx);
+    // Apply the real money movement (savings up) — same as the Journal save path does.
+    // Without this, creating the redemption wouldn't bump savings, yet deleting it later would
+    // subtract — the asymmetry that left savings unchanged on close but dropping on delete.
+    if (typeof window.applyTransactionDelta === 'function') window.applyTransactionDelta(tx, +1);
     scheduleSave();
   }
 
@@ -9697,6 +9701,9 @@ document.addEventListener('keydown', (e) => {
   window.openTxModal = openTxModal;
   // Expose globally so other scripts (e.g. budget-actuals) can open the modal
   window.openTxModal = openTxModal;
+  // Exposed so non-IIFE flows (e.g. close-and-redeem on the Instruments page) can apply the
+  // same real money movement the Journal save uses.
+  window.applyTransactionDelta = applyTransactionDelta;
 
   function renderTodayPage() {
     renderAccountTiles();
