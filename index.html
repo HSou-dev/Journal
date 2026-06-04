@@ -2113,7 +2113,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.66';
+const APP_VERSION = '2026.05.04.67';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -4472,20 +4472,42 @@ function runProjection(overrides={}) {
       const k = inv.id + '_' + inv.name;
       const contribs = result.contribPerMonth[k] || [];
       const annualRate = Math.max(0, inv.rate);
+      // Lifecycle: find a close month (annual instruments are zeroed from that month, with the
+      // pre-close balance redeemed into savings). The main loop already emitted a redemption
+      // inflow using the monthly-compounding figure; for annual instruments that figure is
+      // wrong, so we correct cashContribSeries by the difference.
+      const closeEv = Array.isArray(inv.events) ? inv.events.find(e => e.type === 'close') : null;
+      const closeYM = closeEv ? closeEv.month : null;
       const newBal = new Array(n);
       let prev = inv.balance;
       let yearStartBal = inv.balance;  // balance at last anniversary (or opening, for year 1)
+      let closed = false;
       for (let i = 0; i < n; i++) {
         const meta = months[i];
+        const ym = result.isos[i];
+        if (closed) { newBal[i] = 0; continue; }
+        if (closeYM && ym === closeYM) {
+          // Credit any anniversary interest due this month, add this month's contribution,
+          // then redeem the whole balance into savings and hold 0 afterwards.
+          const contrib = contribs[i] || 0;
+          let bal = prev + contrib;
+          if (isAnniversary(meta.y, meta.m)) bal += yearStartBal * annualRate;
+          // Correct the savings inflow: remove the main loop's (monthly-formula) redemption for
+          // this month and add the correct annual-branch balance instead.
+          if (result.cashContribSeries) {
+            const wrongInflow = (result.redemptionInflow && result.redemptionInflow[i]) || 0;
+            result.cashContribSeries[i] = (result.cashContribSeries[i] || 0) - wrongInflow + bal;
+            if (result.redemptionInflow) result.redemptionInflow[i] = bal;
+          }
+          newBal[i] = 0;
+          closed = true;
+          continue;
+        }
         const contrib = contribs[i] || 0;
-        // Add contribution first (no interest on contributions until next anniversary)
         let bal = prev + contrib;
-        // Credit interest on anniversary month (skip the very first month if it happens to be
-        // the anniversary, since there's been no full year yet — only credit when we've held
-        // for ~12 months. We track this via: only credit if we're past the first anniversary.)
         if (isAnniversary(meta.y, meta.m)) {
           bal += yearStartBal * annualRate;
-          yearStartBal = bal;  // reset baseline for next year
+          yearStartBal = bal;
         }
         newBal[i] = bal;
         prev = bal;
@@ -8736,26 +8758,46 @@ function openInstrumentCloseModal(kind, idx) {
   const nowYM = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
   const cur = currencySymbol();
   document.getElementById('instCloseTitle').textContent = (isInv ? 'Close & redeem · ' : 'Close · ') + (target.name || '');
-  // For an investment, show the projected current balance as the redemption amount.
-  let projBal = Number(target.balance) || 0;
-  try {
-    const p = runProjection({ scenarios: activeScenariosForRender() });
-    const d = new Date(); const ym = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
-    let ci = p.isos.indexOf(ym); if (ci < 0) ci = 0;
-    const k = target.id + '_' + target.name;
-    if (p.bal[k]) projBal = p.bal[k][ci] || projBal;
-  } catch(e) {}
+  // The redeemed amount = the balance accumulated through the month BEFORE the close month
+  // (the close month itself gets no further contribution). Compute it from the projection for
+  // the currently-chosen close month, and keep it in sync if the user changes the month.
+  const _redeemAmountForCloseMonth = (closeYM) => {
+    try {
+      const p = runProjection({ scenarios: activeScenariosForRender() });
+      const k = target.id + '_' + target.name;
+      if (!p.bal[k]) return Number(target.balance) || 0;
+      // balance at end of the month immediately before closeYM
+      const ci = p.isos.indexOf(closeYM);
+      if (ci > 0) return p.bal[k][ci - 1] || 0;
+      if (ci === 0) return Number(target.balance) || 0; // closing at horizon start
+      // closeYM beyond horizon → last known
+      return p.bal[k][p.bal[k].length - 1] || 0;
+    } catch (e) { return Number(target.balance) || 0; }
+  };
+  let projBal = _redeemAmountForCloseMonth(nowYM);
+  document.getElementById('instCloseTitle').textContent = (isInv ? 'Close & redeem · ' : 'Close · ') + (target.name || '');
   document.getElementById('instCloseBody').innerHTML = `
     <div style="font-size:13px;color:var(--ink-dim);line-height:1.6;margin-bottom:14px;">
       ${isInv
-        ? `This closes <strong>${escapeHtml(target.name)}</strong>: contributions stop from the chosen month, the full balance is redeemed into savings, and it shows ₹0 in the projection afterwards.`
+        ? `This closes <strong>${escapeHtml(target.name)}</strong>: contributions stop from the chosen month, the balance accumulated up to the prior month is redeemed into savings, and it shows ₹0 in the projection afterwards.`
         : `This ends <strong>${escapeHtml(target.name)}</strong> early: no further EMIs from the chosen month, and it shows ₹0 in the projection afterwards.`}
     </div>
     <div class="field"><label>Close from month</label><input type="month" id="instCloseMonth" value="${nowYM}" /></div>
-    ${isInv ? `<div class="field" style="margin-top:10px;"><label>Amount to redeem into savings</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" id="instCloseAmount" min="0" step="any" value="${Math.round(projBal)}" /></div><div style="font-size:11px;color:var(--ink-muted);margin-top:4px;">Defaults to the projected balance now. Editable.</div></div>` : ''}
+    ${isInv ? `<div class="field" style="margin-top:10px;"><label>Amount to redeem into savings</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" id="instCloseAmount" min="0" step="any" value="${Math.round(projBal)}" /></div><div style="font-size:11px;color:var(--ink-muted);margin-top:4px;">Balance accumulated up to the month before close. Editable.</div></div>` : ''}
     <div style="font-size:11.5px;color:var(--ink-muted);font-style:italic;margin-top:12px;">
       ${isInv ? 'If the month is now or earlier, a redemption is logged in your Journal immediately. A future month stays projection-only until it arrives.' : 'A future month stays projection-only until it arrives.'}
     </div>`;
+  // Keep the redeem amount in sync when the close month changes.
+  if (isInv) {
+    const monthInput = document.getElementById('instCloseMonth');
+    const amtInput = document.getElementById('instCloseAmount');
+    if (monthInput && amtInput) {
+      monthInput.addEventListener('change', () => {
+        const ym = monthInput.value;
+        if (/^\d{4}-\d{2}$/.test(ym)) amtInput.value = Math.round(_redeemAmountForCloseMonth(ym));
+      });
+    }
+  }
   openScModal('instCloseModal');
 }
 
