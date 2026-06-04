@@ -2113,7 +2113,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.67';
+const APP_VERSION = '2026.05.04.69';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -4350,10 +4350,9 @@ function runProjection(overrides={}) {
       monthInvestContrib += contrib;
       let newBal;
       if (tl.closeHere) {
-        // Close month: compound one last time + this month's contribution, then redeem the
-        // full balance into savings (inflow) and leave the investment at 0 going forward.
-        const beforeRedeem = invPrev[k] * (1 + mRate) + contrib;
-        redemptionInflow[i] += beforeRedeem;
+        // Close month: stop contributions and zero the balance from here on. The actual money
+        // movement into savings is handled by the REAL redemption transaction the close created
+        // (Option A) — so we do NOT emit a redemptionInflow here (that would double-count).
         newBal = 0;
       } else if (!tl.active) {
         // Closed in a prior month → stays at 0, no compounding, no contribution.
@@ -4487,18 +4486,9 @@ function runProjection(overrides={}) {
         const ym = result.isos[i];
         if (closed) { newBal[i] = 0; continue; }
         if (closeYM && ym === closeYM) {
-          // Credit any anniversary interest due this month, add this month's contribution,
-          // then redeem the whole balance into savings and hold 0 afterwards.
-          const contrib = contribs[i] || 0;
-          let bal = prev + contrib;
-          if (isAnniversary(meta.y, meta.m)) bal += yearStartBal * annualRate;
-          // Correct the savings inflow: remove the main loop's (monthly-formula) redemption for
-          // this month and add the correct annual-branch balance instead.
-          if (result.cashContribSeries) {
-            const wrongInflow = (result.redemptionInflow && result.redemptionInflow[i]) || 0;
-            result.cashContribSeries[i] = (result.cashContribSeries[i] || 0) - wrongInflow + bal;
-            if (result.redemptionInflow) result.redemptionInflow[i] = bal;
-          }
+          // Close month: zero the balance and hold 0 afterwards. The money movement into savings
+          // is handled by the REAL redemption transaction (Option A), so we do NOT touch the cash
+          // series or redemptionInflow here.
           newBal[i] = 0;
           closed = true;
           continue;
@@ -5277,8 +5267,6 @@ function projectSavingsChain(p) {
       } else if (tx.type === 'investment_contrib') {
         if (tx.accountId === 'savings') bal += amt;
       } else if (tx.type === 'investment_redemption') {
-        // Close-sourced redemptions are handled by the close event's redemptionInflow; skip here.
-        if (tx.source === 'instClose') return;
         if (tx.accountId === 'savings') bal -= amt;
       }
     });
@@ -5286,7 +5274,8 @@ function projectSavingsChain(p) {
   }
 
   // Residue routed to savings for a given month index = surplus − all investment allocations
-  // + any investment redemption inflow (a closed investment's balance moving into savings).
+  // + redemptions that land in savings this month (real investment_redemption transactions,
+  //   e.g. from close-and-redeem; for past months these are already in the reverse-walk).
   function residueForMonth(i) {
     let scheduledInv = 0, oneTimeInv = 0;
     (p.investments || []).forEach(inv => {
@@ -5295,7 +5284,15 @@ function projectSavingsChain(p) {
       if (inv.monthlyContribution > 0) scheduledInv += val;
       else oneTimeInv += val;
     });
-    const redemption = (p.redemptionInflow || [])[i] || 0;
+    const ym = isos[i];
+    let redemption = (p.redemptionInflow || [])[i] || 0;
+    // Add real redemption transactions dated this month that land in savings.
+    (state.transactions || []).forEach(tx => {
+      if (tx.type !== 'investment_redemption') return;
+      if (tx.accountId !== 'savings') return;
+      if (!tx.date || tx.date.slice(0, 7) !== ym) return;
+      redemption += Number(tx.amount) || 0;
+    });
     return (p.surplus[i] || 0) - scheduledInv - oneTimeInv + redemption;
   }
 
@@ -5590,8 +5587,6 @@ function renderBudget() {
         const acc = (state.accounts || []).find(a => a.id === tx.accountId);
         if (acc && acc.id === 'savings') bal += amt;
       } else if (tx.type === 'investment_redemption') {
-        // Close-sourced redemptions don't touch savings (close event handles the money); skip.
-        if (tx.source === 'instClose') return;
         // Cash arrived at the destination account. If that was savings, reverse-walk subtracts.
         if (tx.accountId === 'savings') bal -= amt;
       }
@@ -5730,7 +5725,6 @@ function renderBudget() {
     let total = 0;
     (state.transactions || []).forEach(tx => {
       if (tx.type !== 'investment_redemption') return;
-      if (tx.source === 'instClose') return; // close event already routes this to savings
       if (!tx.date || tx.date.slice(0, 7) !== ym) return;
       total += Number(tx.amount) || 0;
     });
@@ -9230,15 +9224,14 @@ document.addEventListener('keydown', (e) => {
       const acc = (state.accounts || []).find(a => a.id === tx.accountId);
       if (acc) acc.openingBalance -= sign * tx.amount;
     } else if (tx.type === 'investment_redemption') {
-      // Cash arrives at destination account; investment balance decreases by the redeemed
-      // amount. Both sides are mutated live so the projection starts from corrected values.
-      // EXCEPTION: a redemption created by "close & redeem all" (source:'instClose') is only a
-      // visible Journal record — the close lifecycle event is the single money-mover (it
-      // redeems the full projected balance to savings and zeroes the instrument). Applying the
-      // balance/cash delta here too would double-count, so we skip both sides for it.
-      if (tx.source === 'instClose') return;
+      // Cash arrives at destination account; investment balance decreases by the redeemed amount.
       const acc = (state.accounts || []).find(a => a.id === tx.accountId);
       if (acc) acc.openingBalance += sign * tx.amount;
+      // For a close-and-redeem (source:'instClose'), the close lifecycle EVENT already zeroes the
+      // investment's projected balance from the close month. We must NOT also reduce inv.balance
+      // here, because inv.balance is the horizon-start seed used to project the PAST/pre-close
+      // months — slashing it would corrupt those. So we move only the cash side for instClose.
+      if (tx.source === 'instClose') return;
       const inv = (state.investments || []).find(i => i.id === tx.investmentId);
       if (inv) {
         inv.balance = Math.max(0, (Number(inv.balance) || 0) - sign * tx.amount);
