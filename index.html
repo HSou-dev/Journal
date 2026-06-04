@@ -295,7 +295,7 @@ input::placeholder { color: var(--ink-muted); }
   transition: border-color var(--motion-quick), box-shadow var(--motion-quick);
 }
 .rep-row:hover { border-color: var(--accent-glow); box-shadow: var(--shadow-sm); }
-.rep-row.emi { grid-template-columns: 2fr 1fr 1fr 1fr auto; }
+.rep-row.emi { grid-template-columns: 1.6fr 1fr 1fr 1fr 1fr 1fr auto auto; }
 .rep-row.inv { grid-template-columns: 2fr 1fr 1fr 1fr auto; }
 .rep-row.acc { grid-template-columns: 2fr 1.4fr 1.4fr auto; }
 .rep-row .field label { font-size: 9.5px; }
@@ -356,6 +356,24 @@ input::placeholder { color: var(--ink-muted); }
 .inst-menu-item { display: block; width: 100%; text-align: left; background: transparent; border: none; color: var(--ink); padding: 9px 12px; border-radius: 7px; cursor: pointer; font-size: 13.5px; font-family: 'DM Sans', sans-serif; }
 .inst-menu-item:hover { background: var(--accent-soft); color: var(--gold-bright); }
 @media (max-width: 768px) { .inst-grid { grid-template-columns: 1fr; } }
+/* ── EMI Calculator page ── */
+.emi-calc-grid { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 16px; align-items: start; }
+.emi-calc-inputs { display: flex; flex-direction: column; gap: 12px; }
+.emi-calc-result .card, .emi-calc-result > .card { min-height: 100%; }
+.emi-res-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.emi-res-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-muted); margin-bottom: 4px; }
+.emi-res-big { font-size: 30px; font-weight: 700; color: var(--gold-bright); font-family: 'JetBrains Mono', monospace; line-height: 1.05; }
+.emi-res-big span { font-size: 14px; font-weight: 500; color: var(--ink-dim); }
+.emi-res-sub { font-size: 12px; color: var(--ink-muted); margin-top: 3px; }
+.emi-res-saved { font-size: 13px; color: var(--ink-dim); background: var(--bg-elevated); border-radius: 8px; padding: 9px 12px; margin-bottom: 10px; }
+.emi-res-saved strong { color: var(--gold-bright); }
+.emi-res-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.emi-amort { width: 100%; border-collapse: collapse; font-size: 12.5px; font-family: 'JetBrains Mono', monospace; }
+.emi-amort th { text-align: right; padding: 8px 10px; color: var(--ink-muted); font-weight: 500; border-bottom: 1px solid var(--line); font-family: 'DM Sans', sans-serif; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; position: sticky; top: 0; background: var(--bg-raised); }
+.emi-amort th:first-child, .emi-amort td:first-child { text-align: left; }
+.emi-amort td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--line-soft); color: var(--ink-dim); }
+.emi-amort tbody tr:hover { background: var(--accent-soft); }
+@media (max-width: 768px) { .emi-calc-grid { grid-template-columns: 1fr; } }
 .add-btn { background: transparent; border: 1px dashed var(--line); color: var(--ink-dim); padding: 10px; border-radius: 6px; cursor: pointer; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 500; margin-top: 4px; transition: all 0.15s; }
 .add-btn:hover { border-color: var(--gold); color: var(--gold-bright); border-style: solid; }
 .subsection { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line-soft); }
@@ -1649,6 +1667,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     <div class="nav-item" data-target="scenarios"><span class="dot"></span>Scenarios</div>
     <div class="nav-label">Configure</div>
     <div class="nav-item" data-target="instruments"><span class="dot"></span>Instruments</div>
+    <div class="nav-item" data-target="emiCalc"><span class="dot"></span>EMI Calculator</div>
     <div class="nav-item" data-target="settings"><span class="dot"></span>Rates &amp; Assumptions</div>
     <div class="nav-item" data-target="editData"><span class="dot"></span>Edit my inputs</div>
   </aside>
@@ -1817,6 +1836,12 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       </div>
     </section>
 
+    <section class="section" id="emiCalc">
+      <h1 class="section-title">EMI <em>calculator</em>.</h1>
+      <p class="section-sub">Work out when any loan closes, the total interest, and how prepayments or a higher EMI speed it up. Load one of your loans or enter a custom one — then apply the result to your projection.</p>
+      <div id="emiCalcBody"></div>
+    </section>
+
     <section class="section" id="instruments">
       <h1 class="section-title">Your <em>instruments</em>.</h1>
       <p class="section-sub">Manage your investments and loans — adjust amounts, schedule step-ups, pauses, or close them out. Changes save and recompute instantly. To add a new instrument, use Edit my inputs.</p>
@@ -1854,6 +1879,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     <div class="drawer-item" data-target="scenarios">Scenarios</div>
     <div class="drawer-label">Configure</div>
     <div class="drawer-item" data-target="instruments">Instruments</div>
+    <div class="drawer-item" data-target="emiCalc">EMI Calculator</div>
     <div class="drawer-item" data-target="settings">Rates &amp; Assumptions</div>
     <div class="drawer-item" data-target="editData">Edit my inputs</div>
     <div class="drawer-label">Appearance</div>
@@ -2050,7 +2076,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.60';
+const APP_VERSION = '2026.05.04.61';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -2277,7 +2303,16 @@ function migrateState(s) {
     (s.emis || []).forEach(e => { if (!Array.isArray(e.events)) e.events = []; });
   }
 
-  s.schemaVersion = 11;
+  // Schema v12: enrich EMIs with optional outstandingPrincipal + roi (annual rate) for the
+  // loan payoff calculator and future months-left computation. Backward compatible.
+  if ((s.schemaVersion || 0) < 12) {
+    (s.emis || []).forEach(e => {
+      if (e.outstandingPrincipal == null) e.outstandingPrincipal = '';
+      if (e.roi == null) e.roi = '';
+    });
+  }
+
+  s.schemaVersion = 12;
   return s;
 }
 
@@ -3371,7 +3406,7 @@ function addEmiRow(data={}) {
   const row = document.createElement('div');
   row.className = 'rep-row emi';
   if (data.id) row.setAttribute('data-emi-id', data.id);
-  row.innerHTML = `<div class="field"><label>Name</label><input type="text" data-field="name" placeholder="e.g. Home loan" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Monthly EMI</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="amount" min="0" step="any" value="${data.amount||''}" /></div></div><div class="field"><label>Start Month</label><input type="month" data-field="startMonth" value="${data.startMonth||state.horizonStart}" /></div><div class="field"><label>Months Left</label><input type="number" data-field="months" min="1" step="1" value="${data.months||''}" placeholder="e.g. 24" /></div><button class="sc-timeline-btn" type="button" title="Manage timeline (step-up / close early)" data-timeline-kind="emi">⋯</button><button class="del-btn" title="Remove">×</button>`;
+  row.innerHTML = `<div class="field"><label>Name</label><input type="text" data-field="name" placeholder="e.g. Home loan" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Monthly EMI</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="amount" min="0" step="any" value="${data.amount||''}" /></div></div><div class="field"><label>Start Month</label><input type="month" data-field="startMonth" value="${data.startMonth||state.horizonStart}" /></div><div class="field"><label>Months Left</label><input type="number" data-field="months" min="1" step="1" value="${data.months||''}" placeholder="e.g. 24" /></div><div class="field"><label>Outstanding <span class="opt">optional</span></label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="outstandingPrincipal" min="0" step="any" value="${data.outstandingPrincipal||''}" placeholder="balance owed" /></div></div><div class="field"><label>ROI % p.a. <span class="opt">optional</span></label><input type="number" data-field="roi" min="0" max="50" step="0.05" value="${data.roi!==''&&data.roi!=null?(Number(data.roi)*100).toFixed(2):''}" placeholder="e.g. 8.25" /></div><button class="sc-timeline-btn" type="button" title="Manage timeline (step-up / close early)" data-timeline-kind="emi">⋯</button><button class="del-btn" title="Remove">×</button>`;
   const tbtn = row.querySelector('.sc-timeline-btn');
   row._events = Array.isArray(data.events) ? data.events.slice() : [];
   if (tbtn) {
@@ -3494,7 +3529,11 @@ function readEMIs() {
         id = match ? match.id : ('emi_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6));
       }
       const events = Array.isArray(row._events) ? row._events : [];
-      result.push({ id, name, amount, startMonth, months, events });
+      const outRaw = (row.querySelector('[data-field="outstandingPrincipal"]')||{}).value;
+      const roiRaw = (row.querySelector('[data-field="roi"]')||{}).value;
+      const outstandingPrincipal = outRaw !== '' && outRaw != null ? (Number(outRaw)||0) : '';
+      const roi = roiRaw !== '' && roiRaw != null ? (Number(roiRaw)||0)/100 : '';
+      result.push({ id, name, amount, startMonth, months, events, outstandingPrincipal, roi });
     }
   });
   return result;
@@ -7825,6 +7864,7 @@ function wireDashboard() {
     'scenarios':     renderScenarios,
     'settings':      renderSettings,
     'instruments':   () => { if (typeof renderInstruments === 'function') renderInstruments(); },
+    'emiCalc':       () => { if (typeof renderEmiCalc === 'function') renderEmiCalc(); },
     'editData':      () => { if (typeof renderEditGrid === 'function') renderEditGrid(); }
   };
   function activateSection(targetId) {
@@ -7978,6 +8018,231 @@ function _instrumentStatusBadge(events, kind) {
   return parts.join(' ');
 }
 
+// ─── EMI / Loan Payoff Calculator ──────────────────────────────────────────────
+// Pure amortization helpers.
+function _emiMonthsToClose(principal, emi, monthlyRate) {
+  if (principal <= 0) return 0;
+  if (monthlyRate <= 0) return emi > 0 ? principal / emi : Infinity;
+  if (emi <= principal * monthlyRate) return Infinity; // EMI doesn't cover interest
+  return -Math.log(1 - (principal * monthlyRate) / emi) / Math.log(1 + monthlyRate);
+}
+// Simulate amortization; returns schedule + totals. Optional one-time lump at lumpMonth (0-based).
+function _emiSimulate(principal, emi, monthlyRate, lumpSum, lumpMonth) {
+  const sched = [];
+  let bal = principal, months = 0, totalInterest = 0, totalPaid = 0;
+  const cap = 1200;
+  while (bal > 0.5 && months < cap) {
+    let openingExtra = 0;
+    if (lumpSum > 0 && months === (lumpMonth || 0)) {
+      const applied = Math.min(lumpSum, bal);
+      bal -= applied; totalPaid += applied; openingExtra = applied;
+      if (bal <= 0.5) { sched.push({ m: months+1, opening: bal+applied, emi: applied, interest: 0, principal: applied, closing: 0, prepay: applied }); months++; break; }
+    }
+    const interest = bal * monthlyRate;
+    let principalPaid = emi - interest;
+    if (principalPaid <= 0) return { months: Infinity, totalInterest: Infinity, totalPaid: Infinity, sched: [] };
+    const opening = bal;
+    if (principalPaid >= bal) {
+      const finalPay = bal + interest;
+      totalPaid += finalPay; totalInterest += interest;
+      sched.push({ m: months+1, opening, emi: finalPay, interest, principal: bal, closing: 0, prepay: openingExtra });
+      bal = 0; months++; break;
+    }
+    bal -= principalPaid; totalPaid += emi; totalInterest += interest;
+    sched.push({ m: months+1, opening, emi, interest, principal: principalPaid, closing: bal, prepay: openingExtra });
+    months++;
+  }
+  return { months, totalInterest, totalPaid, sched };
+}
+function _emiAddMonths(n) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + Math.ceil(n)); return d; }
+function _emiFmtDate(d) { return d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }); }
+
+let _emiCalcState = { loanId: '', principal: 0, roiPct: 8.5, baselineEmi: 0, newEmi: 0, lumpSum: 0, lumpMonth: 0, showTable: false };
+
+function renderEmiCalc() {
+  const body = document.getElementById('emiCalcBody');
+  if (!body) return;
+  const cur = currencySymbol();
+  const emis = state.emis || [];
+  const loanOpts = ['<option value="">Custom loan</option>']
+    .concat(emis.map((e,i)=>`<option value="${i}">${escapeHtml(e.name)}</option>`)).join('');
+
+  body.innerHTML = `
+    <div class="emi-calc-grid">
+      <div class="emi-calc-inputs card">
+        <div class="field"><label>Load from my loans</label><select id="emiLoanSel">${loanOpts}</select></div>
+        <div class="field"><label>Outstanding principal</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" id="emiPrincipal" min="0" step="any" value="${_emiCalcState.principal||''}" /></div></div>
+        <div class="field"><label>Interest rate (% p.a.)</label><input type="number" id="emiRoi" min="0" max="50" step="0.05" value="${_emiCalcState.roiPct||''}" /></div>
+        <div class="field"><label>Current / scheduled EMI</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" id="emiBaseline" min="0" step="any" value="${_emiCalcState.baselineEmi||''}" /></div></div>
+        <hr style="border:none;border-top:1px solid var(--line);margin:6px 0;" />
+        <div class="field"><label>New EMI to test</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" id="emiNew" min="0" step="any" value="${_emiCalcState.newEmi||''}" placeholder="e.g. 52000" /></div></div>
+        <div class="grid-2" style="gap:10px;">
+          <div class="field"><label>One-time prepayment <span class="opt">optional</span></label><div class="inline-prefix" data-prefix="${cur}"><input type="number" id="emiLump" min="0" step="any" value="${_emiCalcState.lumpSum||''}" /></div></div>
+          <div class="field"><label>In month #</label><input type="number" id="emiLumpMonth" min="1" step="1" value="${_emiCalcState.lumpMonth?(_emiCalcState.lumpMonth+1):1}" /></div>
+        </div>
+      </div>
+      <div id="emiCalcResult" class="emi-calc-result"></div>
+    </div>
+    <div id="emiCalcTableWrap" style="margin-top:18px;"></div>
+    <div style="margin-top:16px;font-size:12px;color:var(--ink-muted);font-style:italic;font-family:'Fraunces',serif;line-height:1.6;">
+      Assumes reducing-balance amortization. Prepayments here reduce the tenure (EMI unchanged), which maximises interest saved. Confirm any prepayment penalty with your lender, and remember early payoff reduces 80C / Section&nbsp;24 tax benefits if it's a home loan.
+    </div>`;
+
+  const $ = id => document.getElementById(id);
+  const loanSel = $('emiLoanSel');
+  if (_emiCalcState.loanId !== '') loanSel.value = _emiCalcState.loanId;
+
+  loanSel.addEventListener('change', () => {
+    const v = loanSel.value;
+    _emiCalcState.loanId = v;
+    if (v !== '') {
+      const e = emis[Number(v)];
+      if (e) {
+        _emiCalcState.principal = e.outstandingPrincipal !== '' && e.outstandingPrincipal != null ? Number(e.outstandingPrincipal) : 0;
+        _emiCalcState.roiPct = e.roi !== '' && e.roi != null ? (Number(e.roi)*100) : 8.5;
+        _emiCalcState.baselineEmi = Number(e.amount) || 0;
+        _emiCalcState.newEmi = Number(e.amount) || 0;
+      }
+    }
+    renderEmiCalc();
+  });
+
+  const readInputs = () => {
+    _emiCalcState.principal = Number($('emiPrincipal').value) || 0;
+    _emiCalcState.roiPct = Number($('emiRoi').value) || 0;
+    _emiCalcState.baselineEmi = Number($('emiBaseline').value) || 0;
+    _emiCalcState.newEmi = Number($('emiNew').value) || 0;
+    _emiCalcState.lumpSum = Number($('emiLump').value) || 0;
+    _emiCalcState.lumpMonth = Math.max(0, (Number($('emiLumpMonth').value) || 1) - 1);
+    _emiCalcRecompute();
+  };
+  ['emiPrincipal','emiRoi','emiBaseline','emiNew','emiLump','emiLumpMonth'].forEach(id => {
+    const el = $(id); if (el) el.addEventListener('input', readInputs);
+  });
+  _emiCalcRecompute();
+}
+
+function _emiCalcRecompute() {
+  const s = _emiCalcState;
+  const cur = currencySymbol();
+  const resultEl = document.getElementById('emiCalcResult');
+  const tableEl = document.getElementById('emiCalcTableWrap');
+  if (!resultEl) return;
+  const r = (s.roiPct/100) / 12;
+  const P = s.principal;
+  const baseEmi = s.baselineEmi || 0;
+  const newEmi = s.newEmi || baseEmi;
+
+  if (P <= 0 || newEmi <= 0) {
+    resultEl.innerHTML = `<div class="card" style="color:var(--ink-muted);font-style:italic;">Enter outstanding principal, rate, and an EMI to see the payoff.</div>`;
+    if (tableEl) tableEl.innerHTML = '';
+    return;
+  }
+
+  const base = _emiSimulate(P, baseEmi || newEmi, r, 0, 0);
+  const test = _emiSimulate(P, newEmi, r, s.lumpSum, s.lumpMonth);
+
+  if (test.months === Infinity) {
+    resultEl.innerHTML = `<div class="card" style="color:#e06060;">An EMI of ${fmtMoney(newEmi)} doesn't cover the monthly interest (${fmtMoney(P*r)}). Increase the EMI.</div>`;
+    if (tableEl) tableEl.innerHTML = '';
+    return;
+  }
+
+  const closeDate = _emiFmtDate(_emiAddMonths(test.months));
+  const monthsSaved = (base.months !== Infinity) ? (base.months - test.months) : null;
+  const interestSaved = (base.totalInterest !== Infinity) ? (base.totalInterest - test.totalInterest) : null;
+
+  resultEl.innerHTML = `
+    <div class="card">
+      <div class="emi-res-head">
+        <div><div class="emi-res-label">Closes in</div><div class="emi-res-big">${test.months} <span>months</span></div><div class="emi-res-sub">around ${closeDate}</div></div>
+        <div style="text-align:right;"><div class="emi-res-label">Total interest</div><div class="emi-res-big" style="color:#e06060;">${fmtMoney(test.totalInterest, true)}</div><div class="emi-res-sub">paid ${fmtMoney(test.totalPaid, true)} total</div></div>
+      </div>
+      ${(monthsSaved!=null && (monthsSaved>0 || interestSaved>0)) ? `
+        <div class="emi-res-saved">
+          vs your ${fmtMoney(baseEmi||newEmi, true)} EMI: <strong>${monthsSaved>0?monthsSaved+' months':'—'}</strong> sooner · <strong>${fmtMoney(Math.max(0,interestSaved||0), true)}</strong> interest saved
+        </div>` : ''}
+      ${s.lumpSum>0 ? `<div class="emi-res-saved" style="background:var(--accent-soft);">Includes a one-time prepayment of ${fmtMoney(s.lumpSum, true)} in month ${s.lumpMonth+1}.</div>` : ''}
+      <div class="emi-res-actions">
+        <button class="btn ghost" id="emiToggleTable">${_emiCalcState.showTable?'Hide':'Show'} amortization schedule</button>
+        ${s.loanId!=='' ? `<button class="btn" id="emiApplyBtn">Apply to projection</button>` : `<span style="font-size:11.5px;color:var(--ink-muted);font-style:italic;align-self:center;">Load one of your loans to apply this to your plan.</span>`}
+        ${(s.loanId!=='' && _emiLoanHasApplied(s.loanId)) ? `<button class="btn ghost" id="emiRestoreBtn" style="color:#e06060;">Restore original</button>` : ''}
+      </div>
+    </div>`;
+
+  const toggle = document.getElementById('emiToggleTable');
+  if (toggle) toggle.addEventListener('click', () => { _emiCalcState.showTable = !_emiCalcState.showTable; _emiCalcRecompute(); });
+
+  const applyBtn = document.getElementById('emiApplyBtn');
+  if (applyBtn) applyBtn.addEventListener('click', () => _emiApplyToProjection(test.months));
+
+  const restoreBtn = document.getElementById('emiRestoreBtn');
+  if (restoreBtn) restoreBtn.addEventListener('click', () => _emiRestoreOriginal());
+
+  if (tableEl) {
+    if (_emiCalcState.showTable) {
+      const rows = test.sched.map(row => `<tr>
+        <td>${row.m}</td>
+        <td>${fmtMoney(row.opening, true)}</td>
+        <td>${fmtMoney(row.emi, true)}</td>
+        <td style="color:#e06060;">${fmtMoney(row.interest, true)}</td>
+        <td>${fmtMoney(row.principal, true)}</td>
+        <td>${fmtMoney(row.closing, true)}</td>
+      </tr>`).join('');
+      tableEl.innerHTML = `<div class="card" style="overflow-x:auto;"><table class="emi-amort"><thead><tr><th>#</th><th>Opening</th><th>Payment</th><th>Interest</th><th>Principal</th><th>Closing</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    } else {
+      tableEl.innerHTML = '';
+    }
+  }
+}
+
+function _emiLoanHasApplied(loanId) {
+  if (loanId === '' || loanId == null) return false;
+  const e = state.emis[Number(loanId)];
+  return !!(e && Array.isArray(e.events) && e.events.some(ev => ev.source === 'emiCalc'));
+}
+
+function _emiRestoreOriginal() {
+  const s = _emiCalcState;
+  if (s.loanId === '') return;
+  const e = state.emis[Number(s.loanId)];
+  if (!e) return;
+  if (!confirm(`Restore "${e.name}" to its original schedule? This removes the payoff plan applied from this calculator (your manually-added timeline changes stay).`)) return;
+  e.events = (e.events || []).filter(ev => ev.source !== 'emiCalc');
+  scheduleSave();
+  if (typeof renderAll === 'function') renderAll();
+  renderEmiCalc();
+  alert('Restored "' + e.name + '" to its original schedule.');
+}
+
+function _emiApplyToProjection(payoffMonths) {
+  const s = _emiCalcState;
+  if (s.loanId === '') return;
+  const e = state.emis[Number(s.loanId)];
+  if (!e) return;
+  const newEmi = s.newEmi || 0;
+  if (newEmi <= 0) { alert('Enter a valid new EMI first.'); return; }
+  // current month
+  const d = new Date();
+  const nowYM = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  // payoff month = now + payoffMonths
+  const pd = new Date(); pd.setDate(1); pd.setMonth(pd.getMonth() + Math.ceil(payoffMonths));
+  const closeYM = pd.getFullYear() + '-' + String(pd.getMonth()+1).padStart(2,'0');
+
+  const summary = `Apply to "${e.name}":\n\n• Set EMI to ${fmtMoney(newEmi)} from ${nowYM}\n• Loan closes around ${closeYM} (${Math.ceil(payoffMonths)} months)\n\nThis updates your Projection & Net Worth. You can Restore the original anytime from this button.`;
+  if (!confirm(summary)) return;
+
+  // Remove any prior emiCalc-applied events, then add the new ones (tagged).
+  e.events = (e.events || []).filter(ev => ev.source !== 'emiCalc');
+  e.events.push({ type: 'setAmount', month: nowYM, amount: newEmi, source: 'emiCalc' });
+  e.events.push({ type: 'close', month: closeYM, source: 'emiCalc' });
+  e.events.sort((a,b)=>(a.month||'')<(b.month||'')?-1:1);
+  scheduleSave();
+  if (typeof renderAll === 'function') renderAll();
+  renderEmiCalc();
+  alert('Applied. Your projection now reflects this payoff plan for "' + e.name + '".');
+}
+
 function renderInstruments() {
   const body = document.getElementById('instrumentsBody');
   if (!body) return;
@@ -8054,6 +8319,8 @@ function renderInstruments() {
         <div class="field"><label>Monthly EMI</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" min="0" step="any" value="${e.amount||0}" data-inst-field="amount" /></div></div>
         <div class="field"><label>Start month</label><input type="month" value="${e.startMonth||''}" data-inst-field="startMonth" /></div>
         <div class="field"><label>Months (term)</label><input type="number" min="1" step="1" value="${e.months||0}" data-inst-field="months" /></div>
+        <div class="field"><label>Outstanding</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" min="0" step="any" value="${e.outstandingPrincipal!==''&&e.outstandingPrincipal!=null?e.outstandingPrincipal:''}" data-inst-field="outstandingPrincipal" placeholder="balance owed" /></div></div>
+        <div class="field"><label>ROI % p.a.</label><input type="number" min="0" max="50" step="0.05" value="${e.roi!==''&&e.roi!=null?(Number(e.roi)*100).toFixed(2):''}" data-inst-field="roi" placeholder="e.g. 8.25" /></div>
       </div>
       ${evHistory(e.events)}
       <div class="inst-actions">
@@ -8078,8 +8345,9 @@ function renderInstruments() {
       input.addEventListener('change', () => {
         const f = input.dataset.instField;
         let v = input.value;
-        if (f === 'rate') target.rate = (Number(v)||0)/100;
+        if (f === 'rate' || f === 'roi') target[f] = (Number(v)||0)/100;
         else if (f === 'startMonth') target.startMonth = v;
+        else if (f === 'outstandingPrincipal') target.outstandingPrincipal = v === '' ? '' : (Number(v)||0);
         else target[f] = Number(v)||0;
         scheduleSave();
         renderAll();          // recompute Projection + Net Worth instantly
