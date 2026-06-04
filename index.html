@@ -344,10 +344,22 @@ input::placeholder { color: var(--ink-muted); }
 .inst-timeline-btn { flex: 1; font-size: 13px; padding: 8px; }
 .inst-empty { color: var(--ink-muted); font-size: 14px; font-style: italic; }
 .inst-empty a { color: var(--gold-bright); }
-.inst-history { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-.inst-hist-item { font-size: 11px; padding: 3px 6px 3px 8px; border-radius: 8px; background: var(--bg-elevated); color: var(--ink-dim); border: 1px solid var(--line); display: inline-flex; align-items: center; gap: 4px; }
-.inst-hist-del { background: transparent; border: none; color: var(--ink-muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; border-radius: 4px; }
-.inst-hist-del:hover { color: var(--red); background: rgba(224,96,96,0.12); }
+.inst-section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.inst-add-btn { font-size: 12.5px; padding: 7px 12px; white-space: nowrap; }
+.inst-history-btn { font-size: 13px; padding: 8px 12px; }
+.inst-hist-list { display: flex; flex-direction: column; }
+.inst-hist-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+.inst-hist-row:last-child { border-bottom: none; }
+.inst-hist-main { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.inst-hist-tag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 8px; flex: 0 0 auto; }
+.inst-hist-tag.sched { background: var(--accent-soft); color: var(--gold-bright); }
+.inst-hist-tag.logged { background: var(--bg-elevated); color: var(--ink-dim); border: 1px solid var(--line); }
+.inst-hist-label { font-size: 13.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.inst-hist-meta { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.inst-hist-when { font-size: 12px; color: var(--ink-muted); font-family: 'JetBrains Mono', monospace; }
+.inst-hist-del2 { background: transparent; border: 1px solid var(--line); color: var(--ink-muted); cursor: pointer; width: 24px; height: 24px; border-radius: 50%; font-size: 14px; line-height: 1; }
+.inst-hist-del2:hover { color: var(--red); border-color: var(--red); background: rgba(224,96,96,0.1); }
+.inst-hist-viewonly { font-size: 10px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .inst-headline { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px; margin-bottom: 12px; background: var(--accent-soft); border-radius: 10px; }
 .inst-headline-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-muted); }
 .inst-headline-val { font-size: 18px; font-weight: 700; color: var(--gold-bright); font-family: 'JetBrains Mono', monospace; }
@@ -1805,6 +1817,18 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       </div>
     </div>
 
+    <div class="tx-modal-overlay" id="instHistoryModal">
+      <div class="tx-modal" style="max-width:520px;">
+        <div class="tx-modal-head"><div class="tx-modal-title" id="instHistoryTitle">History</div><button class="tx-modal-close" data-insthist-close>×</button></div>
+        <div class="tx-modal-body">
+          <div id="instHistoryBody"></div>
+        </div>
+        <div class="tx-modal-foot">
+          <button class="btn ghost" data-insthist-close>Close</button>
+        </div>
+      </div>
+    </div>
+
     <div class="tx-modal-overlay" id="instCloseModal">
       <div class="tx-modal" style="max-width:440px;">
         <div class="tx-modal-head"><div class="tx-modal-title" id="instCloseTitle">Close instrument</div><button class="tx-modal-close" data-instclose-cancel>×</button></div>
@@ -2089,7 +2113,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.64';
+const APP_VERSION = '2026.05.04.65';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -7743,6 +7767,14 @@ function wireScenariosUI() {
   if (icOverlay) icOverlay.addEventListener('click', (e) => {
     if (e.target === icOverlay) { _instCloseCtx = null; closeScModal('instCloseModal'); }
   });
+  // Instrument history modal handlers
+  document.querySelectorAll('[data-insthist-close]').forEach(el => {
+    el.addEventListener('click', () => { _instHistoryCtx = null; closeScModal('instHistoryModal'); });
+  });
+  const ihOverlay = document.getElementById('instHistoryModal');
+  if (ihOverlay) ihOverlay.addEventListener('click', (e) => {
+    if (e.target === ihOverlay) { _instHistoryCtx = null; closeScModal('instHistoryModal'); }
+  });
 }
 
 function renderCharts() {
@@ -8355,22 +8387,18 @@ function renderInstruments() {
     projEmi.emiMonthly = (p.emiMonthly || [])[curIdx] || 0;
   } catch (e) { /* fall back to stored values */ }
 
-  const evLabel = (e) => {
-    const m = e.month || '';
-    if (e.type === 'close') return `Close${m?' · '+m:''}`;
-    if (e.type === 'setAmount') return `Step to ${fmtMoney(Number(e.amount)||0,true)}${m?' · '+m:''}`;
-    if (e.type === 'pause') return `Pause${m?' · '+m:''}`;
-    if (e.type === 'resume') return `Resume ${fmtMoney(Number(e.amount)||0,true)}${m?' · '+m:''}`;
-    return e.type + (m?' · '+m:'');
+  // Journal money-movements (contrib/redemption) for a given investment id.
+  const txnsForInvestment = (invId) => (state.transactions || [])
+    .filter(t => t && (t.type === 'investment_contrib' || t.type === 'investment_redemption') && t.investmentId === invId);
+
+  const historyCount = (target, kind) => {
+    const evN = Array.isArray(target.events) ? target.events.length : 0;
+    const txN = kind === 'investment' ? txnsForInvestment(target.id).length : 0;
+    return evN + txN;
   };
-  const evHistory = (events) => {
-    const evs = Array.isArray(events) ? events.slice().sort((a,b)=>(a.month||'')<(b.month||'')?-1:1) : [];
-    if (!evs.length) return '';
-    // each item carries its original index for deletion (match by identity at delete time)
-    return `<div class="inst-history">${evs.map(e => {
-      const origIdx = events.indexOf(e);
-      return `<span class="inst-hist-item">${evLabel(e)}<button type="button" class="inst-hist-del" data-ev-idx="${origIdx}" title="Remove this change">×</button></span>`;
-    }).join('')}</div>`;
+  const historyBtn = (target, kind) => {
+    const n = historyCount(target, kind);
+    return `<button type="button" class="btn ghost inst-history-btn" data-inst-history>History${n?` · ${n}`:''}</button>`;
   };
 
   const invCards = invs.map((inv, i) => {
@@ -8391,8 +8419,8 @@ function renderInstruments() {
         <div class="field"><label>Monthly contribution</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" min="0" step="any" value="${inv.monthlyContribution||0}" data-inst-field="monthlyContribution" /></div></div>
         <div class="field"><label>Return rate (% p.a.)</label><input type="number" min="0" max="50" step="0.05" value="${((inv.rate||0)*100).toFixed(2)}" data-inst-field="rate" /></div>
       </div>
-      ${evHistory(inv.events)}
       <div class="inst-actions">
+        ${historyBtn(inv, 'investment')}
         <button class="btn ghost inst-action-btn" data-inst-actions>Actions ▾</button>
       </div>
     </div>`;
@@ -8411,17 +8439,23 @@ function renderInstruments() {
         <div class="field"><label>Outstanding</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" min="0" step="any" value="${e.outstandingPrincipal!==''&&e.outstandingPrincipal!=null?e.outstandingPrincipal:''}" data-inst-field="outstandingPrincipal" placeholder="balance owed" /></div></div>
         <div class="field"><label>ROI % p.a.</label><input type="number" min="0" max="50" step="0.05" value="${e.roi!==''&&e.roi!=null?(Number(e.roi)*100).toFixed(2):''}" data-inst-field="roi" placeholder="e.g. 8.25" /></div>
       </div>
-      ${evHistory(e.events)}
       <div class="inst-actions">
+        ${historyBtn(e, 'emi')}
         <button class="btn ghost inst-action-btn" data-inst-actions>Actions ▾</button>
       </div>
     </div>`).join('');
 
   body.innerHTML = `
-    <div class="inst-section-title">Investments</div>
-    ${invs.length ? `<div class="inst-grid">${invCards}</div>` : `<p class="inst-empty">No investments yet. Add them in <a href="#" data-goto-edit>Edit my inputs</a>.</p>`}
-    <div class="inst-section-title" style="margin-top:28px;">Loans &amp; EMIs</div>
-    ${emis.length ? `<div class="inst-grid">${emiCards}</div>` : `<p class="inst-empty">No EMIs yet. Add them in <a href="#" data-goto-edit>Edit my inputs</a>.</p>`}
+    <div class="inst-section-head">
+      <div class="inst-section-title">Investments</div>
+      <button class="btn ghost inst-add-btn" data-inst-new="investment">+ New investment</button>
+    </div>
+    ${invs.length ? `<div class="inst-grid">${invCards}</div>` : `<p class="inst-empty">No investments yet — add one above, or in <a href="#" data-goto-edit>Edit my inputs</a>.</p>`}
+    <div class="inst-section-head" style="margin-top:28px;">
+      <div class="inst-section-title">Loans &amp; EMIs</div>
+      <button class="btn ghost inst-add-btn" data-inst-new="emi">+ New loan / EMI</button>
+    </div>
+    ${emis.length ? `<div class="inst-grid">${emiCards}</div>` : `<p class="inst-empty">No EMIs yet — add one above, or in <a href="#" data-goto-edit>Edit my inputs</a>.</p>`}
   `;
 
   // Immediate-save field edits
@@ -8443,20 +8477,13 @@ function renderInstruments() {
         renderInstruments();  // refresh headline (projected value) on this page
       });
     });
-    // Delete a logged action (× on a history chip)
-    card.querySelectorAll('.inst-hist-del').forEach(btn => {
-      btn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        const evIdx = Number(btn.dataset.evIdx);
-        if (Array.isArray(target.events) && evIdx >= 0 && evIdx < target.events.length) {
-          target.events.splice(evIdx, 1);
-          scheduleSave();
-          renderAll();
-          renderInstruments();
-        }
-      });
+    // History button → opens unified history modal
+    const hbtn = card.querySelector('[data-inst-history]');
+    if (hbtn) hbtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      openInstrumentHistory(kind, idx);
     });
-    // Actions menu (Redeem / Step up / Pause / Close)
+    // Actions menu (Add funds / Redeem / Step up / Pause / Close)
     const abtn = card.querySelector('[data-inst-actions]');
     if (abtn) abtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -8467,6 +8494,35 @@ function renderInstruments() {
   body.querySelectorAll('[data-goto-edit]').forEach(a => {
     a.addEventListener('click', (e) => { e.preventDefault(); activateSection('editData'); });
   });
+  body.querySelectorAll('[data-inst-new]').forEach(btn => {
+    btn.addEventListener('click', () => _instAddNew(btn.dataset.instNew));
+  });
+}
+
+// Create a new instrument from the Instruments page, then scroll to its card to edit inline.
+function _instAddNew(kind) {
+  if (kind === 'investment') {
+    const tmpl = (typeof INSTRUMENT_TEMPLATES !== 'undefined' && INSTRUMENT_TEMPLATES[0]) || { id:'fd', name:'New FD', defaultRate:0.07, color:'#6a9fb5' };
+    // Prefer an FD template if present (common case for this flow).
+    const fd = (typeof INSTRUMENT_TEMPLATES !== 'undefined') ? INSTRUMENT_TEMPLATES.find(t => /fd|fixed/i.test(t.id) || /fd|fixed/i.test(t.name)) : null;
+    const use = fd || tmpl;
+    state.investments = state.investments || [];
+    state.investments.push({
+      id: use.id, name: use.name || 'New investment', balance: 0, monthlyContribution: 0,
+      rate: use.defaultRate || 0.07, liquid: use.defaultLiquid ?? false, compoundsMonthly: false,
+      color: use.color || 'var(--accent)', events: []
+    });
+  } else {
+    state.emis = state.emis || [];
+    const nowYM = (() => { const d = new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); })();
+    state.emis.push({
+      id: 'emi_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6),
+      name: 'New loan', amount: 0, startMonth: nowYM, months: 12, events: [], outstandingPrincipal: '', roi: ''
+    });
+  }
+  scheduleSave();
+  if (typeof renderAll === 'function') renderAll();
+  renderInstruments();
 }
 
 function _todayISODate() {
@@ -8483,6 +8539,7 @@ function openInstrumentActionsMenu(anchorBtn, kind, idx) {
   if (!target) return;
   const isInv = kind === 'investment';
   const items = [];
+  if (isInv) items.push({ key: 'addfunds', label: '+ Add funds (invest)' });
   if (isInv) items.push({ key: 'redeem', label: '− Redeem (cash out)' });
   items.push({ key: 'stepup', label: '↗ Step up / down' });
   items.push({ key: 'pause', label: '❚❚ Pause contributions' });
@@ -8539,6 +8596,17 @@ function handleInstrumentAction(act, kind, idx) {
   if (!target) return;
   const nowYM = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
 
+  if (act === 'addfunds') {
+    if (window.openTxModal) {
+      window.openTxModal('investment_contrib', {
+        investmentId: target.id,
+        date: _todayISODate(),
+        accountId: (state.accounts.find(a=>a.id==='savings')?.id) || undefined
+      });
+    }
+    return;
+  }
+
   if (act === 'redeem') {
     if (window.openTxModal) {
       window.openTxModal('investment_redemption', {
@@ -8558,6 +8626,88 @@ function handleInstrumentAction(act, kind, idx) {
 
   // step up / pause / resume → timeline editor, optionally preset to that event type
   openTimelineEditorForState(kind, target, act);
+}
+
+// Unified history modal for an instrument: lifecycle events (deletable here) +
+// journal money-movements (contrib/redemption — view-only; delete from the Journal).
+let _instHistoryCtx = null;
+function openInstrumentHistory(kind, idx) {
+  const target = kind === 'investment' ? state.investments[idx] : state.emis[idx];
+  if (!target) return;
+  _instHistoryCtx = { kind, idx, target };
+  document.getElementById('instHistoryTitle').textContent = 'History · ' + (target.name || '');
+  renderInstrumentHistoryBody();
+  openScModal('instHistoryModal');
+}
+
+function renderInstrumentHistoryBody() {
+  const ctx = _instHistoryCtx;
+  if (!ctx) return;
+  const { kind, target } = ctx;
+  const isInv = kind === 'investment';
+  const items = [];
+
+  // Lifecycle events (scheduled changes) — deletable.
+  (target.events || []).forEach((e, i) => {
+    let label;
+    if (e.type === 'close') label = isInv ? 'Close & redeem' : 'Close (end early)';
+    else if (e.type === 'setAmount') label = 'Step to ' + fmtMoney(Number(e.amount)||0, true);
+    else if (e.type === 'pause') label = 'Pause contributions';
+    else if (e.type === 'resume') label = 'Resume ' + fmtMoney(Number(e.amount)||0, true);
+    else label = e.type;
+    items.push({ sortKey: (e.month||'') + '-01', when: e.month || '', label, kind: 'event', evIdx: i, tag: 'Scheduled' });
+  });
+
+  // Journal money-movements (investments only) — view-only here.
+  if (isInv) {
+    (state.transactions || [])
+      .filter(t => t && (t.type === 'investment_contrib' || t.type === 'investment_redemption') && t.investmentId === target.id)
+      .forEach(t => {
+        const isContrib = t.type === 'investment_contrib';
+        items.push({
+          sortKey: t.date || '',
+          when: t.date || '',
+          label: (isContrib ? '+ Invested ' : '− Redeemed ') + fmtMoney(Number(t.amount)||0, true) + (t.note ? ' · ' + escapeHtml(t.note) : ''),
+          kind: 'txn', tag: 'Logged', amtClass: isContrib ? 'neg' : 'pos'
+        });
+      });
+  }
+
+  items.sort((a,b) => (a.sortKey < b.sortKey ? 1 : -1)); // most recent first
+
+  const rows = items.length ? items.map(it => `
+    <div class="inst-hist-row">
+      <div class="inst-hist-main">
+        <span class="inst-hist-tag ${it.kind==='txn'?'logged':'sched'}">${it.tag}</span>
+        <span class="inst-hist-label">${it.label}</span>
+      </div>
+      <div class="inst-hist-meta">
+        <span class="inst-hist-when">${it.kind==='txn' ? (it.when||'') : (_emiFmtYM ? _emiFmtYM(it.when) : it.when)}</span>
+        ${it.kind === 'event'
+          ? `<button type="button" class="inst-hist-del2" data-ev-del="${it.evIdx}" title="Remove this scheduled change">×</button>`
+          : `<span class="inst-hist-viewonly" title="Money movements are managed in the Journal">Journal</span>`}
+      </div>
+    </div>`).join('') : `<p class="inst-empty">No history yet.</p>`;
+
+  document.getElementById('instHistoryBody').innerHTML = `
+    <div style="font-size:12px;color:var(--ink-muted);font-style:italic;font-family:'Fraunces',serif;margin-bottom:12px;">
+      Scheduled changes (step-ups, pauses, closes) can be removed here. Logged money movements (invest / redeem) are real transactions — edit or delete them from the Journal.
+    </div>
+    <div class="inst-hist-list">${rows}</div>`;
+
+  // Wire deletes for lifecycle events.
+  document.querySelectorAll('#instHistoryBody [data-ev-del]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const evIdx = Number(btn.dataset.evDel);
+      if (Array.isArray(target.events) && evIdx >= 0 && evIdx < target.events.length) {
+        target.events.splice(evIdx, 1);
+        scheduleSave();
+        if (typeof renderAll === 'function') renderAll();
+        renderInstrumentHistoryBody();   // refresh modal
+        renderInstruments();             // refresh card counts behind it
+      }
+    });
+  });
 }
 
 // Dedicated close-and-redeem modal: one clear flow (pick month → confirm).
