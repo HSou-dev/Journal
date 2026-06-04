@@ -1805,6 +1805,19 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       </div>
     </div>
 
+    <div class="tx-modal-overlay" id="instCloseModal">
+      <div class="tx-modal" style="max-width:440px;">
+        <div class="tx-modal-head"><div class="tx-modal-title" id="instCloseTitle">Close instrument</div><button class="tx-modal-close" data-instclose-cancel>×</button></div>
+        <div class="tx-modal-body">
+          <div id="instCloseBody"></div>
+        </div>
+        <div class="tx-modal-foot">
+          <button class="btn ghost" data-instclose-cancel>Cancel</button>
+          <button class="btn" id="instCloseConfirm">Close &amp; redeem</button>
+        </div>
+      </div>
+    </div>
+
     <div class="tx-modal-overlay" id="timelineModal">
       <div class="tx-modal" style="max-width:520px;">
         <div class="tx-modal-head"><div class="tx-modal-title" id="timelineTitle">Manage timeline</div><button class="tx-modal-close" data-timeline-close>×</button></div>
@@ -2076,7 +2089,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.63';
+const APP_VERSION = '2026.05.04.64';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -7720,6 +7733,16 @@ function wireScenariosUI() {
   if (tlOverlay) tlOverlay.addEventListener('click', (e) => {
     if (e.target === tlOverlay) { _timelineCtx = null; closeScModal('timelineModal'); }
   });
+  // Instrument close-and-redeem modal handlers
+  const icConfirm = document.getElementById('instCloseConfirm');
+  if (icConfirm) icConfirm.addEventListener('click', confirmInstrumentClose);
+  document.querySelectorAll('[data-instclose-cancel]').forEach(el => {
+    el.addEventListener('click', () => { _instCloseCtx = null; closeScModal('instCloseModal'); });
+  });
+  const icOverlay = document.getElementById('instCloseModal');
+  if (icOverlay) icOverlay.addEventListener('click', (e) => {
+    if (e.target === icOverlay) { _instCloseCtx = null; closeScModal('instCloseModal'); }
+  });
 }
 
 function renderCharts() {
@@ -8529,15 +8552,81 @@ function handleInstrumentAction(act, kind, idx) {
   }
 
   if (act === 'close') {
-    // Open the timeline editor pre-set to a close event so the user picks the month via a
-    // proper calendar (month) input rather than a prompt. The auto-redeem (for current/past
-    // close months) is handled in saveTimelineEditor when the close event is committed.
-    openTimelineEditorForState(kind, target, 'close');
+    openInstrumentCloseModal(kind, idx);
     return;
   }
 
   // step up / pause / resume → timeline editor, optionally preset to that event type
   openTimelineEditorForState(kind, target, act);
+}
+
+// Dedicated close-and-redeem modal: one clear flow (pick month → confirm).
+let _instCloseCtx = null;
+function openInstrumentCloseModal(kind, idx) {
+  const target = kind === 'investment' ? state.investments[idx] : state.emis[idx];
+  if (!target) return;
+  _instCloseCtx = { kind, idx, target };
+  const isInv = kind === 'investment';
+  const nowYM = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
+  const cur = currencySymbol();
+  document.getElementById('instCloseTitle').textContent = (isInv ? 'Close & redeem · ' : 'Close · ') + (target.name || '');
+  // For an investment, show the projected current balance as the redemption amount.
+  let projBal = Number(target.balance) || 0;
+  try {
+    const p = runProjection({ scenarios: activeScenariosForRender() });
+    const d = new Date(); const ym = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    let ci = p.isos.indexOf(ym); if (ci < 0) ci = 0;
+    const k = target.id + '_' + target.name;
+    if (p.bal[k]) projBal = p.bal[k][ci] || projBal;
+  } catch(e) {}
+  document.getElementById('instCloseBody').innerHTML = `
+    <div style="font-size:13px;color:var(--ink-dim);line-height:1.6;margin-bottom:14px;">
+      ${isInv
+        ? `This closes <strong>${escapeHtml(target.name)}</strong>: contributions stop from the chosen month, the full balance is redeemed into savings, and it shows ₹0 in the projection afterwards.`
+        : `This ends <strong>${escapeHtml(target.name)}</strong> early: no further EMIs from the chosen month, and it shows ₹0 in the projection afterwards.`}
+    </div>
+    <div class="field"><label>Close from month</label><input type="month" id="instCloseMonth" value="${nowYM}" /></div>
+    ${isInv ? `<div class="field" style="margin-top:10px;"><label>Amount to redeem into savings</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" id="instCloseAmount" min="0" step="any" value="${Math.round(projBal)}" /></div><div style="font-size:11px;color:var(--ink-muted);margin-top:4px;">Defaults to the projected balance now. Editable.</div></div>` : ''}
+    <div style="font-size:11.5px;color:var(--ink-muted);font-style:italic;margin-top:12px;">
+      ${isInv ? 'If the month is now or earlier, a redemption is logged in your Journal immediately. A future month stays projection-only until it arrives.' : 'A future month stays projection-only until it arrives.'}
+    </div>`;
+  openScModal('instCloseModal');
+}
+
+function confirmInstrumentClose() {
+  const ctx = _instCloseCtx;
+  if (!ctx) return;
+  const { kind, target } = ctx;
+  const isInv = kind === 'investment';
+  const monthEl = document.getElementById('instCloseMonth');
+  const closeYM = monthEl ? monthEl.value : '';
+  if (!/^\d{4}-\d{2}$/.test(closeYM)) { alert('Pick a valid month to close from.'); return; }
+  const nowYM = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
+  const amountEl = document.getElementById('instCloseAmount');
+  const redeemAmount = amountEl ? (Number(amountEl.value) || 0) : 0;
+
+  // 1) Write the close lifecycle event (stops contributions; engine zeroes it afterwards).
+  target.events = (target.events || []).filter(e => e.type !== 'close');
+  target.events.push({ type: 'close', month: closeYM, source: 'instClose' });
+  target.events.sort((a,b)=>(a.month||'')<(b.month||'')?-1:1);
+  scheduleSave();
+  closeScModal('instCloseModal');
+  _instCloseCtx = null;
+
+  // 2) For an investment closing now-or-earlier, log a REAL redemption transaction.
+  if (isInv && closeYM <= nowYM && window.openTxModal) {
+    setTimeout(() => {
+      window.openTxModal('investment_redemption', {
+        investmentId: target.id,
+        amount: redeemAmount,
+        date: _todayISODate(),
+        accountId: (state.accounts.find(a=>a.id==='savings')?.id) || undefined
+      });
+    }, 140);
+  }
+
+  if (typeof renderAll === 'function') renderAll();
+  if (typeof renderInstruments === 'function') renderInstruments();
 }
 
 // Open the timeline editor bound directly to a state object (Instruments page variant).
