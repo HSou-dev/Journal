@@ -352,8 +352,8 @@ input::placeholder { color: var(--ink-muted); }
 .inst-headline-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-muted); }
 .inst-headline-val { font-size: 18px; font-weight: 700; color: var(--gold-bright); font-family: 'JetBrains Mono', monospace; }
 .inst-action-btn { flex: 1; font-size: 13px; padding: 8px; }
-.inst-menu { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-lg); z-index: 1000; min-width: 210px; padding: 6px; }
-.inst-menu-item { display: block; width: 100%; text-align: left; background: transparent; border: none; color: var(--ink); padding: 9px 12px; border-radius: 7px; cursor: pointer; font-size: 13.5px; font-family: 'DM Sans', sans-serif; }
+.inst-menu { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-lg); z-index: 1000; min-width: 220px; padding: 6px; }
+.inst-menu-item { display: block; width: 100%; text-align: left; background: transparent; border: none; color: var(--ink); padding: 11px 13px; border-radius: 7px; cursor: pointer; font-size: 14px; font-family: 'DM Sans', sans-serif; white-space: nowrap; }
 .inst-menu-item:hover { background: var(--accent-soft); color: var(--gold-bright); }
 @media (max-width: 768px) { .inst-grid { grid-template-columns: 1fr; } }
 /* ── EMI Calculator page ── */
@@ -2076,7 +2076,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.62';
+const APP_VERSION = '2026.05.04.63';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -8453,7 +8453,7 @@ function _todayISODate() {
 
 // Small popover menu for instrument actions (Redeem / Step up / Pause / Resume / Close).
 let _instMenuEl = null;
-function _closeInstMenu() { if (_instMenuEl) { _instMenuEl.remove(); _instMenuEl = null; document.removeEventListener('click', _closeInstMenu); } }
+function _closeInstMenu() { if (_instMenuEl) { _instMenuEl.remove(); _instMenuEl = null; document.removeEventListener('click', _instOutsideClose, true); } }
 function openInstrumentActionsMenu(anchorBtn, kind, idx) {
   _closeInstMenu();
   const target = kind === 'investment' ? state.investments[idx] : state.emis[idx];
@@ -8469,14 +8469,28 @@ function openInstrumentActionsMenu(anchorBtn, kind, idx) {
   const menu = document.createElement('div');
   menu.className = 'inst-menu';
   menu.innerHTML = items.map(it => `<button type="button" class="inst-menu-item" data-act="${it.key}">${it.label}</button>`).join('');
-  document.body.appendChild(menu);
-  const r = anchorBtn.getBoundingClientRect();
   menu.style.position = 'fixed';
-  menu.style.top = (r.bottom + 4) + 'px';
-  menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 230)) + 'px';
-  _instMenuEl = menu;
-  setTimeout(() => document.addEventListener('click', _closeInstMenu), 0);
+  menu.style.visibility = 'hidden';
+  document.body.appendChild(menu);
 
+  // Position: prefer below the button; if it would overflow the viewport bottom, flip above.
+  const r = anchorBtn.getBoundingClientRect();
+  const menuH = menu.offsetHeight || (items.length * 40 + 12);
+  const menuW = menu.offsetWidth || 220;
+  const vh = window.innerHeight, vw = window.innerWidth;
+  let top = r.bottom + 4;
+  if (top + menuH > vh - 8) {
+    // not enough room below → place above the button
+    top = Math.max(8, r.top - menuH - 4);
+  }
+  let left = r.left;
+  if (left + menuW > vw - 8) left = Math.max(8, vw - menuW - 8);
+  menu.style.top = top + 'px';
+  menu.style.left = left + 'px';
+  menu.style.visibility = 'visible';
+  _instMenuEl = menu;
+
+  // Wire item clicks. Use pointerdown so selection registers before any outside-close.
   menu.querySelectorAll('[data-act]').forEach(b => {
     b.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -8485,6 +8499,16 @@ function openInstrumentActionsMenu(anchorBtn, kind, idx) {
       handleInstrumentAction(act, kind, idx);
     });
   });
+
+  // Outside-click closes the menu. Defer attaching so the opening tap doesn't immediately
+  // trigger it. Ignore clicks landing inside the menu itself.
+  setTimeout(() => {
+    document.addEventListener('click', _instOutsideClose, true);
+  }, 0);
+}
+function _instOutsideClose(e) {
+  if (_instMenuEl && _instMenuEl.contains(e.target)) return; // click inside menu → ignore
+  _closeInstMenu();
 }
 
 function handleInstrumentAction(act, kind, idx) {
