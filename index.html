@@ -344,6 +344,12 @@ input::placeholder { color: var(--ink-muted); }
 .inst-timeline-btn { flex: 1; font-size: 13px; padding: 8px; }
 .inst-empty { color: var(--ink-muted); font-size: 14px; font-style: italic; }
 .inst-empty a { color: var(--gold-bright); }
+.inst-history { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.inst-hist-item { font-size: 11px; padding: 3px 8px; border-radius: 8px; background: var(--bg-elevated); color: var(--ink-dim); border: 1px solid var(--line); }
+.inst-action-btn { flex: 1; font-size: 13px; padding: 8px; }
+.inst-menu { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-lg); z-index: 1000; min-width: 210px; padding: 6px; }
+.inst-menu-item { display: block; width: 100%; text-align: left; background: transparent; border: none; color: var(--ink); padding: 9px 12px; border-radius: 7px; cursor: pointer; font-size: 13.5px; font-family: 'DM Sans', sans-serif; }
+.inst-menu-item:hover { background: var(--accent-soft); color: var(--gold-bright); }
 @media (max-width: 768px) { .inst-grid { grid-template-columns: 1fr; } }
 .add-btn { background: transparent; border: 1px dashed var(--line); color: var(--ink-dim); padding: 10px; border-radius: 6px; cursor: pointer; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 500; margin-top: 4px; transition: all 0.15s; }
 .add-btn:hover { border-color: var(--gold); color: var(--gold-bright); border-style: solid; }
@@ -2039,7 +2045,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.58';
+const APP_VERSION = '2026.05.04.59';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -7013,6 +7019,7 @@ function renderTimelineFields() {
   // amount visibility depends on type
   const typeSel = document.getElementById('tlType');
   const amtWrap = document.getElementById('tlAmountWrap');
+  if (ctx.presetType && typeSel) { typeSel.value = ctx.presetType; ctx.presetType = null; }
   const syncAmt = () => { amtWrap.style.display = (typeSel.value === 'setAmount' || typeSel.value === 'resume') ? '' : 'none'; };
   typeSel.addEventListener('change', syncAmt);
   syncAmt();
@@ -7955,6 +7962,20 @@ function renderInstruments() {
   const invs = state.investments || [];
   const emis = state.emis || [];
 
+  const evLabel = (e) => {
+    const m = e.month || '';
+    if (e.type === 'close') return `Close${m?' · '+m:''}`;
+    if (e.type === 'setAmount') return `Step to ${fmtMoney(Number(e.amount)||0,true)}${m?' · '+m:''}`;
+    if (e.type === 'pause') return `Pause${m?' · '+m:''}`;
+    if (e.type === 'resume') return `Resume ${fmtMoney(Number(e.amount)||0,true)}${m?' · '+m:''}`;
+    return e.type + (m?' · '+m:'');
+  };
+  const evHistory = (events) => {
+    const evs = Array.isArray(events) ? events.slice().sort((a,b)=>(a.month||'')<(b.month||'')?-1:1) : [];
+    if (!evs.length) return '';
+    return `<div class="inst-history">${evs.map(e => `<span class="inst-hist-item">${evLabel(e)}</span>`).join('')}</div>`;
+  };
+
   const invCards = invs.map((inv, i) => `
     <div class="inst-card" data-inst-kind="investment" data-inst-idx="${i}">
       <div class="inst-card-head">
@@ -7966,8 +7987,9 @@ function renderInstruments() {
         <div class="field"><label>Monthly contribution</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" min="0" step="any" value="${inv.monthlyContribution||0}" data-inst-field="monthlyContribution" /></div></div>
         <div class="field"><label>Return rate (% p.a.)</label><input type="number" min="0" max="50" step="0.05" value="${((inv.rate||0)*100).toFixed(2)}" data-inst-field="rate" /></div>
       </div>
+      ${evHistory(inv.events)}
       <div class="inst-actions">
-        <button class="btn ghost inst-timeline-btn" data-inst-timeline>Manage timeline${(inv.events||[]).length?` · ${(inv.events||[]).length}`:''}</button>
+        <button class="btn ghost inst-action-btn" data-inst-actions>Actions ▾</button>
       </div>
     </div>`).join('');
 
@@ -7982,8 +8004,9 @@ function renderInstruments() {
         <div class="field"><label>Start month</label><input type="month" value="${e.startMonth||''}" data-inst-field="startMonth" /></div>
         <div class="field"><label>Months (term)</label><input type="number" min="1" step="1" value="${e.months||0}" data-inst-field="months" /></div>
       </div>
+      ${evHistory(e.events)}
       <div class="inst-actions">
-        <button class="btn ghost inst-timeline-btn" data-inst-timeline>Manage timeline${(e.events||[]).length?` · ${(e.events||[]).length}`:''}</button>
+        <button class="btn ghost inst-action-btn" data-inst-actions>Actions ▾</button>
       </div>
     </div>`).join('');
 
@@ -8011,9 +8034,12 @@ function renderInstruments() {
         renderAll();        // recompute Projection + Net Worth instantly
       });
     });
-    // Timeline button — reuse the Phase 1 editor, but operate on the state object directly.
-    const tbtn = card.querySelector('[data-inst-timeline]');
-    if (tbtn) tbtn.addEventListener('click', () => openTimelineEditorForState(kind, target));
+    // Actions menu (Redeem / Step up / Pause / Close)
+    const abtn = card.querySelector('[data-inst-actions]');
+    if (abtn) abtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      openInstrumentActionsMenu(abtn, kind, idx);
+    });
   });
 
   body.querySelectorAll('[data-goto-edit]').forEach(a => {
@@ -8021,15 +8047,103 @@ function renderInstruments() {
   });
 }
 
+function _todayISODate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// Small popover menu for instrument actions (Redeem / Step up / Pause / Resume / Close).
+let _instMenuEl = null;
+function _closeInstMenu() { if (_instMenuEl) { _instMenuEl.remove(); _instMenuEl = null; document.removeEventListener('click', _closeInstMenu); } }
+function openInstrumentActionsMenu(anchorBtn, kind, idx) {
+  _closeInstMenu();
+  const target = kind === 'investment' ? state.investments[idx] : state.emis[idx];
+  if (!target) return;
+  const isInv = kind === 'investment';
+  const items = [];
+  if (isInv) items.push({ key: 'redeem', label: '− Redeem (cash out)' });
+  items.push({ key: 'stepup', label: '↗ Step up / down' });
+  items.push({ key: 'pause', label: '❚❚ Pause contributions' });
+  items.push({ key: 'resume', label: '▶ Resume contributions' });
+  items.push({ key: 'close', label: isInv ? '✕ Close & redeem all' : '✕ Close (end early)' });
+
+  const menu = document.createElement('div');
+  menu.className = 'inst-menu';
+  menu.innerHTML = items.map(it => `<button type="button" class="inst-menu-item" data-act="${it.key}">${it.label}</button>`).join('');
+  document.body.appendChild(menu);
+  const r = anchorBtn.getBoundingClientRect();
+  menu.style.position = 'fixed';
+  menu.style.top = (r.bottom + 4) + 'px';
+  menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 230)) + 'px';
+  _instMenuEl = menu;
+  setTimeout(() => document.addEventListener('click', _closeInstMenu), 0);
+
+  menu.querySelectorAll('[data-act]').forEach(b => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const act = b.dataset.act;
+      _closeInstMenu();
+      handleInstrumentAction(act, kind, idx);
+    });
+  });
+}
+
+function handleInstrumentAction(act, kind, idx) {
+  const target = kind === 'investment' ? state.investments[idx] : state.emis[idx];
+  if (!target) return;
+  const nowYM = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
+
+  if (act === 'redeem') {
+    if (window.openTxModal) {
+      window.openTxModal('investment_redemption', {
+        investmentId: target.id,
+        amount: Number(target.balance) || 0,
+        date: _todayISODate(),
+        accountId: (state.accounts.find(a=>a.id==='savings')?.id) || undefined
+      });
+    }
+    return;
+  }
+
+  if (act === 'close') {
+    const eff = (prompt('Close month (YYYY-MM)? Leave as-is for this month.', nowYM) || nowYM).trim();
+    if (!/^\d{4}-\d{2}$/.test(eff)) { alert('Please use YYYY-MM format.'); return; }
+    target.events = (target.events || []).filter(e => e.type !== 'close');
+    target.events.push({ type: 'close', month: eff });
+    target.events.sort((a,b)=>(a.month||'')<(b.month||'')?-1:1);
+    scheduleSave();
+    if (kind === 'investment' && eff <= nowYM) {
+      // Materialize the redemption as a real Journal transaction now.
+      if (window.openTxModal) {
+        window.openTxModal('investment_redemption', {
+          investmentId: target.id,
+          amount: Number(target.balance) || 0,
+          date: _todayISODate(),
+          accountId: (state.accounts.find(a=>a.id==='savings')?.id) || undefined
+        });
+      }
+    } else if (kind === 'investment') {
+      alert('Scheduled to close in ' + eff + '. Its balance redeems into savings in the projection from that month (future close — no journal entry yet).');
+    }
+    if (typeof renderAll === 'function') renderAll();
+    renderInstruments();
+    return;
+  }
+
+  // step up / pause / resume → timeline editor, optionally preset to that event type
+  openTimelineEditorForState(kind, target, act);
+}
+
 // Open the timeline editor bound directly to a state object (Instruments page variant).
 // On save, writes events back to the state object, persists, recomputes, re-renders the page.
-function openTimelineEditorForState(kind, instrument) {
+function openTimelineEditorForState(kind, instrument, presetType) {
   _timelineCtx = {
     kind,
     row: null,                 // no DOM row here; we persist to state directly
     events: (instrument.events || []).slice(),
     refreshBadge: null,
-    stateTarget: instrument
+    stateTarget: instrument,
+    presetType: presetType === 'stepup' ? 'setAmount' : presetType
   };
   const label = instrument.name || (kind === 'emi' ? 'EMI' : 'Investment');
   document.getElementById('timelineTitle').textContent = 'Timeline · ' + label;
@@ -8556,7 +8670,7 @@ document.addEventListener('keydown', (e) => {
 
   const modal = {
     overlay: () => document.getElementById('txModalOverlay'),
-    show(typeOrId) {
+    show(typeOrId, prefill) {
       const isEdit = typeOrId && typeof typeOrId === 'string' && typeOrId.startsWith('tx_');
       let tx = null, type;
       if (isEdit) {
@@ -8567,6 +8681,26 @@ document.addEventListener('keydown', (e) => {
         type = typeOrId;
       }
       this.populate(type, tx);
+      // Optional prefill (e.g. from the Instruments page Redeem action): preselect the
+      // investment, default the amount (editable), and set the date.
+      if (prefill && !isEdit) {
+        if (prefill.investmentId) {
+          const sel = document.getElementById('txInvestment');
+          if (sel) sel.value = prefill.investmentId;
+        }
+        if (prefill.amount != null) {
+          const amtEl = document.getElementById('txAmount');
+          if (amtEl) { amtEl.value = prefill.amount; amtEl.dataset.autofilled = ''; }
+        }
+        if (prefill.date) {
+          const dEl = document.getElementById('txDate');
+          if (dEl) dEl.value = prefill.date;
+        }
+        if (prefill.accountId) {
+          const aEl = document.getElementById('txAccount');
+          if (aEl) aEl.value = prefill.accountId;
+        }
+      }
       this.overlay().classList.add('show');
       document.body.style.overflow = 'hidden';
       document.body.classList.add('modal-open');
@@ -8849,7 +8983,8 @@ document.addEventListener('keydown', (e) => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }
-  function openTxModal(arg) { modal.show(arg); }
+  function openTxModal(arg, prefill) { modal.show(arg, prefill); }
+  window.openTxModal = openTxModal;
   // Expose globally so other scripts (e.g. budget-actuals) can open the modal
   window.openTxModal = openTxModal;
 
