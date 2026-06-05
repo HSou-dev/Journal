@@ -2115,7 +2115,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.74';
+const APP_VERSION = '2026.05.04.77';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -2351,7 +2351,34 @@ function migrateState(s) {
     });
   }
 
-  s.schemaVersion = 12;
+  // Schema v13: ensure every investment has a UNIQUE id. Historically two instruments could
+  // share an id (e.g. both gold types as "gold"), which cross-wires anything keyed by id alone
+  // (history filters, redemption/contrib matching). Rename duplicates and migrate references in
+  // transactions and events so balances/history stay attached to the right instrument.
+  if ((s.schemaVersion || 0) < 13) {
+    const seen = new Set();
+    (s.investments || []).forEach(inv => {
+      if (!inv || !inv.id) return;
+      if (!seen.has(inv.id)) { seen.add(inv.id); return; }
+      // Duplicate → mint a new unique id derived from the name.
+      const base = (inv.name || inv.id).toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 12) || 'inv';
+      let nid = base, k = 2;
+      while (seen.has(nid) || (s.investments || []).some(x => x !== inv && x.id === nid)) { nid = base + k; k++; }
+      const oldId = inv.id;
+      // Re-point transactions that referenced this specific instrument BY NAME match where possible.
+      // (We can only safely migrate txns whose investmentId === oldId AND note/name matches this inv;
+      //  to avoid mis-assigning, we move txns whose note contains this inv's name.)
+      (s.transactions || []).forEach(t => {
+        if (t.investmentId === oldId && t.note && inv.name && t.note.toLowerCase().includes(inv.name.toLowerCase())) {
+          t.investmentId = nid;
+        }
+      });
+      inv.id = nid;
+      seen.add(nid);
+    });
+  }
+
+  s.schemaVersion = 13;
   return s;
 }
 
@@ -3576,8 +3603,9 @@ function readEMIs() {
 
 function readInvestments() {
   const result = [];
+  const usedIds = new Set();
   document.querySelectorAll('#investmentList .rep-row').forEach(row => {
-    const id = row.getAttribute('data-inv-id') || 'other';
+    let id = row.getAttribute('data-inv-id') || 'other';
     const name = ((row.querySelector('[data-field="name"]')||{}).value||'').trim();
     const balance = Number((row.querySelector('[data-field="balance"]')||{}).value) || 0;
     const monthlyContribution = Number((row.querySelector('[data-field="monthly"]')||{}).value) || 0;
@@ -3587,6 +3615,15 @@ function readInvestments() {
     const compoundsMonthly = (row.querySelector('.toggle[data-field="compoundsMonthly"]')||{}).classList?.contains('on') || false;
     const tmpl = INSTRUMENT_TEMPLATES.find(t => t.id === id) || INSTRUMENT_TEMPLATES[0];
     if (name) {
+      // Ensure a UNIQUE id even if two rows came from the same template (e.g. two gold types).
+      if (usedIds.has(id)) {
+        const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 12) || id;
+        let nid = base, k = 2;
+        while (usedIds.has(nid)) { nid = base + k; k++; }
+        id = nid;
+        row.setAttribute('data-inv-id', id); // keep the row in sync so it stays stable
+      }
+      usedIds.add(id);
       // Lifecycle events are stored on the row element (edited via the timeline panel).
       const events = Array.isArray(row._events) ? row._events : [];
       result.push({ id, name, balance, monthlyContribution, rate, liquid, compoundsMonthly, color: tmpl.color, events });
@@ -4828,6 +4865,16 @@ function renderAll() {
   renderScenarios();
   renderCharts();
   renderSettings();
+  // Also refresh the data-driven pages so a change made anywhere is reflected everywhere
+  // immediately, rather than relying on navigation (activateSection) to re-render them.
+  if (typeof renderInstruments === 'function') renderInstruments();
+  if (typeof window.renderTodayPage === 'function') window.renderTodayPage();
+  if (typeof renderEditGrid === 'function') {
+    // Only re-render the inputs grid if it's currently visible, to avoid clobbering an
+    // in-progress edit there (it reads from DOM on save).
+    const ed = document.getElementById('editData');
+    if (ed && ed.classList.contains('active')) renderEditGrid();
+  }
 }
 
 // ----- Budget (current-month actuals vs limits) -----
@@ -8094,6 +8141,15 @@ function wireDashboard() {
         if (state.investments[idx]) state.investments[idx].rate = val;
       }
     });
+    // Appraisal / bump-month dropdowns — previously ignored here, so changing a person's
+    // appraisal month in the dashboard never took effect. Read them too.
+    document.querySelectorAll('#settingsRateRows select[data-bump-key]').forEach(sel => {
+      const key = sel.dataset.bumpKey;
+      const val = Number(sel.value) || 4;
+      if (key === 'p1')       state.p1BumpMonth = val;
+      else if (key === 'p2')  state.p2BumpMonth = val;
+      else if (key === 'exp') state.expenseBumpMonth = val;
+    });
     const cgTog = document.querySelector('#settingsRateRows .toggle[data-grow-contrib]');
     if (cgTog) state.growContributions = cgTog.classList.contains('on');
     scheduleSave();
@@ -8568,12 +8624,15 @@ function renderInstruments() {
 function _instAddNew(kind) {
   if (kind === 'investment') {
     const tmpl = (typeof INSTRUMENT_TEMPLATES !== 'undefined' && INSTRUMENT_TEMPLATES[0]) || { id:'fd', name:'New FD', defaultRate:0.07, color:'#6a9fb5' };
-    // Prefer an FD template if present (common case for this flow).
     const fd = (typeof INSTRUMENT_TEMPLATES !== 'undefined') ? INSTRUMENT_TEMPLATES.find(t => /fd|fixed/i.test(t.id) || /fd|fixed/i.test(t.name)) : null;
     const use = fd || tmpl;
     state.investments = state.investments || [];
+    // Always mint a UNIQUE id so a second FD (etc.) never collides with an existing one.
+    const existing = new Set(state.investments.map(i => i.id));
+    let nid = use.id, k = 2;
+    while (existing.has(nid)) { nid = use.id + k; k++; }
     state.investments.push({
-      id: use.id, name: use.name || 'New investment', balance: 0, monthlyContribution: 0,
+      id: nid, name: use.name || 'New investment', balance: 0, monthlyContribution: 0,
       rate: use.defaultRate || 0.07, liquid: use.defaultLiquid ?? false, compoundsMonthly: false,
       color: use.color || 'var(--accent)', events: []
     });
