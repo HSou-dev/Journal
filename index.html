@@ -347,6 +347,8 @@ input::placeholder { color: var(--ink-muted); }
 .inst-section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
 .inst-add-btn { font-size: 12.5px; padding: 7px 12px; white-space: nowrap; }
 .inst-history-btn { font-size: 13px; padding: 8px 12px; }
+.inst-end-note { font-size: 12px; color: var(--ink-muted); margin: 8px 0 4px; font-style: italic; }
+.inst-end-note strong { color: var(--ink-dim); font-style: normal; }
 .inst-hist-list { display: flex; flex-direction: column; }
 .inst-hist-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
 .inst-hist-row:last-child { border-bottom: none; }
@@ -2113,7 +2115,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.73';
+const APP_VERSION = '2026.05.04.74';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -5783,11 +5785,9 @@ function renderBudget() {
     // EMIs that have NO journal entry but ARE scheduled for this past month — keep scheduled value
     let monthEmiScheduled = 0;
     (state.emis || []).forEach(e => {
-      if (!e.startMonth || !e.months) return;
-      const [sy, sm] = e.startMonth.split('-').map(Number);
-      let ey = sy, em = sm + e.months - 1;
-      while (em > 12) { em -= 12; ey++; }
-      const endIso = ey + '-' + String(em).padStart(2, '0');
+      if (!e.startMonth) return;
+      const endIso = _emiEndIso(e);
+      if (!endIso) return;
       if (ym >= e.startMonth && ym <= endIso) {
         const hasJournal = !!(emiActualByMonth[ym] && emiActualByMonth[ym][e.id]);
         if (!hasJournal) monthEmiScheduled += e.amount;
@@ -5812,11 +5812,9 @@ function renderBudget() {
       // Per EMI: same model
       let totalEmiNumeric = 0;
       (state.emis || []).forEach(e => {
-        if (!e.startMonth || !e.months) return;
-        const [sy, sm] = e.startMonth.split('-').map(Number);
-        let ey = sy, em = sm + e.months - 1;
-        while (em > 12) { em -= 12; ey++; }
-        const endIso = ey + '-' + String(em).padStart(2, '0');
+        if (!e.startMonth) return;
+        const endIso = _emiEndIso(e);
+        if (!endIso) return;
         if (ym >= e.startMonth && ym <= endIso) {
           const actual = (emiActualByMonth[ym] && emiActualByMonth[ym][e.id]) || 0;
           totalEmiNumeric += actual + Math.max(0, e.amount - actual);
@@ -6116,13 +6114,15 @@ function renderBudget() {
     `<tr class="subtotal"><th>Total Income</th>${cells(totalIncome)}</tr>`;
 
   const expenseRows = [];
-  // EMIs (no growth) — apply overlay so past months show actuals, current shows actual/scheduled
+  // EMIs (no growth) — apply overlay so past months show actuals, current shows actual/scheduled.
+  // End-of-life via the shared _emiActiveWindow so a close date overrides the term consistently
+  // with the engine and every other page.
+  const _emiWinMonths = isos.map(iso => ({ iso }));
   (state.emis || []).forEach(e => {
     const row = new Array(n).fill(0);
-    const startIdxE = isos.findIndex(iso => iso >= e.startMonth);
-    if (startIdxE >= 0) {
-      const endIdxE = Math.min(n - 1, startIdxE + e.months - 1);
-      for (let i = startIdxE; i <= endIdxE; i++) row[i] = e.amount;
+    const win = _emiActiveWindow(e, _emiWinMonths);
+    if (win) {
+      for (let i = win.startIdx; i <= win.endIdx; i++) row[i] = e.amount;
     }
     const ov = overlayEmiRow(e.id, row);
     expenseRows.push({ label: e.name + ' (EMI)', overlay: ov });
@@ -6723,11 +6723,9 @@ function renderNetWorth() {
     });
     // EMIs
     (state.emis || []).forEach(e => {
-      if (!e.startMonth || !e.months) return;
-      const [sy, sm] = e.startMonth.split('-').map(Number);
-      let ey = sy, em = sm + e.months - 1;
-      while (em > 12) { em -= 12; ey++; }
-      const endIso = ey + '-' + String(em).padStart(2, '0');
+      if (!e.startMonth) return;
+      const endIso = _emiEndIso(e);
+      if (!endIso) return;
       if (ym >= e.startMonth && ym <= endIso) {
         const actual = (emiActualByMonthLocal[ym] && emiActualByMonthLocal[ym][e.id]) || 0;
         overlayExp += actual + Math.max(0, e.amount - actual);
@@ -8505,6 +8503,7 @@ function renderInstruments() {
         <div class="field"><label>Outstanding</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" min="0" step="any" value="${e.outstandingPrincipal!==''&&e.outstandingPrincipal!=null?e.outstandingPrincipal:''}" data-inst-field="outstandingPrincipal" placeholder="balance owed" /></div></div>
         <div class="field"><label>ROI % p.a.</label><input type="number" min="0" max="50" step="0.05" value="${e.roi!==''&&e.roi!=null?(Number(e.roi)*100).toFixed(2):''}" data-inst-field="roi" placeholder="e.g. 8.25" /></div>
       </div>
+      ${(() => { const end = (typeof _emiEndIso==='function') ? _emiEndIso(e) : null; const hasClose = Array.isArray(e.events) && e.events.some(ev=>ev.type==='close'); return end ? `<div class="inst-end-note">Last payment: <strong>${formatMonthLabel(end)}</strong>${hasClose?' · closed early':''}</div>` : ''; })()}
       <div class="inst-actions">
         ${historyBtn(e, 'emi')}
         <button class="btn ghost inst-action-btn" data-inst-actions>Actions ▾</button>
@@ -8804,6 +8803,8 @@ function openInstrumentCloseModal(kind, idx) {
   };
   let projBal = _redeemAmountForCloseMonth(nowYM);
   document.getElementById('instCloseTitle').textContent = (isInv ? 'Close & redeem · ' : 'Close · ') + (target.name || '');
+  const _icConfirmBtn = document.getElementById('instCloseConfirm');
+  if (_icConfirmBtn) _icConfirmBtn.textContent = isInv ? 'Close & redeem' : 'Close';
   document.getElementById('instCloseBody').innerHTML = `
     <div style="font-size:13px;color:var(--ink-dim);line-height:1.6;margin-bottom:14px;">
       ${isInv
@@ -8841,18 +8842,13 @@ function confirmInstrumentClose() {
   const amountEl = document.getElementById('instCloseAmount');
   const redeemAmount = amountEl ? (Number(amountEl.value) || 0) : 0;
 
-  // 1) Write the close lifecycle event.
+  // 1) Write the close lifecycle event. This is the SINGLE authoritative end-of-life signal:
+  // _emiEndIso() makes the close month win over the term on every page. We deliberately do NOT
+  // rewrite `months` here — doing so created a second source of truth that disagreed with the
+  // close event and made the EMI overshoot its end. The close event alone defines the end.
   target.events = (target.events || []).filter(e => e.type !== 'close');
   target.events.push({ type: 'close', month: closeYM, source: 'instClose' });
   target.events.sort((a,b)=>(a.month||'')<(b.month||'')?-1:1);
-  // For an EMI, the close month is the LAST PAID month and overrides the term. Rewrite `months`
-  // so Edit-my-inputs reflects the same end (start → closeYM inclusive) and can never conflict.
-  if (!isInv && target.startMonth && /^\d{4}-\d{2}$/.test(target.startMonth)) {
-    const [sy, sm] = target.startMonth.split('-').map(Number);
-    const [cy, cm] = closeYM.split('-').map(Number);
-    const span = (cy * 12 + (cm - 1)) - (sy * 12 + (sm - 1)) + 1; // inclusive
-    if (span > 0) target.months = span;
-  }
   scheduleSave();
   closeScModal('instCloseModal');
   _instCloseCtx = null;
@@ -9556,12 +9552,10 @@ document.addEventListener('keydown', (e) => {
         const cats = type === 'income' ? INCOME_CATS : EXPENSE_CATS_FOR_TX;
         // Active EMIs as of selected date (only for expense type) — each becomes its own chip.
         const activeEmis = (type === 'expense') ? (state.emis || []).filter(e => {
-          if (!e.startMonth || !e.months) return false;
+          if (!e.startMonth) return false;
+          const endIso = _emiEndIso(e);
+          if (!endIso) return false;
           const d = (tx && tx.date) ? tx.date.slice(0,7) : (todayISO().slice(0,7));
-          const [sy, sm] = e.startMonth.split('-').map(Number);
-          let ey = sy, em = sm + e.months - 1;
-          while (em > 12) { em -= 12; ey++; }
-          const endIso = ey + '-' + String(em).padStart(2, '0');
           return d >= e.startMonth && d <= endIso;
         }) : [];
         const chosenCat = tx ? tx.category : (cats[0] && cats[0].key);
