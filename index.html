@@ -2115,7 +2115,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.78';
+const APP_VERSION = '2026.05.04.79';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -6330,8 +6330,26 @@ function renderBudget() {
     let actualTransfer = 0;
     (state.transactions || []).forEach(tx => {
       if (!tx.date || tx.date.slice(0, 7) !== ym) return;
-      if (tx.type !== 'transfer' || tx.toAccountId !== 'savings') return;
-      actualTransfer += Number(tx.amount) || 0;
+      // NET cash that actually moved into the savings account this month.
+      //   Inflows  (+): transfers into savings, investment redemptions credited
+      //                 to savings, and income booked directly to savings.
+      //   Outflows (-): transfers out of savings, expenses paid from savings, and
+      //                 investment contributions funded from the savings account.
+      // Redemptions / income are folded into surplus on the TARGET side, so they
+      // must be credited here too, otherwise target and actual disagree.
+      const amt = Number(tx.amount) || 0;
+      if (tx.type === 'transfer') {
+        if (tx.toAccountId === 'savings') actualTransfer += amt;
+        if (tx.fromAccountId === 'savings') actualTransfer -= amt;
+      } else if (tx.type === 'investment_redemption' && tx.accountId === 'savings') {
+        actualTransfer += amt;
+      } else if (tx.type === 'income' && tx.accountId === 'savings') {
+        actualTransfer += amt;
+      } else if (tx.type === 'expense' && tx.accountId === 'savings') {
+        actualTransfer -= amt;
+      } else if (tx.type === 'investment_contrib' && tx.accountId === 'savings') {
+        actualTransfer -= amt;
+      }
     });
     // ────── Target computation ──────
     // Planned-to-Savings target = surplus − all investment allocations (scheduled SIPs +
