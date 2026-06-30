@@ -672,6 +672,8 @@ h1.section-title em { font-style: italic; color: var(--gold); font-weight: 300; 
 .val { font-family: 'Fraunces', serif; font-size: 36px; font-weight: 400; line-height: 1; margin-bottom: 6px; color: var(--ink); }
 .val.gold { color: var(--gold-bright); }
 .val.green { color: var(--green); }
+.val.blue { color: var(--blue); }
+.val.red { color: var(--red); }
 .val .unit { font-size: 16px; color: var(--ink-muted); }
 .sub { font-size: 12px; color: var(--ink-muted); font-family: 'JetBrains Mono', monospace; }
 .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
@@ -1777,7 +1779,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       <p class="section-sub">Pick a date — any date, any year. The model compounds every instrument at its configured rate and adds the contributions scheduled between now and then.</p>
       <div class="control-row"><div class="ctrl"><label>Valuation Month</label><input type="month" id="nwDate" /></div><div class="ctrl"><label>&nbsp;</label><button class="btn" id="nwRun">Compute</button></div></div>
       <div class="callout">The projection assumes contributions continue at the pace you entered, and each asset earns its rate <strong>compounded monthly</strong>. Adjust rates in the <strong>Rates &amp; Assumptions</strong> section.</div>
-      <div class="grid-3" style="margin-bottom:16px;" id="nwKpis"></div>
+      <div class="grid-4" style="margin-bottom:16px;" id="nwKpis"></div>
       <div class="grid-main" style="margin-bottom:16px;">
         <div class="card"><div class="card-head">Net Worth Over Time</div><div class="chart-wrap"><canvas id="nwLine"></canvas></div></div>
         <div class="card"><div class="card-head">Composition on Chosen Date</div><div class="chart-wrap"><canvas id="nwDonut"></canvas></div></div>
@@ -2115,7 +2117,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.04.79';
+const APP_VERSION = '2026.05.04.80';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -4044,6 +4046,23 @@ function _emiEndIso(e) {
   return ey + '-' + String(em).padStart(2, '0');
 }
 
+// ---- Chart color helpers (shared by all donut/pie/area charts) ----
+// Chart.js cannot parse CSS var() strings — they silently render as black. resolveCssColor
+// turns var(--x) into its computed value; paletteColors hands out a distinct, readable set
+// so no two adjacent slices collide and nothing renders black.
+const CHART_PALETTE = ['#2E7D5B','#6a9fb5','#c37b52','#b58ac4','#5eb3a8','#d99a3c','#8a6a2c','#9c5fb0','#e06060','#4a8fb0','#7d9b4e','#b5824a'];
+function resolveCssColor(c, fallback) {
+  if (c == null || c === '') return fallback || '#7d7360';
+  c = String(c).trim();
+  if (c.slice(0, 4) === 'var(') {
+    const name = c.slice(4, c.indexOf(')')).trim();
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback || '#7d7360';
+  }
+  return c;
+}
+function paletteColors(n) { const out = []; for (let i = 0; i < n; i++) out.push(CHART_PALETTE[i % CHART_PALETTE.length]); return out; }
+
 // Authoritative active window for an EMI, shared by the projection engine AND the
 // projection-sheet current-month overlay so they can never disagree.
 // Returns { startIdx, endIdx } as indices into `months`, or null if it never starts in window.
@@ -4950,10 +4969,9 @@ function renderBudgetActuals() {
     const v = actualsByCat[c.key] || 0;
     if (v > 0) pieEntries.push({ label: c.label, val: v, color: c.color || '#7fb069' });
   });
-  (state.emis || []).forEach(e => {
-    const v = emiActuals[e.id] || 0;
-    if (v > 0) pieEntries.push({ label: e.name + ' (EMI)', val: v, color: e.color || 'var(--accent)' });
-  });
+  let _emiPieTotal = 0;
+  (state.emis || []).forEach(e => { _emiPieTotal += emiActuals[e.id] || 0; });
+  if (_emiPieTotal > 0) pieEntries.push({ label: 'EMIs (combined)', val: _emiPieTotal, color: '#2E7D5B' });
   if (pieCard) {
     if (pieEntries.length === 0) {
       pieCard.style.display = 'none';
@@ -4968,18 +4986,19 @@ function renderBudgetActuals() {
           labels: pieEntries.map(e => e.label),
           datasets: [{
             data: pieEntries.map(e => e.val),
-            backgroundColor: pieEntries.map(e => e.color),
-            borderColor: 'rgba(20,17,13,0.6)',
-            borderWidth: 1,
+            backgroundColor: paletteColors(pieEntries.length),
+            borderColor: getComputedStyle(document.documentElement).getPropertyValue('--bg-card').trim() || '#FFFFFF',
+            borderWidth: 2,
           }]
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          cutout: '58%',
           plugins: {
             legend: {
               position: 'right',
-              labels: { color: '#c8b896', font: { size: 11 }, boxWidth: 12, padding: 6 }
+              labels: { color: (getComputedStyle(document.documentElement).getPropertyValue('--ink-muted').trim() || '#8A8F88'), font: { size: 11 }, boxWidth: 12, padding: 6, usePointStyle: true }
             },
             tooltip: {
               callbacks: {
@@ -6833,18 +6852,40 @@ function renderNetWorth() {
   const openLiab = (state.accounts||[]).filter(a => a.type === 'liability').reduce((s,a) => s + (Number(a.openingBalance)||0), 0);
   const openBal = openInvBal + openCash + openLiab;
   const growth = nwAtDate - openBal - totContrib;
+  // Non-liquid assets = illiquid investments at the chosen month (cash is liquid, lives in Liquidity).
+  const totalInvAtDate = p.investments.reduce((a,inv)=>a+(p.bal[inv.id+'_'+inv.name][idx]||0),0);
+  const nonLiquidAtDate = Math.max(0, totalInvAtDate - lqInvAtDate);
+  // Debts at the chosen month = outstanding loan balances + remaining scheduled EMI payments.
+  // Loans come from liability accounts (liabSeries is stored negative). EMIs are separate from
+  // liability accounts, so summing remaining installments does not double-count.
+  let _emiRemain = 0;
+  (state.emis || []).forEach(e => {
+    const win = _emiActiveWindow(e, p.months);
+    if (!win) return;
+    const from = Math.max(idx, win.startIdx);
+    if (from > win.endIdx) return;
+    if (Array.isArray(e.events) && e.events.some(ev => ev.type === 'setAmount' || ev.type === 'pause' || ev.type === 'resume')) {
+      const tl = resolveInstrumentTimeline(e.events.filter(ev => ev.type !== 'close'), p.months, e.amount);
+      for (let i = from; i <= win.endIdx; i++) _emiRemain += tl[i].amount;
+    } else {
+      _emiRemain += e.amount * (win.endIdx - from + 1);
+    }
+  });
+  const debtsAtDate = Math.abs(liabAtDate) + _emiRemain;
   const kpiEl = document.getElementById('nwKpis');
   const kpiData = [
     { label:'Net Worth · '+valDate, val:nwAtDate, color:'gold' },
-    { label:'Liquidity', val:lqAtDate, color:'blue' },
-    { label:'Compounding Growth', val:growth, color:'green' }
+    { label:'Liquidity', val:lqAtDate, color:'green' },
+    { label:'Non-Liquid Assets', val:nonLiquidAtDate, color:'blue' },
+    { label:'Debts · '+valDate, val:debtsAtDate, color:'red' }
   ];
   kpiEl.innerHTML = kpiData.map(k => `<div class="card kpi"><div class="card-head">${k.label}</div><div class="val ${k.color}">${fmtMoney(k.val, true)}</div></div>`).join('');
 
   destroyChart('nwLine');
+  const _nwAccent = resolveCssColor('var(--accent)', '#2E7D5B');
   charts.nwLine = new Chart(document.getElementById('nwLine'), {
     type:'line',
-    data: { labels: p.labels, datasets: [{ label:'Net Worth', data:adjustedNetWorth, borderColor:'var(--accent)', backgroundColor:'var(--accent-soft)', borderWidth:2, fill:true, tension:0.3, pointRadius:0 }] },
+    data: { labels: p.labels, datasets: [{ label:'Net Worth', data:adjustedNetWorth, borderColor:_nwAccent, backgroundColor:'rgba(46,125,91,0.12)', borderWidth:2, fill:true, tension:0.3, pointRadius:0 }] },
     options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>' '+fmtMoney(c.parsed.y)}}}, scales:{x:axisOpt(), y:{...axisOpt(), ticks:{...axisOpt().ticks,callback:fmtAxis}}} }
   });
 
@@ -6855,7 +6896,7 @@ function renderNetWorth() {
   if (donutData.length) {
     charts.nwDonut = new Chart(document.getElementById('nwDonut'), {
       type:'doughnut',
-      data:{ labels:donutData.map(d=>d.name), datasets:[{ data:donutData.map(d=>d.val), backgroundColor:donutData.map(d=>d.color), borderColor: getComputedStyle(document.documentElement).getPropertyValue('--bg-card').trim() || '#FFFFFF', borderWidth:3 }] },
+      data:{ labels:donutData.map(d=>d.name), datasets:[{ data:donutData.map(d=>d.val), backgroundColor:paletteColors(donutData.length), borderColor: getComputedStyle(document.documentElement).getPropertyValue('--bg-card').trim() || '#FFFFFF', borderWidth:3 }] },
       options:{ responsive:true, maintainAspectRatio:false, cutout:'60%', plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{label:c=>' '+c.label+': '+fmtMoney(c.parsed)}}} }
     });
   }
@@ -9473,11 +9514,12 @@ document.addEventListener('keydown', (e) => {
   function renderAdjustmentsHistory() {
     const wrap = document.getElementById('adjustmentsList');
     if (!wrap) return;
+    const _curYM = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
     const adjs = (state.transactions || [])
-      .filter(t => t && t.type === 'adjustment')
+      .filter(t => t && t.type === 'adjustment' && (t.date || '').slice(0,7) === _curYM)
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     if (adjs.length === 0) {
-      wrap.innerHTML = '<div class="tx-empty">No adjustments logged yet. Use <strong>± Adjust</strong> above to reconcile a balance.</div>';
+      wrap.innerHTML = '<div class="tx-empty">No adjustments this month. Use <strong>± Adjust</strong> above to reconcile a balance.</div>';
       return;
     }
     wrap.innerHTML = adjs.map(tx => {
