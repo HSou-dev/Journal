@@ -2250,7 +2250,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.03';
+const APP_VERSION = '2026.05.05.04';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -4417,6 +4417,18 @@ function updatePreviewBanner() {
 // baseAmount is the instrument's default monthly contribution / EMI amount.
 // Single authoritative END month (YYYY-MM) for an EMI: close event month wins over the term.
 // Returns null if it has no valid start. Close month is the last paid month (inclusive).
+// True if EMI `e` is active in month `ym` (YYYY-MM): started on/before ym and not
+// strictly past its end month. The final payment month counts as active. Shared by
+// the Dashboard's monthly outflow, liquidity, and debt tracker so they never disagree.
+function _emiActiveIn(e, ym) {
+  const total = Number(e.months) || 0;
+  if (total <= 0 || !e.startMonth) return false;
+  if (ym < e.startMonth) return false;
+  const endIso = _emiEndIso(e);
+  if (endIso && ym > endIso) return false;
+  return true;
+}
+
 function _emiEndIso(e) {
   if (!e.startMonth || !/^\d{4}-\d{2}$/.test(e.startMonth)) return null;
   const closeEv = Array.isArray(e.events) ? e.events.find(ev => ev.type === 'close') : null;
@@ -5710,9 +5722,13 @@ function renderDashboard() {
   const totalAssets = compEntries.reduce((s,e) => s + e.value, 0);
 
   // ── Monthly cash flow (this month) ──
+  // An EMI counts toward this month's outflow only if it is ACTIVE this month:
+  // started on or before now AND not past its end month (the final payment month
+  // is still active). This shared test is reused by liquidity + the debt tracker.
+  const _emiNowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
   const monthIncome = (state.p1Salary||0) + (state.p1Other||0) + (state.p2Salary||0) + (state.p2Other||0);
   const monthExp = EXPENSE_CATEGORIES.reduce((a,c)=>a+(Number(state[c.key])||0),0);
-  const monthEMI = (state.emis||[]).reduce((a,e)=>a+(Number(e.amount)||0),0);
+  const monthEMI = (state.emis||[]).filter(e => _emiActiveIn(e, _emiNowYM)).reduce((a,e)=>a+(Number(e.amount)||0),0);
   const monthSurplus = monthIncome - monthExp - monthEMI;
 
   // ═══ BUILD HTML ═══
@@ -5767,10 +5783,7 @@ function renderDashboard() {
       <div class="dash-stat"><div class="label">Monthly surplus</div><div class="val" style="color:${monthSurplus>=0?'var(--accent-bright)':'var(--red)'};">${fmtMoney(monthSurplus, true)}</div><div class="foot">${monthIncome>0?(monthSurplus/monthIncome*100).toFixed(0):0}% of income saved</div></div>
     </div>`;
 
-  // ── TRAJECTORY CHART ──
-  html += `
-    <div class="dash-section-title">Your net-worth trajectory</div>
-    <div class="dash-chart-wrap"><div class="dash-chart-box"><canvas id="dashTrajectory"></canvas></div></div>`;
+  // ── (Net-worth trajectory chart removed per user preference) ──
 
   // ── WHAT-IF SLIDER (only if retirement on) ──
   if (ret) {
@@ -5840,7 +5853,7 @@ function renderDashboard() {
   if (setupBtn) setupBtn.addEventListener('click', () => { if (typeof openSingleStepEdit === 'function') openSingleStepEdit(7); });
 
   // Trajectory chart with retirement target line + event annotations
-  _renderDashTrajectory(p, ret, todayIdx, adjNetWorth);
+  // (Trajectory chart removed per user preference)
 
   // What-if slider
   if (ret) _wireWhatIf(p, ret, adjNetWorth);
@@ -5991,8 +6004,9 @@ function _renderLiquidity(p, todayIdx) {
     .reduce((a,inv) => { const k = inv.id+'_'+inv.name; return a + ((p.bal[k] && p.bal[k][todayIdx]) || 0); }, 0);
   const liqCash = p.cashSeries ? (p.cashSeries[todayIdx] || 0) : 0;
   const liquid = liqInv + liqCash;
+  const _lqNowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
   const monthExp = EXPENSE_CATEGORIES.reduce((a,c)=>a+(Number(state[c.key])||0),0)
-    + (state.emis||[]).reduce((a,e)=>a+(Number(e.amount)||0),0);
+    + (state.emis||[]).filter(e => _emiActiveIn(e, _lqNowYM)).reduce((a,e)=>a+(Number(e.amount)||0),0);
   const monthsCovered = monthExp > 0 ? liquid / monthExp : 0;
   // Score: 0 at 0 months, 100 at 6+ months, sweet spot band
   const score = Math.min(100, Math.round(monthsCovered / 6 * 100));
@@ -6034,7 +6048,10 @@ function _renderDebtTracker() {
     paid = Math.max(0, Math.min(total, paid));
     const remaining = Math.max(0, total - paid);
     const started = nowYM >= e.startMonth;
-    const done = remaining === 0 || (endIso && nowYM > endIso);
+    // "Done" only when STRICTLY past the end month — the final payment month is
+    // still active and must remain visible. (remaining===0 alone is wrong: an EMI
+    // whose last payment is the current month has remaining 0 but is still active.)
+    const done = (endIso && nowYM > endIso);
 
     // Per your preference: completed EMIs drop off the tracker entirely.
     if (done) return;
