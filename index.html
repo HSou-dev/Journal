@@ -2047,6 +2047,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     <!-- Drawer is the "More" menu — primary destinations (Budget/Journal/Projection)
          are accessed via the bottom tab bar. Drawer only contains secondary items. -->
     <div class="drawer-label">Overview</div>
+    <div class="drawer-item" data-target="dashboard">Dashboard</div>
     <div class="drawer-item" data-target="networth">Net Worth</div>
     <div class="drawer-label">Analysis</div>
     <div class="drawer-item" data-target="scenarios">Scenarios</div>
@@ -2249,7 +2250,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.02';
+const APP_VERSION = '2026.05.05.03';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -4593,6 +4594,20 @@ function runProjection(overrides={}) {
     }
   });
 
+  // ── Retirement income cutoff (opt-in via overrides.retire) ──────────────
+  // When the Dashboard passes overrides.retire = { p1StopISO, p2StopISO }, each
+  // person's salary/other income drops to zero from their retirement month onward
+  // ("true retirement" — no more paycheck). Existing callers pass nothing, so
+  // default behavior for every other page is unchanged.
+  const _retire = overrides.retire || null;
+  if (_retire) {
+    for (let i = 0; i < n; i++) {
+      const iso = months[i].iso;
+      if (_retire.p1StopISO && iso >= _retire.p1StopISO) p1Series[i] = 0;
+      if (_retire.p2StopISO && iso >= _retire.p2StopISO) p2Series[i] = 0;
+    }
+  }
+
   // One-off income series (with optional annual repeat + salary growth applied each repeat)
   const oneOffIncSeries = new Array(n).fill(0);
   function expandOneOff(o, target, growthRate, multiplier) {
@@ -4811,7 +4826,13 @@ function runProjection(overrides={}) {
       const mRate = Math.pow(1 + Math.max(0, inv.rate), 1/12) - 1;
       // Contribution this month comes from the lifecycle timeline (honors step-up/pause/close),
       // then scaled by the growth/scenario multiplier. Closed/paused months → 0.
-      const contrib = (tl.amount || 0) * contribMul;
+      let contrib = (tl.amount || 0) * contribMul;
+      // Retirement cutoff: contributions stop once household retirement begins
+      // (opt-in via overrides.retire.contribStopISO). Salary funds SIPs, so when
+      // salary stops, contributions stop too.
+      if (_retire && _retire.contribStopISO && months[i].iso >= _retire.contribStopISO) {
+        contrib = 0;
+      }
       contribPerMonth[k].push(contrib);
       monthInvestContrib += contrib;
       let newBal;
@@ -5625,6 +5646,7 @@ function renderDashboard() {
 
   // Run the projection over the full horizon (extend to retirement if needed).
   let projEnd = state.horizonEnd;
+  let retireOverride = null;
   if (state.retEnabled) {
     const p1Age = Number(state.p1CurrentAge) || 30;
     const p1Ret = Number(state.p1RetireAge) || 60;
@@ -5633,25 +5655,55 @@ function renderDashboard() {
     const endY = sy + Math.max(0, life - p1Age);
     const wantEnd = endY + '-' + String(sm).padStart(2, '0');
     if (wantEnd > projEnd) projEnd = wantEnd;
+    // Compute each person's retirement month for the true-retirement cutoff.
+    const smStr = String(sm).padStart(2, '0');
+    const p1StopISO = (sy + Math.max(0, p1Ret - p1Age)) + '-' + smStr;
+    let p2StopISO = null;
+    if (state.mode === 'partner') {
+      const p2Age = Number(state.p2CurrentAge) || 28;
+      const p2Ret = Number(state.p2RetireAge) || 58;
+      p2StopISO = (sy + Math.max(0, p2Ret - p2Age)) + '-' + smStr;
+    }
+    // Contributions stop when the LAST earner retires (household still invests
+    // while anyone draws a salary). Corpus is snapshotted at P1 retirement anyway.
+    const contribStopISO = (p2StopISO && p2StopISO > p1StopISO) ? p2StopISO : p1StopISO;
+    retireOverride = { p1StopISO, p2StopISO, contribStopISO };
   }
-  const p = runProjection({ horizonEnd: projEnd, scenarios: activeScenariosForRender() });
+  const p = runProjection({ horizonEnd: projEnd, scenarios: activeScenariosForRender(), retire: retireOverride });
 
   const _nowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
   let todayIdx = p.isos.indexOf(_nowYM);
   if (todayIdx < 0) todayIdx = 0;
 
-  const nwToday = p.netWorth[todayIdx] || 0;
-  const ret = computeRetirement(p);   // null if retirement off
+  // Net worth must match the Net Worth page exactly. That page uses the shared
+  // projectSavingsChain for the cash component (reverse-walks past months to true
+  // closing balances and removes the engine's double-count of past contributions),
+  // NOT the raw p.cashSeries baked into p.netWorth. Recompute the same way here so
+  // the Dashboard and Net Worth page never disagree.
+  const _dashCashChain = (typeof projectSavingsChain === 'function') ? projectSavingsChain(p) : null;
+  function _dashNetWorthAt(i) {
+    const inv = (p.investments || []).reduce((a, v) => a + ((p.bal[v.id + '_' + v.name] || [])[i] || 0), 0);
+    const liab = (p.liabSeries || [])[i] || 0;
+    const cash = _dashCashChain ? (_dashCashChain[i] || 0) : ((p.cashSeries || [])[i] || 0);
+    return inv + cash + liab;
+  }
+  const nwToday = _dashNetWorthAt(todayIdx);
+  // Full chain-adjusted net worth series, so the trajectory chart, annual review,
+  // and corpus projection all use the SAME definition as the Net Worth page.
+  const adjNetWorth = p.isos.map((ym, i) => _dashNetWorthAt(i));
+  const ret = computeRetirement(p, { nwSeries: adjNetWorth });   // null if retirement off
 
   // ── Assemble current asset composition ──
+  // Cash uses the SAME chain-adjusted value as the hero net worth (not raw opening
+  // balances), so the composition, hero number, and Net Worth page all agree.
   const compEntries = [];
   (state.investments || []).forEach(inv => {
     const k = inv.id + '_' + inv.name;
     const bal = (p.bal[k] && p.bal[k][todayIdx] != null) ? p.bal[k][todayIdx] : inv.balance;
     if (bal > 0) compEntries.push({ name: inv.name, color: inv.color || 'var(--accent)', value: bal });
   });
-  const cashTotal = (state.accounts || []).filter(a => a.type === 'asset')
-    .reduce((s,a) => s + (Number(a.openingBalance) || 0), 0);
+  const cashTotal = _dashCashChain ? (_dashCashChain[todayIdx] || 0)
+    : (state.accounts || []).filter(a => a.type === 'asset').reduce((s,a) => s + (Number(a.openingBalance) || 0), 0);
   if (cashTotal > 0) compEntries.push({ name: 'Cash & Savings', color: '#C9A84C', value: cashTotal });
   const liabTotal = (state.accounts || []).filter(a => a.type === 'liability')
     .reduce((s,a) => s + Math.abs(Number(a.openingBalance) || 0), 0);
@@ -5746,7 +5798,15 @@ function renderDashboard() {
   }
 
   // ── DEBT PAYOFF TRACKER ──
-  if ((state.emis || []).length) {
+  // Only show if there's at least one EMI that isn't already fully paid off.
+  const _hasActiveDebt = (state.emis || []).some(e => {
+    const total = Number(e.months) || 0;
+    if (total <= 0 || !e.startMonth) return false;
+    const endIso = (typeof _emiEndIso === 'function') ? _emiEndIso(e) : null;
+    const nowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
+    return !(endIso && nowYM > endIso);   // active or future
+  });
+  if (_hasActiveDebt) {
     html += `<div class="dash-section-title">Debt payoff</div><div class="dash-card" style="margin-bottom:16px;"><div id="dashDebt"></div></div>`;
   }
 
@@ -5780,16 +5840,16 @@ function renderDashboard() {
   if (setupBtn) setupBtn.addEventListener('click', () => { if (typeof openSingleStepEdit === 'function') openSingleStepEdit(7); });
 
   // Trajectory chart with retirement target line + event annotations
-  _renderDashTrajectory(p, ret, todayIdx);
+  _renderDashTrajectory(p, ret, todayIdx, adjNetWorth);
 
   // What-if slider
-  if (ret) _wireWhatIf(p, ret);
+  if (ret) _wireWhatIf(p, ret, adjNetWorth);
 
   // Liquidity health
   _renderLiquidity(p, todayIdx);
 
   // Debt payoff
-  if ((state.emis || []).length) _renderDebtTracker();
+  if (_hasActiveDebt) _renderDebtTracker();
 
   // Asset rows
   _renderAssetRows(p, ret, todayIdx);
@@ -5798,11 +5858,12 @@ function renderDashboard() {
   _renderInsights(p, ret, todayIdx, { monthIncome, monthExp, monthEMI, monthSurplus, totalAssets, liabTotal, compEntries });
 
   // Annual review (Priority 7)
-  _wireAnnualReview(p);
+  _wireAnnualReview(p, adjNetWorth);
 }
 
 // Priority 7: Annual review — compare Jan vs Dec of a chosen year.
-function _wireAnnualReview(p) {
+function _wireAnnualReview(p, nwSeries) {
+  const _nw = nwSeries || p.netWorth;
   const sel = document.getElementById('dashReviewYear');
   const body = document.getElementById('dashReviewBody');
   if (!sel || !body) return;
@@ -5824,7 +5885,7 @@ function _wireAnnualReview(p) {
     if (iJan < 0) iJan = yearIdxs[0];
     if (iDec < 0) iDec = yearIdxs[yearIdxs.length - 1];
 
-    const nwJan = p.netWorth[iJan] || 0, nwDec = p.netWorth[iDec] || 0;
+    const nwJan = _nw[iJan] || 0, nwDec = _nw[iDec] || 0;
     const nwGrowth = nwDec - nwJan;
     const nwGrowthPct = nwJan !== 0 ? (nwGrowth / Math.abs(nwJan) * 100) : 0;
 
@@ -5836,10 +5897,23 @@ function _wireAnnualReview(p) {
     });
     const savingsRate = incSum > 0 ? (surSum / incSum * 100) : 0;
 
-    // Income growth Jan→Dec (monthly)
-    const incJan = (p.totalIncome && p.totalIncome[iJan]) || 0;
-    const incDec = (p.totalIncome && p.totalIncome[iDec]) || 0;
-    const incGrowthPct = incJan !== 0 ? ((incDec - incJan) / incJan * 100) : 0;
+    // Income growth across the year. The very first horizon month can carry a
+    // doubled/partial salary (opening-month or journal-override artifact), which
+    // produces a bogus swing. Guard against it: never use the global first index
+    // as the baseline, and if the two endpoints look artifact-driven (start month
+    // more than 25% above the year's median monthly income), fall back to the
+    // median so the % reflects real salary growth, not a data glitch.
+    const yearIncomes = yearIdxs.map(i => (p.totalIncome && p.totalIncome[i]) || 0).filter(v => v > 0).sort((a,b)=>a-b);
+    const medianInc = yearIncomes.length ? yearIncomes[Math.floor(yearIncomes.length/2)] : 0;
+    let baseIdx = iJan;
+    if (baseIdx === 0 && yearIdxs.length > 1) baseIdx = yearIdxs[1]; // skip artifact-prone first month
+    let incBase = (p.totalIncome && p.totalIncome[baseIdx]) || 0;
+    let incEnd  = (p.totalIncome && p.totalIncome[iDec]) || 0;
+    // If either endpoint is an outlier vs the median, use the median as a stable baseline.
+    if (medianInc > 0 && incBase > medianInc * 1.25) incBase = medianInc;
+    if (medianInc > 0 && incEnd > medianInc * 1.75) incEnd = medianInc;
+    const incGrowthPct = incBase > 0 ? ((incEnd - incBase) / incBase * 100) : 0;
+    const incJan = incBase, incDec = incEnd;
 
     const stat = (label, val, foot, color) => `
       <div class="dash-stat"><div class="label">${label}</div><div class="val" style="${color?'color:'+color+';':''}">${val}</div><div class="foot">${foot}</div></div>`;
@@ -5855,12 +5929,13 @@ function _wireAnnualReview(p) {
   render();
 }
 
-function _renderDashTrajectory(p, ret, todayIdx) {
+function _renderDashTrajectory(p, ret, todayIdx, nwSeries) {
   destroyChart('dashTrajectory');
   const canvas = document.getElementById('dashTrajectory');
   if (!canvas) return;
+  const nwData = nwSeries || p.netWorth;
   const datasets = [{
-    label: 'Net Worth', data: p.netWorth,
+    label: 'Net Worth', data: nwData,
     borderColor: 'var(--accent)', backgroundColor: 'var(--accent-soft)',
     borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4
   }];
@@ -5889,7 +5964,7 @@ function _renderDashTrajectory(p, ret, todayIdx) {
   });
 }
 
-function _wireWhatIf(p, retBase) {
+function _wireWhatIf(p, retBase, nwSeries) {
   const slider = document.getElementById('dashWhatIf');
   const valEl = document.getElementById('dashWhatIfVal');
   const resEl = document.getElementById('dashWhatIfResult');
@@ -5897,7 +5972,7 @@ function _wireWhatIf(p, retBase) {
   const update = () => {
     const extra = Number(slider.value) || 0;
     if (valEl) valEl.textContent = '+' + currencySymbol() + fmtNum(extra, CURRENCIES[state.currency].style, true) + '/mo';
-    const r = computeRetirement(p, { extraMonthly: extra });
+    const r = computeRetirement(p, { extraMonthly: extra, nwSeries: nwSeries });
     if (!r) { resEl.textContent = ''; return; }
     const added = r.projectedCorpus - retBase.projectedCorpus;
     const newGap = r.gap;
@@ -5940,24 +6015,59 @@ function _renderLiquidity(p, todayIdx) {
 function _renderDebtTracker() {
   const el = document.getElementById('dashDebt');
   if (!el) return;
-  const [hy, hm] = (state.horizonStart || '2026-01').split('-').map(Number);
-  const now = new Date();
-  const monthsElapsed = Math.max(0, (now.getFullYear() - hy) * 12 + (now.getMonth()+1 - hm));
-  el.innerHTML = (state.emis || []).map(e => {
+  const nowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
+
+  // Months between two YYYY-MM strings (b - a), can be negative.
+  const monthDiff = (a, b) => {
+    const [ay, am] = a.split('-').map(Number);
+    const [by, bm] = b.split('-').map(Number);
+    return (by - ay) * 12 + (bm - am);
+  };
+
+  const rows = [];
+  (state.emis || []).forEach(e => {
     const total = Number(e.months) || 0;
-    const paid = Math.min(total, monthsElapsed);
-    const pct = total > 0 ? (paid / total * 100) : 0;
+    if (total <= 0 || !e.startMonth) return;
+    const endIso = _emiEndIso(e);               // respects close events
+    // Payments made = months from this EMI's OWN start up to (and including) the current month.
+    let paid = monthDiff(e.startMonth, nowYM) + 1;   // +1: the start month itself counts as paid
+    paid = Math.max(0, Math.min(total, paid));
     const remaining = Math.max(0, total - paid);
-    return `
-      <div style="margin-bottom:14px;">
-        <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--ink);">
-          <span>${escapeHtml(e.name)}</span>
-          <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-muted);">${fmtMoney(e.amount)}/mo · ${remaining} mo left</span>
-        </div>
-        <div class="dash-loan-bar"><div class="dash-loan-fill" style="width:${pct}%;"></div></div>
-        <div style="font-size:11px;color:var(--ink-muted);margin-top:3px;">${paid} of ${total} payments made · ${pct.toFixed(0)}% done</div>
-      </div>`;
-  }).join('');
+    const started = nowYM >= e.startMonth;
+    const done = remaining === 0 || (endIso && nowYM > endIso);
+
+    // Per your preference: completed EMIs drop off the tracker entirely.
+    if (done) return;
+
+    const pct = total > 0 ? (paid / total * 100) : 0;
+    if (!started) {
+      // Future EMI — hasn't begun yet.
+      const startsIn = monthDiff(nowYM, e.startMonth);
+      rows.push(`
+        <div style="margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--ink);">
+            <span>${escapeHtml(e.name)}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-muted);">${fmtMoney(e.amount)}/mo · starts in ${startsIn} mo</span>
+          </div>
+          <div class="dash-loan-bar"><div class="dash-loan-fill" style="width:0%;"></div></div>
+          <div style="font-size:11px;color:var(--ink-muted);margin-top:3px;">Not started · ${total} payments scheduled</div>
+        </div>`);
+    } else {
+      rows.push(`
+        <div style="margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--ink);">
+            <span>${escapeHtml(e.name)}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-muted);">${fmtMoney(e.amount)}/mo · ${remaining} mo left</span>
+          </div>
+          <div class="dash-loan-bar"><div class="dash-loan-fill" style="width:${pct}%;"></div></div>
+          <div style="font-size:11px;color:var(--ink-muted);margin-top:3px;">${paid} of ${total} payments made · ${pct.toFixed(0)}% done</div>
+        </div>`);
+    }
+  });
+
+  el.innerHTML = rows.length
+    ? rows.join('')
+    : '<div style="font-size:13px;color:var(--ink-muted);font-style:italic;">No active loans — all EMIs are paid off. 🎉</div>';
 }
 
 function _renderAssetRows(p, ret, todayIdx) {
@@ -6276,7 +6386,7 @@ function computeRetirement(p, opts) {
   // ── Projected corpus at retirement = net worth at retIdx from the projection ──
   // If a what-if extraMonthly is supplied, approximate its future value added to corpus:
   // it compounds at a blended investment rate for the remaining months.
-  let projectedCorpus = (p.netWorth && p.netWorth[retIdx]) || 0;
+  let projectedCorpus = (opts.nwSeries ? opts.nwSeries[retIdx] : (p.netWorth && p.netWorth[retIdx])) || 0;
   if (extraMonthly > 0) {
     // Blended monthly rate: average of investment rates, fallback to 10% annual.
     const invs = state.investments || [];
