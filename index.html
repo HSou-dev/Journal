@@ -1461,6 +1461,14 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 @keyframes dashFadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .dash-eyebrow { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-muted); margin-bottom: 10px; }
 .dash-bignum { font-family: 'Fraunces', serif; font-size: 38px; line-height: 1; color: var(--ink); font-weight: 500; }
+.dash-hero-split { display: flex; gap: 20px; align-items: flex-start; }
+.dash-hero-col { flex: 1; min-width: 0; }
+.dash-hero-col + .dash-hero-col { border-left: 1px solid var(--line); padding-left: 20px; }
+.dash-liq-label { font-size: 11px; line-height: 1.45; color: var(--ink-muted); margin-top: 6px; }
+@media (max-width: 520px) {
+  .dash-hero-split { flex-direction: column; gap: 14px; }
+  .dash-hero-col + .dash-hero-col { border-left: none; padding-left: 0; border-top: 1px solid var(--line); padding-top: 14px; }
+}
 .dash-bignum .cur { font-size: 22px; color: var(--ink-muted); margin-right: 4px; }
 .dash-sub { font-size: 12.5px; color: var(--ink-muted); margin-top: 8px; }
 .dash-delta { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
@@ -2256,7 +2264,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.05';
+const APP_VERSION = '2026.05.05.06';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -5737,6 +5745,23 @@ function renderDashboard() {
   const monthEMI = (state.emis||[]).filter(e => _emiActiveIn(e, _emiNowYM)).reduce((a,e)=>a+(Number(e.amount)||0),0);
   const monthSurplus = monthIncome - monthExp - monthEMI;
 
+  // ── Liquidity (shown beside net worth in the hero card) ──
+  // Reuses the same definition as the Net Worth page / Liquidity health: liquid
+  // investments + cash. Cash uses the SAME chain-adjusted figure as the hero net worth
+  // and composition bar (cashTotal above), so the card is internally consistent.
+  const _liqInvNames = [];
+  let _liqInvTotal = 0;
+  (state.investments || []).forEach(inv => {
+    if (!inv.liquid) return;
+    const k = inv.id + '_' + inv.name;
+    const bal = (p.bal[k] && p.bal[k][todayIdx] != null) ? p.bal[k][todayIdx] : (inv.balance || 0);
+    if (bal > 0) { _liqInvTotal += bal; _liqInvNames.push(inv.name); }
+  });
+  const liquidityTotal = _liqInvTotal + (cashTotal > 0 ? cashTotal : 0);
+  const _liqLabelParts = _liqInvNames.slice();
+  if (cashTotal > 0) _liqLabelParts.push('Cash & Savings');
+  const liquidityLabel = _liqLabelParts.length ? _liqLabelParts.join(', ') : 'no liquid assets flagged';
+
   // ═══ BUILD HTML ═══
   let html = '';
 
@@ -5745,10 +5770,20 @@ function renderDashboard() {
 
   // Net worth card
   const nwFmt = fmtShortUnit(nwToday);
+  const lqFmt = fmtShortUnit(liquidityTotal);
   html += `
     <div class="dash-card feature">
-      <div class="dash-eyebrow">Net worth today · ${_nowYM}</div>
-      <div class="dash-bignum"><span class="cur">${currencySymbol()}</span>${nwFmt.val}${nwFmt.unit ? '<span style="font-size:22px;color:var(--ink-muted);"> '+nwFmt.unit+'</span>' : ''}</div>
+      <div class="dash-hero-split">
+        <div class="dash-hero-col">
+          <div class="dash-eyebrow">Net worth today · ${_nowYM}</div>
+          <div class="dash-bignum"><span class="cur">${currencySymbol()}</span>${nwFmt.val}${nwFmt.unit ? '<span style="font-size:22px;color:var(--ink-muted);"> '+nwFmt.unit+'</span>' : ''}</div>
+        </div>
+        <div class="dash-hero-col">
+          <div class="dash-eyebrow">Liquidity</div>
+          <div class="dash-bignum" style="font-size:30px;"><span class="cur" style="font-size:18px;">${currencySymbol()}</span>${lqFmt.val}${lqFmt.unit ? '<span style="font-size:16px;color:var(--ink-muted);"> '+lqFmt.unit+'</span>' : ''}</div>
+          <div class="dash-liq-label">${escapeHtml(liquidityLabel)}</div>
+        </div>
+      </div>
       <div class="dash-sub">Assets ${fmtMoney(totalAssets, true)}${liabTotal>0 ? ' · Liabilities '+fmtMoney(liabTotal, true) : ''}</div>
       <div class="dash-composition-bar">
         ${totalAssets>0 ? compEntries.map(e => `<div class="dash-comp-seg" style="width:${(e.value/totalAssets*100).toFixed(2)}%;background:${e.color};" title="${escapeHtml(e.name)}: ${fmtMoney(e.value)}"></div>`).join('') : '<div class="dash-comp-seg" style="width:100%;background:var(--line);"></div>'}
