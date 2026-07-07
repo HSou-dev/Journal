@@ -1453,6 +1453,12 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 @media (max-width: 860px) { .dash-hero { grid-template-columns: 1fr; } }
 .dash-card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; }
 .dash-card.feature { background: linear-gradient(135deg, var(--bg-card), var(--bg-elevated)); border-color: var(--accent-glow); }
+.dash-retire-card { transition: border-color 0.15s ease, box-shadow 0.15s ease; }
+.dash-retire-card:hover { border-color: var(--accent-glow); box-shadow: 0 2px 10px var(--accent-hover); }
+.dash-retire-toggle { font-size: 12px; color: var(--accent); letter-spacing: 0; }
+.dash-retire-assump { font-size: 11px; line-height: 1.5; color: var(--ink-muted); margin-top: 10px; }
+.dash-retire-detail { animation: dashFadeIn 0.18s ease; }
+@keyframes dashFadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .dash-eyebrow { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-muted); margin-bottom: 10px; }
 .dash-bignum { font-family: 'Fraunces', serif; font-size: 38px; line-height: 1; color: var(--ink); font-weight: 500; }
 .dash-bignum .cur { font-size: 22px; color: var(--ink-muted); margin-right: 4px; }
@@ -2250,7 +2256,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.04';
+const APP_VERSION = '2026.05.05.05';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -5756,13 +5762,16 @@ function renderDashboard() {
   if (ret) {
     const pct = Math.min(100, Math.max(0, ret.pctFunded * 100));
     const barColor = ret.onTrack ? 'var(--accent-bright)' : (pct > 60 ? '#C9A84C' : 'var(--red)');
+    const _infPct = ((Number(state.expenseGrowthRate) || 0.06) * 100).toFixed(0);
+    const _postRetPct = ((Number(state.postRetReturn) || 0.07) * 100).toFixed(0);
     html += `
-      <div class="dash-card">
-        <div class="dash-eyebrow">Retirement corpus · age ${ret.p1Ret}</div>
+      <div class="dash-card dash-retire-card" id="dashRetireCard" style="cursor:pointer;">
+        <div class="dash-eyebrow" style="display:flex;justify-content:space-between;align-items:center;">Retirement corpus · age ${ret.p1Ret}<span class="dash-retire-toggle" id="dashRetireToggle" aria-hidden="true">▸</span></div>
         <div class="dash-bignum" style="font-size:30px;"><span class="cur">${currencySymbol()}</span>${fmtShortUnit(ret.projectedCorpus).val}<span style="font-size:16px;color:var(--ink-muted);"> ${fmtShortUnit(ret.projectedCorpus).unit}</span></div>
         <div class="dash-sub">of ${fmtMoney(ret.requiredCorpus, true)} needed · ${ret.yearsToRet} years to go</div>
         <div class="dash-progress-track"><div class="dash-progress-fill" style="width:${pct}%;background:${barColor};"></div></div>
         <div class="dash-delta ${ret.onTrack?'pos':'neg'}">${ret.onTrack ? '▲ On track — surplus of '+fmtMoney(ret.gap, true) : '▼ Shortfall of '+fmtMoney(Math.abs(ret.gap), true)}</div>
+        <div class="dash-retire-assump">Assumes ${ret.monthlyNeedPct}% of current expenses, inflated ${_infPct}%/yr to age ${ret.p1Ret}, sustained ${ret.drawdownYears} yrs at ${_postRetPct}% post-retirement return. <span style="color:var(--accent);">Tap for details ▸</span></div>
       </div>`;
   } else {
     html += `
@@ -5775,6 +5784,11 @@ function renderDashboard() {
   }
   html += '</div>'; // end hero
 
+  // ── RETIREMENT DETAIL (expands on card click) ──
+  if (ret) {
+    html += `<div class="dash-card dash-retire-detail" id="dashRetireDetail" style="display:none;margin-bottom:16px;"></div>`;
+  }
+
   // ── MONTHLY PULSE: 3 stat cards ──
   html += `
     <div class="dash-grid-3">
@@ -5785,30 +5799,12 @@ function renderDashboard() {
 
   // ── (Net-worth trajectory chart removed per user preference) ──
 
-  // ── WHAT-IF SLIDER (only if retirement on) ──
-  if (ret) {
-    html += `
-      <div class="dash-two-col">
-        <div class="dash-card">
-          <div class="dash-eyebrow">What if I invest more?</div>
-          <div class="dash-slider-row">
-            <input type="range" id="dashWhatIf" min="0" max="100000" step="2500" value="0">
-            <span class="dash-slider-val" id="dashWhatIfVal">+${currencySymbol()}0/mo</span>
-          </div>
-          <div class="dash-whatif-result" id="dashWhatIfResult"></div>
-        </div>
-        <div class="dash-card">
-          <div class="dash-eyebrow">Liquidity health</div>
-          <div id="dashLiquidity"></div>
-        </div>
-      </div>`;
-  } else {
-    html += `
+  // ── LIQUIDITY HEALTH (full-width) ──
+  html += `
       <div class="dash-card" style="margin-bottom:16px;">
         <div class="dash-eyebrow">Liquidity health</div>
         <div id="dashLiquidity"></div>
       </div>`;
-  }
 
   // ── DEBT PAYOFF TRACKER ──
   // Only show if there's at least one EMI that isn't already fully paid off.
@@ -5855,8 +5851,25 @@ function renderDashboard() {
   // Trajectory chart with retirement target line + event annotations
   // (Trajectory chart removed per user preference)
 
-  // What-if slider
-  if (ret) _wireWhatIf(p, ret, adjNetWorth);
+  // Retirement card → expand/collapse detail panel
+  if (ret) {
+    const _rCard = document.getElementById('dashRetireCard');
+    const _rDetail = document.getElementById('dashRetireDetail');
+    const _rToggle = document.getElementById('dashRetireToggle');
+    if (_rCard && _rDetail) {
+      _rCard.addEventListener('click', () => {
+        const open = _rDetail.style.display !== 'none';
+        if (open) {
+          _rDetail.style.display = 'none';
+          if (_rToggle) _rToggle.textContent = '▸';
+        } else {
+          if (!_rDetail.dataset.built) { _rDetail.innerHTML = _renderRetireDetail(ret); _rDetail.dataset.built = '1'; }
+          _rDetail.style.display = 'block';
+          if (_rToggle) _rToggle.textContent = '▾';
+        }
+      });
+    }
+  }
 
   // Liquidity health
   _renderLiquidity(p, todayIdx);
@@ -5977,24 +5990,52 @@ function _renderDashTrajectory(p, ret, todayIdx, nwSeries) {
   });
 }
 
-function _wireWhatIf(p, retBase, nwSeries) {
-  const slider = document.getElementById('dashWhatIf');
-  const valEl = document.getElementById('dashWhatIfVal');
-  const resEl = document.getElementById('dashWhatIfResult');
-  if (!slider || !resEl) return;
-  const update = () => {
-    const extra = Number(slider.value) || 0;
-    if (valEl) valEl.textContent = '+' + currencySymbol() + fmtNum(extra, CURRENCIES[state.currency].style, true) + '/mo';
-    const r = computeRetirement(p, { extraMonthly: extra, nwSeries: nwSeries });
-    if (!r) { resEl.textContent = ''; return; }
-    const added = r.projectedCorpus - retBase.projectedCorpus;
-    const newGap = r.gap;
-    resEl.innerHTML = extra === 0
-      ? `Drag to see how extra monthly investing grows your corpus. Your current projection is <strong>${fmtMoney(retBase.projectedCorpus, true)}</strong>.`
-      : `Investing <strong>${fmtMoney(extra, true)}</strong>/mo more adds <strong>${fmtMoney(added, true)}</strong> to your corpus by retirement — reaching <strong>${fmtMoney(r.projectedCorpus, true)}</strong>. ${newGap >= 0 ? 'That fully funds your target with '+fmtMoney(newGap, true)+' to spare.' : 'Still '+fmtMoney(Math.abs(newGap), true)+' short of target.'}`;
-  };
-  slider.addEventListener('input', update);
-  update();
+// Build the expandable retirement detail: summary + year-by-year drawdown of the
+// PROJECTED corpus (the card headline), so the panel and card headline always agree.
+// Withdrawals grow at inflation; corpus earns the post-retirement return. This is a
+// display-only projection — no engine math is touched.
+function _renderRetireDetail(ret) {
+  const inf = Number(state.expenseGrowthRate) || 0.06;
+  const postRet = Number(state.postRetReturn) || 0.07;
+  const retYear = parseInt((ret.retISO || '').split('-')[0], 10) || (new Date().getFullYear() + ret.yearsToRet);
+
+  // ── Summary rows ──
+  const summary = [
+    ['Projected corpus at ' + ret.p1Ret, fmtMoney(ret.projectedCorpus, true)],
+    ['Present value (today\u2019s money)', fmtMoney(ret.pvProjected, true)],
+    ['Required corpus', fmtMoney(ret.requiredCorpus, true)],
+    [(ret.onTrack ? 'Surplus' : 'Shortfall'), fmtMoney(Math.abs(ret.gap), true)],
+    ['Monthly need at retirement', fmtMoney(ret.monthlyNeedAtRet, true)]
+  ];
+  let html = '<div class="dash-eyebrow">Retirement detail</div>';
+  html += '<table class="dash-table" style="margin-bottom:18px;"><tbody>';
+  summary.forEach(([k, v], i) => {
+    const strong = (i === 3);
+    const col = strong ? (ret.onTrack ? 'var(--accent-bright)' : 'var(--red)') : 'var(--ink)';
+    html += `<tr><td style="color:var(--ink-muted);">${k}</td><td style="text-align:right;font-weight:${strong?600:400};color:${col};">${v}</td></tr>`;
+  });
+  html += '</tbody></table>';
+
+  // ── Drawdown table: from projected corpus, age p1Ret → life expectancy ──
+  html += `<div class="dash-eyebrow">Drawdown — age ${ret.p1Ret} to ${ret.life}</div>`;
+  html += '<table class="dash-table"><thead><tr><th>Year</th><th>Age</th><th style="text-align:right;">Annual withdrawal</th><th style="text-align:right;">Corpus remaining</th></tr></thead><tbody>';
+  let corpus = ret.projectedCorpus;
+  let exhaustedAge = null;
+  for (let k = 0; k < ret.drawdownYears; k++) {
+    const age = ret.p1Ret + k;
+    const yearNeed = ret.annualNeedAtRet * Math.pow(1 + inf, k);
+    corpus = corpus * (1 + postRet) - yearNeed;
+    let remaining = corpus;
+    if (corpus < 0 && exhaustedAge === null) { exhaustedAge = age; }
+    if (remaining < 0) remaining = 0;
+    const rowCol = corpus < 0 ? 'var(--red)' : 'var(--ink)';
+    html += `<tr><td>${retYear + k}</td><td>${age}</td><td style="text-align:right;">${fmtMoney(yearNeed, true)}</td><td style="text-align:right;color:${rowCol};">${fmtMoney(remaining, true)}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  html += `<div class="dash-retire-assump" style="margin-top:12px;">${exhaustedAge === null
+    ? 'On this projection the corpus sustains withdrawals through age ' + ret.life + '.'
+    : 'On this projection the corpus is exhausted at age ' + exhaustedAge + ' — before life expectancy of ' + ret.life + '.'}</div>`;
+  return html;
 }
 
 function _renderLiquidity(p, todayIdx) {
