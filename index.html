@@ -1701,7 +1701,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       </div>
       <div class="subsection">
         <div class="subsection-title">One-off <em>expenses</em> <span style="font-style:italic;color:var(--ink-muted);font-size:13px;font-weight:400;">(optional)</span></div>
-        <div class="subsection-desc">Planned big spends — a trip, a wedding, appliance purchase, annual premiums.</div>
+        <div class="subsection-desc">Planned big spends — a trip, a wedding, appliance purchase, annual premiums. This section is for <em>future</em> projected spends; to log a one-time expense in the current or a past month, add it on the Journal page (choose the “One-time expense” category).</div>
         <div class="repeater-wrap" id="expenseOneOffs"></div>
         <button class="add-btn" id="addExpenseOneOff">+ Add one-off expense</button>
       </div>
@@ -2299,7 +2299,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.10';
+const APP_VERSION = '2026.05.05.11';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -2984,7 +2984,14 @@ function saveStep(step) {
     case 3:
       getExpenseCats().forEach(c => { const _el = document.getElementById(c.key); if (_el) state[c.key] = Number(_el.value) || 0; });
       state.plannedSavingsTransfer = Number((document.getElementById('plannedSavingsTransfer')||{}).value) || 0;
-      state.expenseOneOffs = readOneOffs('expenseOneOffs');
+      {
+        // The edit form only renders future/recurring one-offs, so readOneOffs returns just those.
+        // Re-attach legacy past/current non-recurring one-offs (hidden from the form) so they are
+        // never dropped — they stay counted via the planned path, per the agreed behavior.
+        const _s3NowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
+        const kept = (state.expenseOneOffs || []).filter(o => o && !((o.month && o.month > _s3NowYM) || o.repeat));
+        state.expenseOneOffs = kept.concat(readOneOffs('expenseOneOffs'));
+      }
       break;
     case 4: state.emis = readEMIs(); break;
     case 5: state.investments = readInvestments(); break;
@@ -4319,7 +4326,15 @@ function initWizard() {
   document.getElementById('incomeOverrideList').innerHTML = '';
   (state.incomeOverrides||[]).forEach(d => addIncomeOverrideRow(d));
   document.getElementById('expenseOneOffs').innerHTML = '';
-  (state.expenseOneOffs||[]).forEach(d => addOneOffRow('expenseOneOffs', d));
+  // Edit-inputs shows PROJECTED one-offs only: future-dated or recurring. Past/current one-time
+  // expenses live on the Journal page. Legacy past one-offs remain in state (counted) but are not
+  // shown/edited here; saveStep(3) re-attaches them so they're never dropped on save.
+  {
+    const _eiNowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
+    (state.expenseOneOffs||[])
+      .filter(o => o && ((o.month && o.month > _eiNowYM) || o.repeat))
+      .forEach(d => addOneOffRow('expenseOneOffs', d));
+  }
   document.getElementById('emiList').innerHTML = '';
   (state.emis||[]).forEach(d => addEmiRow(d));
   document.getElementById('investmentList').innerHTML = '';
@@ -6784,6 +6799,11 @@ function renderBudget() {
   const emiActualByMonth = {};
   const investActualByMonth = {};
   const expActualMisc = {}; // adjustments tagged isHiddenSpending
+  // Journal one-time expenses (reserved category 'oneTime'). Kept SEPARATE from category actuals
+  // so they never fold into a normal category or the past-month "sum of all categories" — this is
+  // what guarantees they're counted exactly once (in the One-time row + the overlay total).
+  const oneTimeActualByMonth = {};   // ym -> [{ note, amount }]
+  const oneTimeActualTotal = {};     // ym -> sum
   (state.transactions || []).forEach(tx => {
     if (!tx.date) return;
     const ym = tx.date.slice(0, 7);
@@ -6793,6 +6813,10 @@ function renderBudget() {
       if (tx.category === 'emi' && tx.emiId) {
         if (!emiActualByMonth[ym]) emiActualByMonth[ym] = {};
         emiActualByMonth[ym][tx.emiId] = (emiActualByMonth[ym][tx.emiId] || 0) + amt;
+      } else if (tx.category === 'oneTime') {
+        if (!oneTimeActualByMonth[ym]) oneTimeActualByMonth[ym] = [];
+        oneTimeActualByMonth[ym].push({ note: (tx.note || '').trim() || 'One-time expense', amount: amt });
+        oneTimeActualTotal[ym] = (oneTimeActualTotal[ym] || 0) + amt;
       } else if (tx.category) {
         if (!expActualByMonth[ym]) expActualByMonth[ym] = {};
         expActualByMonth[ym][tx.category] = (expActualByMonth[ym][tx.category] || 0) + amt;
@@ -7225,10 +7249,12 @@ function renderBudget() {
     // the bug: a current-month one-off showed as its own row but didn't move the total). Add the
     // engine's one-off series back on top. Future months are skipped by the _isFuture continue and
     // keep the engine total, which already includes one-offs. Index with sliceFrom+i because the
-    // overlay loop runs over the visible window while p.oneOffExpSeries is full-horizon. This flows
-    // into the sheet's derived surplus/residue/cash automatically; engine net-worth and
-    // projectSavingsChain math (which already count one-offs) are untouched.
-    _overlayTotalExpense[i] += (p.oneOffExpSeries[sliceFrom + i] || 0);
+    // overlay loop runs over the visible window while p.oneOffExpSeries is full-horizon. Also add
+    // journal one-time expenses (reserved 'oneTime' category, kept out of category actuals above)
+    // for this month. This flows into the sheet's derived surplus/residue/cash automatically;
+    // engine net-worth and projectSavingsChain math (which don't see journal one-times, so no
+    // double-count) are untouched.
+    _overlayTotalExpense[i] += (p.oneOffExpSeries[sliceFrom + i] || 0) + (oneTimeActualTotal[ym] || 0);
   }
   totalExpense = _overlayTotalExpense;
   emiMonthly = _overlayEmiTotal;
@@ -7593,6 +7619,17 @@ function renderBudget() {
       }
     });
   });
+  // Merge journal one-time expenses (past/current) into the same row, so all sources — planned
+  // (Edit-inputs, future) and journaled (past/current) — appear as ONE row. No overlap: Edit-inputs
+  // is future-only and Journal is past/current-only, so a month draws from at most one source
+  // (except legacy planned one-offs left in place, which simply add alongside).
+  for (let i = 0; i < n; i++) {
+    const acts = oneTimeActualByMonth[isos[i]] || [];
+    acts.forEach(a => {
+      oneTimeCombined[i] += a.amount;
+      oneTimeDetail[i].push({ note: a.note, amount: a.amount });
+    });
+  }
   if (oneTimeCombined.some(v => v > 0)) {
     expenseRows.push({ oneTime: true, label: 'One-time expenses', values: oneTimeCombined, detail: oneTimeDetail });
   }
@@ -11101,7 +11138,7 @@ document.addEventListener('keydown', (e) => {
   }
   window.renderAdjustmentsHistory = renderAdjustmentsHistory;
 
-  function labelForCat(key, list) { const c = list.find(c => c.key === key); return c ? c.label : (key || '—'); }
+  function labelForCat(key, list) { if (key === 'oneTime') return 'One-time expense'; const c = list.find(c => c.key === key); return c ? c.label : (key || '—'); }
   function formatDate(iso) { const d = new Date(iso + 'T00:00'); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
 
   const modal = {
@@ -11254,7 +11291,12 @@ document.addEventListener('keydown', (e) => {
           }).join('');
         }
         const groupedRegular = cats.length > 0 ? '<div class="tx-cat-group-label">Categories</div>' + regularHtml : regularHtml;
-        document.getElementById('txCatChips').innerHTML = (activeEmis.length > 0 ? groupedRegular + emiHtml : regularHtml);
+        let chipHtml = (activeEmis.length > 0 ? groupedRegular + emiHtml : regularHtml);
+        if (type === 'expense') {
+          chipHtml += '<div class="tx-cat-group-label">Other</div>'
+            + '<div class="tx-cat-chip' + (chosenCat === 'oneTime' ? ' selected' : '') + '" data-cat="oneTime" title="A single non-recurring expense — appears in the One-time expenses row on the projection sheet">One-time expense</div>';
+        }
+        document.getElementById('txCatChips').innerHTML = chipHtml;
         document.querySelectorAll('#txCatChips .tx-cat-chip').forEach(chip => {
           chip.addEventListener('click', () => {
             document.querySelectorAll('#txCatChips .tx-cat-chip').forEach(c => c.classList.remove('selected'));
@@ -11342,6 +11384,7 @@ document.addEventListener('keydown', (e) => {
         const catChip = document.querySelector('#txCatChips .tx-cat-chip.selected');
         const category = catChip ? catChip.dataset.cat : null;
         if (!category) { alert('Pick a category.'); return; }
+        if (category === 'oneTime' && !note) { alert('Give the one-time expense a name using the Note field (it shows in the One-time expenses breakdown).'); return; }
         tx = { type, amount, date, accountId: acc, category, note };
         // EMI selection: store the specific EMI id so we can route it in budget actuals.
         if (category === 'emi' && catChip && catChip.dataset.emiId) {
