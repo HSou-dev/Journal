@@ -2299,7 +2299,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.12';
+const APP_VERSION = '2026.05.05.13';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -5705,8 +5705,14 @@ function renderBudgetRowDetails(filter, month) {
   const monthPrefix = month + '-';
   // Inline helpers (module-scoped equivalents of the journal IIFE's private helpers).
   const _labelForCatLocal = (key) => {
+    if (key === 'oneTime') return 'One-time expense';
     const c = (getExpenseCats() || []).find(c => c.key === key);
-    return c ? c.label : (key || '—');
+    if (c) return c.label;
+    const override = (state.categoryLabels || {})[key];
+    if (override) return override;
+    const builtin = EXPENSE_CATEGORIES.find(c2 => c2.key === key);
+    if (builtin) return builtin.label;
+    return key || '—';
   };
   const _formatDateLocal = (iso) => {
     if (!iso) return '';
@@ -10912,7 +10918,10 @@ document.addEventListener('keydown', (e) => {
 (function () {
   'use strict';
 
-  const EXPENSE_CATS_FOR_TX = getExpenseCats().map(c => ({ key: c.key, label: c.label }));
+  // Live category list — recomputed on every use so renames / additions / deletions made in
+  // Edit-inputs immediately reflect in the Journal picker and transaction labels (previously this
+  // was a const captured once at load, so category edits never reached the Journal).
+  const expenseCatsForTx = () => getExpenseCats().map(c => ({ key: c.key, label: c.label }));
   const INCOME_CATS = [
     { key: 'salary',   label: 'Salary' },
     { key: 'rewards',  label: 'Rewards' },
@@ -11075,7 +11084,7 @@ document.addEventListener('keydown', (e) => {
         const emiObj = isEmi ? (state.emis || []).find(e => e.id === tx.emiId) : null;
         const catLabel = isEmi
           ? (emiObj ? `EMI · ${emiObj.name}` : 'EMI')
-          : labelForCat(tx.category, EXPENSE_CATS_FOR_TX);
+          : labelForCat(tx.category, expenseCatsForTx());
         line1 = (tx.note || catLabel || 'Expense');
         line2 = `${formatDate(tx.date)} · ${catLabel} · ${acc ? acc.name : '—'}`;
         amtClass = 'neg'; amtPrefix = '−';
@@ -11164,7 +11173,19 @@ document.addEventListener('keydown', (e) => {
   }
   window.renderAdjustmentsHistory = renderAdjustmentsHistory;
 
-  function labelForCat(key, list) { if (key === 'oneTime') return 'One-time expense'; const c = list.find(c => c.key === key); return c ? c.label : (key || '—'); }
+  function labelForCat(key, list) {
+    if (key === 'oneTime') return 'One-time expense';
+    if (key === 'emi') return 'EMI';
+    const c = list.find(c => c.key === key);
+    if (c) return c.label;
+    // Category was deleted: fall back to a rename override or the built-in default label so old
+    // transactions still read sensibly rather than showing the raw key (e.g. "exInsurance").
+    const override = (state.categoryLabels || {})[key];
+    if (override) return override;
+    const builtin = EXPENSE_CATEGORIES.find(c2 => c2.key === key);
+    if (builtin) return builtin.label;
+    return key || '—';
+  }
   function formatDate(iso) { const d = new Date(iso + 'T00:00'); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
 
   const modal = {
@@ -11296,7 +11317,7 @@ document.addEventListener('keydown', (e) => {
         }
       }
       if (single && type !== 'adjustment' && type !== 'investment_contrib' && type !== 'investment_redemption') {
-        const cats = type === 'income' ? INCOME_CATS : EXPENSE_CATS_FOR_TX;
+        const cats = type === 'income' ? INCOME_CATS : expenseCatsForTx();
         // Active EMIs as of selected date (only for expense type) — each becomes its own chip.
         const activeEmis = (type === 'expense') ? (state.emis || []).filter(e => {
           if (!e.startMonth) return false;
