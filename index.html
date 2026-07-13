@@ -942,9 +942,16 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 .budget-grid .pos { color: var(--ink); }
 .proj-table .ot-cell .ot-total { cursor: pointer; border-bottom: 1px dotted var(--ink-muted); white-space: nowrap; }
 .proj-table .ot-cell .ot-caret { font-size: 8px; color: var(--ink-muted); }
-.proj-table .ot-cell .ot-detail { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--line); text-align: right; }
-.proj-table .ot-cell .ot-line { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; color: var(--ink-dim); line-height: 1.5; }
-.proj-table .ot-cell .ot-line span:first-child { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 90px; }
+.ot-popover { position: fixed; z-index: 1000; background: var(--bg-card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.18); padding: 10px 12px; font-family: 'DM Sans', system-ui, sans-serif; }
+.ot-pop-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-muted); margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.ot-pop-close { background: transparent; border: none; color: var(--ink-muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.ot-pop-close:hover { color: var(--ink); }
+.ot-pop-row { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 3px 0; }
+.ot-pop-note { color: var(--ink-dim); font-size: 13px; line-height: 1.4; word-break: break-word; }
+.ot-pop-amt { color: var(--ink); font-family: 'JetBrains Mono', monospace; font-size: 12.5px; white-space: nowrap; }
+.ot-pop-total { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line); font-weight: 600; }
+.ot-pop-total .ot-pop-note, .ot-pop-total span:first-child { color: var(--ink); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+.ot-pop-total span:last-child { color: var(--accent); font-family: 'JetBrains Mono', monospace; }
 
 #hamburgerBtn {
   display: none;
@@ -2292,7 +2299,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.07';
+const APP_VERSION = '2026.05.05.08';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -6687,14 +6694,55 @@ function computeRetirement(p, opts) {
   };
 }
 
-// Toggle a projection-sheet one-time cell between its month total and per-item detail.
-window._toggleOneTimeCell = function(span) {
-  const cell = span.closest('td'); if (!cell) return;
-  const det = cell.querySelector('.ot-detail'); if (!det) return;
-  const open = det.style.display !== 'none';
-  det.style.display = open ? 'none' : 'block';
-  const car = span.querySelector('.ot-caret');
-  if (car) car.innerHTML = open ? '&#9656;' : '&#9662;';
+// One-time cell → floating detail popover. Rendered at body level with position:fixed so it
+// escapes the projection table's horizontal scroll clipping and can show full expense names,
+// and it's width-capped to the viewport so it stays readable on mobile.
+function _otOutside(e) {
+  const p = document.getElementById('_otPopover');
+  if (!p) return;
+  if (p.contains(e.target)) return;
+  if (e.target.closest && e.target.closest('.ot-total')) return;
+  _closeOneTimePopover();
+}
+function _otEsc(e) { if (e.key === 'Escape') _closeOneTimePopover(); }
+window._closeOneTimePopover = function() {
+  const p = document.getElementById('_otPopover');
+  if (p) p.remove();
+  document.removeEventListener('click', _otOutside, true);
+  document.removeEventListener('keydown', _otEsc, true);
+};
+window._openOneTimePopover = function(anchor, cid) {
+  const data = (window._otRegistry || {})[cid];
+  if (!data) return;
+  const already = document.getElementById('_otPopover');
+  _closeOneTimePopover();
+  if (already && already.getAttribute('data-cid') === cid) return; // second tap on same cell closes it
+  const total = data.items.reduce((a, it) => a + (it.amount || 0), 0);
+  const rows = data.items
+    .slice().sort((a, b) => (b.amount || 0) - (a.amount || 0))
+    .map(it => `<div class="ot-pop-row"><span class="ot-pop-note">${escapeHtml(it.note)}</span><span class="ot-pop-amt">${fmtMoney(it.amount)}</span></div>`).join('');
+  const pop = document.createElement('div');
+  pop.className = 'ot-popover';
+  pop.id = '_otPopover';
+  pop.setAttribute('data-cid', cid);
+  pop.innerHTML = `<div class="ot-pop-head"><span>One-time · ${escapeHtml(data.month)}</span><button type="button" class="ot-pop-close" onclick="_closeOneTimePopover()" aria-label="Close">&times;</button></div>${rows}<div class="ot-pop-row ot-pop-total"><span>Total</span><span>${fmtMoney(total)}</span></div>`;
+  document.body.appendChild(pop);
+  // Position: anchored under the cell on desktop; clamped to the viewport (mobile-safe).
+  const r = anchor.getBoundingClientRect();
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const pw = Math.min(280, vw - 24);
+  pop.style.width = pw + 'px';
+  let left = r.left + r.width / 2 - pw / 2;
+  left = Math.max(12, Math.min(left, vw - pw - 12));
+  const ph = pop.offsetHeight;
+  let top = r.bottom + 6;
+  if (top + ph > vh - 12) top = Math.max(12, r.top - ph - 6);
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+  setTimeout(() => {
+    document.addEventListener('click', _otOutside, true);
+    document.addEventListener('keydown', _otEsc, true);
+  }, 0);
 };
 
 function renderBudget() {
@@ -7545,12 +7593,14 @@ function renderBudget() {
     expenseRows.map(r => {
       let cellHtml;
       if (r.oneTime) {
+        const _otReg = (window._otRegistry = {});
         cellHtml = r.values.map((v, i) => {
           const items = r.detail[i] || [];
           const base = `num ${neg(v)}${_isCurrent(i) ? ' current-month' : ''}`;
           if (items.length >= 2) {
-            const lines = items.map(it => `<div class="ot-line"><span>${escapeHtml(it.note)}</span><span>${fmtMoney(it.amount)}</span></div>`).join('');
-            return `<td class="${base} ot-cell" data-col="${i}"><span class="ot-total" onclick="_toggleOneTimeCell(this)">${fmtMoney(v)} <span class="ot-caret">&#9656;</span></span><div class="ot-detail" style="display:none;">${lines}</div></td>`;
+            const cid = 'ot' + i;
+            _otReg[cid] = { month: labels[i], items };
+            return `<td class="${base} ot-cell" data-col="${i}"><span class="ot-total" onclick="_openOneTimePopover(this,'${cid}')">${fmtMoney(v)} <span class="ot-caret">&#9656;</span></span></td>`;
           }
           return `<td class="${base}" data-col="${i}">${fmtMoney(v)}</td>`;
         }).join('');
