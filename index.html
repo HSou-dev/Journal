@@ -2299,7 +2299,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.08';
+const APP_VERSION = '2026.05.05.09';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -7597,7 +7597,7 @@ function renderBudget() {
         cellHtml = r.values.map((v, i) => {
           const items = r.detail[i] || [];
           const base = `num ${neg(v)}${_isCurrent(i) ? ' current-month' : ''}`;
-          if (items.length >= 2) {
+          if (items.length >= 1) {
             const cid = 'ot' + i;
             _otReg[cid] = { month: labels[i], items };
             return `<td class="${base} ot-cell" data-col="${i}"><span class="ot-total" onclick="_openOneTimePopover(this,'${cid}')">${fmtMoney(v)} <span class="ot-caret">&#9656;</span></span></td>`;
