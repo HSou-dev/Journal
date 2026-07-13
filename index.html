@@ -2299,7 +2299,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.11';
+const APP_VERSION = '2026.05.05.12';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -5505,11 +5505,17 @@ function renderBudgetActuals() {
   // (These are CC adjustments tagged isHiddenSpending — they pollute Misc and the user
   // should be able to drill in to see why Misc is higher than expected.)
   let adjMiscActual = 0;
+  let oneTimeActual = 0;           // journal one-time expenses this month
+  const oneTimeItems = [];         // for the expandable detail
   (state.transactions || []).forEach(tx => {
     if (!tx.date || !tx.date.startsWith(monthPrefix)) return;
     if (tx.type === 'expense' && tx.category === 'emi' && tx.emiId) {
       // EMI payment — routed to its own per-EMI tube, not to discretionary categories.
       if (emiActuals.hasOwnProperty(tx.emiId)) emiActuals[tx.emiId] += Number(tx.amount) || 0;
+    } else if (tx.type === 'expense' && tx.category === 'oneTime') {
+      // One-time expenses — their own tube (budget always 0, so any spend reads as "over").
+      oneTimeActual += Number(tx.amount) || 0;
+      oneTimeItems.push({ note: (tx.note || '').trim() || 'One-time expense', amount: Number(tx.amount) || 0, date: tx.date });
     } else if (tx.type === 'expense' && actualsByCat.hasOwnProperty(tx.category)) {
       actualsByCat[tx.category] += Number(tx.amount) || 0;
     } else if (tx.type === 'adjustment' && tx.isHiddenSpending && actualsByCat.hasOwnProperty('exMisc')) {
@@ -5628,6 +5634,14 @@ function renderBudgetActuals() {
     }
   }
 
+  // ---- One-time expenses ----
+  // No monthly budget — the allotted amount is always 0, so any journal one-time expense this
+  // month reads as fully "over" (red tube). Only shown when there's a one-time spend this month.
+  if (oneTimeActual > 0) {
+    html += '<div class="budget-section-head">One-time expenses</div>';
+    html += renderBudgetRow('One-time expenses', '#c37b52', oneTimeActual, 0, false, 'onetime', true);
+  }
+
   // ---- Planned savings transfer ----
   // Loose mode: planned amount is a target; "actual" = sum of transfers logged this month
   // whose destination is the savings account. Difference is informational, not enforced.
@@ -5715,10 +5729,13 @@ function renderBudgetRowDetails(filter, month) {
       return tx.type === 'expense' && tx.category === 'emi' && tx.emiId === id;
     }
     if (filter === 'all-disc') {
-      // All discretionary expenses (any category except EMI) + adjustment-misc
-      if (tx.type === 'expense' && tx.category !== 'emi') return true;
+      // All discretionary expenses (any category except EMI and one-time) + adjustment-misc
+      if (tx.type === 'expense' && tx.category !== 'emi' && tx.category !== 'oneTime') return true;
       if (tx.type === 'adjustment' && tx.isHiddenSpending) return true;
       return false;
+    }
+    if (filter === 'onetime') {
+      return tx.type === 'expense' && tx.category === 'oneTime';
     }
     if (filter === 'all-emi') {
       return tx.type === 'expense' && tx.category === 'emi';
@@ -5770,21 +5787,25 @@ function renderBudgetRowDetails(filter, month) {
 
 // Render a single budget row (tube + label). Optionally accepts a filter string used by
 // the click-to-expand handler to identify which transactions to show.
-function renderBudgetRow(name, color, actual, budget, master, filter) {
+function renderBudgetRow(name, color, actual, budget, master, filter, zeroIsOver) {
   const safeActual = Math.max(0, Number(actual) || 0);
   const safeBudget = Math.max(0, Number(budget) || 0);
   const hasLimit = safeBudget > 0;
-  const pct = hasLimit ? (safeActual / safeBudget) : 0;
-  const over = hasLimit && pct > 1;
-  const fillWidth = hasLimit ? Math.min(100, pct * 100) : 0;
-  const pctText = hasLimit ? Math.round(pct * 100) + '%' : '—';
+  // Rows with an intentional 0 budget (e.g. One-time expenses): any spend is "over" → full red.
+  const zeroOver = !hasLimit && zeroIsOver && safeActual > 0;
+  const pct = hasLimit ? (safeActual / safeBudget) : (zeroOver ? 1 : 0);
+  const over = (hasLimit && pct > 1) || zeroOver;
+  const fillWidth = hasLimit ? Math.min(100, pct * 100) : (zeroOver ? 100 : 0);
+  const pctText = hasLimit ? Math.round(pct * 100) + '%' : (zeroOver ? 'over' : '—');
   const amountsClass = over ? 'budget-row-amounts over' : 'budget-row-amounts';
   const fillClass = over ? 'tube-fill over' : 'tube-fill';
   const rowClass = master ? 'budget-row budget-master-row' : 'budget-row';
   const dot = `<span class="dot" style="background:${color};"></span>`;
   const numbers = hasLimit
     ? `${fmtMoney(safeActual, true)} / ${fmtMoney(safeBudget, true)}<span class="pct">${pctText}</span>`
-    : `${fmtMoney(safeActual, true)}<span class="pct">no budget set</span>`;
+    : (zeroOver
+        ? `${fmtMoney(safeActual, true)} / ${fmtMoney(0, true)}<span class="pct">over budget</span>`
+        : `${fmtMoney(safeActual, true)}<span class="pct">no budget set</span>`);
   const filterAttr = filter ? ` data-filter="${escapeHtml(filter)}"` : '';
   const chevron = filter ? '<span class="budget-chevron" aria-hidden="true">›</span>' : '';
   return `<div class="${rowClass}"${filterAttr} role="${filter ? 'button' : ''}" tabindex="${filter ? '0' : ''}">
@@ -7766,7 +7787,12 @@ function renderBudget() {
       } else if (tx.type === 'income' && tx.accountId === 'savings') {
         actualTransfer += amt;
       } else if (tx.type === 'expense' && tx.accountId === 'savings') {
-        actualTransfer -= amt;
+        // A one-time expense is a spending event, not an "un-saving." It already reduces the
+        // TARGET (via surplus) and shows in Total Expenses, so it must NOT also reduce the
+        // actual transfer the user deliberately made into savings — otherwise a ₹60k advance
+        // transfer would wrongly shrink to ₹15k after logging a ₹45k one-time. Regular expenses
+        // paid from savings keep the established net-inflow behavior.
+        if (tx.category !== 'oneTime') actualTransfer -= amt;
       } else if (tx.type === 'investment_contrib' && tx.accountId === 'savings') {
         actualTransfer -= amt;
       }
