@@ -243,6 +243,14 @@ h2.panel-title em { font-style: italic; color: var(--gold); font-weight: 300; }
 .field.full { grid-column: 1 / -1; }
 .field label { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-muted); font-weight: 500; }
 .field label .opt { color: var(--ink-muted); font-style: italic; letter-spacing: 0.02em; text-transform: none; margin-left: 6px; font-size: 10.5px; }
+.cat-field label { display: flex; align-items: center; gap: 6px; }
+.cat-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.cat-label-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0.02em; font-size: 12px; }
+.cat-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity 0.15s; }
+.cat-field:hover .cat-actions, .cat-field:focus-within .cat-actions { opacity: 1; }
+.cat-btn { background: transparent; border: none; color: var(--ink-muted); cursor: pointer; font-size: 13px; line-height: 1; padding: 2px 4px; border-radius: 4px; }
+.cat-btn:hover { background: var(--accent-hover); color: var(--ink); }
+.cat-btn.cat-del:hover { color: var(--red); }
 input[type="text"], input[type="number"], input[type="date"], input[type="month"], select, textarea {
   background: var(--bg-elevated);
   border: 1px solid var(--line);
@@ -932,6 +940,11 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 .budget-grid tr.residual th, .budget-grid tr.residual td { font-weight:600; font-style:italic; background:var(--bg-elevated); border-top:1px solid var(--line); }
 .budget-grid .neg { color: var(--red); }
 .budget-grid .pos { color: var(--ink); }
+.proj-table .ot-cell .ot-total { cursor: pointer; border-bottom: 1px dotted var(--ink-muted); white-space: nowrap; }
+.proj-table .ot-cell .ot-caret { font-size: 8px; color: var(--ink-muted); }
+.proj-table .ot-cell .ot-detail { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--line); text-align: right; }
+.proj-table .ot-cell .ot-line { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; color: var(--ink-dim); line-height: 1.5; }
+.proj-table .ot-cell .ot-line span:first-child { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 90px; }
 
 #hamburgerBtn {
   display: none;
@@ -1670,18 +1683,8 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       <div class="panel-head"><span class="panel-num">No. 03</span><span class="panel-divider"></span><span class="panel-num">Outflows</span></div>
       <h2 class="panel-title">What goes <em>out</em>?</h2>
       <p class="panel-desc">Typical monthly spending. Round values are fine — you can refine later.</p>
-      <div class="form-grid">
-        <div class="field"><label>Rent &amp; maintenance</label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exRent" min="0" step="any" placeholder="0" /></div></div>
-        <div class="field"><label>Food &amp; groceries</label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exFood" min="0" step="any" placeholder="0" /></div></div>
-        <div class="field"><label>Utilities <span class="opt">power, internet, gas</span></label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exUtil" min="0" step="any" placeholder="0" /></div></div>
-        <div class="field"><label>Transport &amp; fuel</label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exTransport" min="0" step="any" placeholder="0" /></div></div>
-        <div class="field"><label>Shopping &amp; personal</label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exShopping" min="0" step="any" placeholder="0" /></div></div>
-        <div class="field"><label>Dining out &amp; entertainment</label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exDining" min="0" step="any" placeholder="0" /></div></div>
-        <div class="field"><label>Subscriptions <span class="opt">streaming, apps</span></label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exSubs" min="0" step="any" placeholder="0" /></div></div>
-        <div class="field"><label>Support &amp; family <span class="opt">parents, kids</span></label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exFamily" min="0" step="any" placeholder="0" /></div></div>
-        <div class="field"><label>Insurance premium <span class="opt">monthly equivalent</span></label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exInsurance" min="0" step="any" placeholder="0" /></div></div>
-        <div class="field"><label>Miscellaneous / buffer</label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exMisc" min="0" step="any" placeholder="0" /></div></div>
-      </div>
+      <div class="form-grid" id="expenseCatGrid"></div>
+      <button class="add-btn" id="addExpenseCat" style="margin-top:4px;">+ Add category</button>
       <div class="subsection">
         <div class="subsection-title">Planned savings transfer <span style="font-style:italic;color:var(--ink-muted);font-size:13px;font-weight:400;">(optional)</span></div>
         <div class="subsection-desc">A monthly target you intend to move into your Savings account at the start of each month — like a self-imposed forced-saving rule. We track this against actual transfers logged in the journal. The leftover (after expenses + investments + this transfer) is shown separately as Unplanned overflow.</div>
@@ -2252,6 +2255,31 @@ const EXPENSE_CATEGORIES = [
   { key:'exMisc',      label:'Miscellaneous',         color:'#7d7360' }
 ];
 
+// Color pool for user-added custom categories.
+const CUSTOM_CAT_COLORS = ['#4a8fb0','#7d9b4e','#d99a3c','#9c5fb0','#5eb3a8','#c37b52','#b5824a','#6a9fb5'];
+
+// Single source of truth for the *active* expense categories. Merges the built-in list
+// (minus any the user has deleted, with any renamed labels applied) plus user-added custom
+// categories. EVERY consumer (inputs, engine series, donut, budget tubes, projections,
+// retirement need, transaction tagging) must read through this — never the raw array —
+// so renames/additions/deletions propagate everywhere from one place.
+function getExpenseCats() {
+  const labels  = (state && state.categoryLabels)   || {};
+  const deleted = (state && state.deletedCategories) || [];
+  const custom  = (state && state.customCategories)  || [];
+  const out = [];
+  EXPENSE_CATEGORIES.forEach(c => {
+    if (deleted.indexOf(c.key) !== -1) return;
+    out.push({ key: c.key, label: labels[c.key] || c.label, color: c.color, builtIn: true });
+  });
+  custom.forEach(c => {
+    if (!c || !c.key) return;
+    out.push({ key: c.key, label: labels[c.key] || c.label || 'Category', color: c.color || '#7d7360', builtIn: false });
+  });
+  return out;
+}
+window.getExpenseCats = getExpenseCats;
+
 let state = null;
 let currentStep = 1;
 let currentUser = null;
@@ -2264,7 +2292,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.06';
+const APP_VERSION = '2026.05.05.07';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -2310,6 +2338,10 @@ function freshState() {
     s.retExpensePct = 60;
     s.postRetReturn = 0.07;
     s.retStrategies = {};
+    // Editable expense categories (schema v15)
+    s.categoryLabels = {};
+    s.customCategories = [];
+    s.deletedCategories = [];
     return s;
   };
 })();
@@ -2553,7 +2585,18 @@ function migrateState(s) {
     if (!s.retStrategies || typeof s.retStrategies !== 'object') s.retStrategies = {};
   }
 
-  s.schemaVersion = 14;
+  if ((s.schemaVersion || 0) < 15) {
+    // Editable expense categories (schema v15).
+    // categoryLabels: { [builtInKey]: overrideLabel } — display-only rename of built-ins.
+    // customCategories: [ { key, label, color } ] — user-added categories, key auto-generated.
+    // deletedCategories: [ builtInKey ] — built-ins the user has hidden. Their stored amount
+    //   is left in state (harmless) but the category no longer appears or contributes.
+    if (!s.categoryLabels || typeof s.categoryLabels !== 'object') s.categoryLabels = {};
+    if (!Array.isArray(s.customCategories)) s.customCategories = [];
+    if (!Array.isArray(s.deletedCategories)) s.deletedCategories = [];
+  }
+
+  s.schemaVersion = 15;
   return s;
 }
 
@@ -2932,7 +2975,7 @@ function saveStep(step) {
       state.incomeOverrides = readIncomeOverrides();
       break;
     case 3:
-      EXPENSE_CATEGORIES.forEach(c => { state[c.key] = Number(document.getElementById(c.key).value) || 0; });
+      getExpenseCats().forEach(c => { const _el = document.getElementById(c.key); if (_el) state[c.key] = Number(_el.value) || 0; });
       state.plannedSavingsTransfer = Number((document.getElementById('plannedSavingsTransfer')||{}).value) || 0;
       state.expenseOneOffs = readOneOffs('expenseOneOffs');
       break;
@@ -4035,7 +4078,7 @@ function _updateRetExpHint() {
   const hint = document.getElementById('retExpAmountHint');
   if (!hint) return;
   const pct = Number((document.getElementById('retExpensePct')||{}).value) || 60;
-  const curExp = EXPENSE_CATEGORIES.reduce((a,c)=>a+(Number(state[c.key])||0),0);
+  const curExp = getExpenseCats().reduce((a,c)=>a+(Number(state[c.key])||0),0);
   const retExp = curExp * pct / 100;
   hint.innerHTML = `Today you spend about <strong>${fmtMoney(curExp)}</strong>/mo. At ${pct}% that's <strong style="color:var(--gold-bright);">${fmtMoney(retExp)}</strong>/mo in retirement (in today's money).`;
 }
@@ -4125,11 +4168,11 @@ function buildRateEditor() {
 function buildReview() {
   const panel = document.getElementById('reviewPanel');
   const totalMonthly = state.p1Salary + state.p1Other + state.p2Salary + state.p2Other;
-  const totalExp = EXPENSE_CATEGORIES.reduce((a,c) => a + state[c.key], 0);
+  const totalExp = getExpenseCats().reduce((a,c) => a + (Number(state[c.key])||0), 0);
   const totalEMI = state.emis.reduce((a,e) => a + e.amount, 0);
   const investBal = state.investments.reduce((a,i) => a + i.balance, 0);
   const monthlyInvest = state.investments.reduce((a,i) => a + i.monthlyContribution, 0);
-  panel.innerHTML = `<div class="review-grid"><div class="review-card"><div class="review-head"><span>Household</span><span class="edit" data-goto="1">Edit</span></div><div class="review-item"><span class="k">Mode</span><span class="v">${state.mode === 'solo' ? 'Solo' : 'With partner'}</span></div><div class="review-item"><span class="k">Planner</span><span class="v">${escapeHtml(state.p1Name)}${state.mode==='partner'?' &amp; '+escapeHtml(state.p2Name):''}</span></div><div class="review-item"><span class="k">Currency</span><span class="v">${state.currency}</span></div><div class="review-item"><span class="k">Default horizon</span><span class="v">10 years</span></div></div><div class="review-card"><div class="review-head"><span>Income · monthly</span><span class="edit" data-goto="2">Edit</span></div>${state.p1Salary ? `<div class="review-item"><span class="k">${escapeHtml(state.p1Name)} salary</span><span class="v">${fmtMoney(state.p1Salary)}</span></div>` : ''}${state.p1Other ? `<div class="review-item"><span class="k">${escapeHtml(state.p1Name)} other</span><span class="v">${fmtMoney(state.p1Other)}</span></div>` : ''}${state.p2Salary ? `<div class="review-item"><span class="k">${escapeHtml(state.p2Name)} salary</span><span class="v">${fmtMoney(state.p2Salary)}</span></div>` : ''}${state.p2Other ? `<div class="review-item"><span class="k">${escapeHtml(state.p2Name)} other</span><span class="v">${fmtMoney(state.p2Other)}</span></div>` : ''}<div class="review-item"><span class="k">One-off income</span><span class="v">${state.incomeOneOffs.length} entries</span></div><div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Total monthly</span><span class="v" style="color:var(--gold-bright);">${fmtMoney(totalMonthly)}</span></div></div><div class="review-card"><div class="review-head"><span>Expenses · monthly</span><span class="edit" data-goto="3">Edit</span></div>${EXPENSE_CATEGORIES.filter(c => state[c.key] > 0).map(c => `<div class="review-item"><span class="k">${c.label}</span><span class="v">${fmtMoney(state[c.key])}</span></div>`).join('')}<div class="review-item"><span class="k">One-off expenses</span><span class="v">${state.expenseOneOffs.length} entries</span></div><div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Total monthly</span><span class="v" style="color:var(--red);">${fmtMoney(totalExp)}</span></div></div><div class="review-card"><div class="review-head"><span>EMIs</span><span class="edit" data-goto="4">Edit</span></div>${state.emis.length === 0 ? '<div class="review-item"><span class="k">None entered</span><span class="v">—</span></div>' : state.emis.map(e => `<div class="review-item"><span class="k">${escapeHtml(e.name)}</span><span class="v">${fmtMoney(e.amount)} · ${e.months} mo</span></div>`).join('')}${state.emis.length ? `<div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Total EMI</span><span class="v" style="color:var(--red);">${fmtMoney(totalEMI)}</span></div>` : ''}</div><div class="review-card"><div class="review-head"><span>Investments</span><span class="edit" data-goto="5">Edit</span></div>${state.investments.length === 0 ? '<div class="review-item"><span class="k">None entered</span><span class="v">—</span></div>' : state.investments.map(i => `<div class="review-item"><span class="k"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${i.color};margin-right:8px;"></span>${escapeHtml(i.name)}</span><span class="v">${fmtMoney(i.balance)} · ${(i.rate*100).toFixed(2)}%</span></div>`).join('')}${state.investments.length ? `<div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Current net worth</span><span class="v" style="color:var(--gold-bright);">${fmtMoney(investBal)}</span></div>` : ''}</div><div class="review-card"><div class="review-head"><span>Accounts</span><span class="edit" data-goto="6">Edit</span></div>${(state.accounts||[]).length === 0 ? '<div class="review-item"><span class="k">None entered</span><span class="v">—</span></div>' : state.accounts.map(a => `<div class="review-item"><span class="k">${escapeHtml(a.name)} · ${a.type}</span><span class="v" style="${a.openingBalance<0?'color:var(--red)':''}">${fmtMoney(a.openingBalance)}</span></div>`).join('')}</div></div>`;
+  panel.innerHTML = `<div class="review-grid"><div class="review-card"><div class="review-head"><span>Household</span><span class="edit" data-goto="1">Edit</span></div><div class="review-item"><span class="k">Mode</span><span class="v">${state.mode === 'solo' ? 'Solo' : 'With partner'}</span></div><div class="review-item"><span class="k">Planner</span><span class="v">${escapeHtml(state.p1Name)}${state.mode==='partner'?' &amp; '+escapeHtml(state.p2Name):''}</span></div><div class="review-item"><span class="k">Currency</span><span class="v">${state.currency}</span></div><div class="review-item"><span class="k">Default horizon</span><span class="v">10 years</span></div></div><div class="review-card"><div class="review-head"><span>Income · monthly</span><span class="edit" data-goto="2">Edit</span></div>${state.p1Salary ? `<div class="review-item"><span class="k">${escapeHtml(state.p1Name)} salary</span><span class="v">${fmtMoney(state.p1Salary)}</span></div>` : ''}${state.p1Other ? `<div class="review-item"><span class="k">${escapeHtml(state.p1Name)} other</span><span class="v">${fmtMoney(state.p1Other)}</span></div>` : ''}${state.p2Salary ? `<div class="review-item"><span class="k">${escapeHtml(state.p2Name)} salary</span><span class="v">${fmtMoney(state.p2Salary)}</span></div>` : ''}${state.p2Other ? `<div class="review-item"><span class="k">${escapeHtml(state.p2Name)} other</span><span class="v">${fmtMoney(state.p2Other)}</span></div>` : ''}<div class="review-item"><span class="k">One-off income</span><span class="v">${state.incomeOneOffs.length} entries</span></div><div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Total monthly</span><span class="v" style="color:var(--gold-bright);">${fmtMoney(totalMonthly)}</span></div></div><div class="review-card"><div class="review-head"><span>Expenses · monthly</span><span class="edit" data-goto="3">Edit</span></div>${getExpenseCats().filter(c => state[c.key] > 0).map(c => `<div class="review-item"><span class="k">${c.label}</span><span class="v">${fmtMoney(state[c.key])}</span></div>`).join('')}<div class="review-item"><span class="k">One-off expenses</span><span class="v">${state.expenseOneOffs.length} entries</span></div><div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Total monthly</span><span class="v" style="color:var(--red);">${fmtMoney(totalExp)}</span></div></div><div class="review-card"><div class="review-head"><span>EMIs</span><span class="edit" data-goto="4">Edit</span></div>${state.emis.length === 0 ? '<div class="review-item"><span class="k">None entered</span><span class="v">—</span></div>' : state.emis.map(e => `<div class="review-item"><span class="k">${escapeHtml(e.name)}</span><span class="v">${fmtMoney(e.amount)} · ${e.months} mo</span></div>`).join('')}${state.emis.length ? `<div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Total EMI</span><span class="v" style="color:var(--red);">${fmtMoney(totalEMI)}</span></div>` : ''}</div><div class="review-card"><div class="review-head"><span>Investments</span><span class="edit" data-goto="5">Edit</span></div>${state.investments.length === 0 ? '<div class="review-item"><span class="k">None entered</span><span class="v">—</span></div>' : state.investments.map(i => `<div class="review-item"><span class="k"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${i.color};margin-right:8px;"></span>${escapeHtml(i.name)}</span><span class="v">${fmtMoney(i.balance)} · ${(i.rate*100).toFixed(2)}%</span></div>`).join('')}${state.investments.length ? `<div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Current net worth</span><span class="v" style="color:var(--gold-bright);">${fmtMoney(investBal)}</span></div>` : ''}</div><div class="review-card"><div class="review-head"><span>Accounts</span><span class="edit" data-goto="6">Edit</span></div>${(state.accounts||[]).length === 0 ? '<div class="review-item"><span class="k">None entered</span><span class="v">—</span></div>' : state.accounts.map(a => `<div class="review-item"><span class="k">${escapeHtml(a.name)} · ${a.type}</span><span class="v" style="${a.openingBalance<0?'color:var(--red)':''}">${fmtMoney(a.openingBalance)}</span></div>`).join('')}</div></div>`;
   panel.querySelectorAll('.edit').forEach(el => { el.addEventListener('click', () => showStep(Number(el.dataset.goto))); });
 }
 
@@ -4164,6 +4207,72 @@ function ensureDefaultAccounts() {
   }
 }
 
+// ── Editable expense categories (schema v15): dynamic Step-3 inputs + rename/add/delete ──
+// All operations write only to state.categoryLabels / customCategories / deletedCategories,
+// then re-render + scheduleSave. Category *amounts* live in state[key] exactly as before, so
+// the engine and every getExpenseCats() consumer pick up changes with no further wiring.
+function _captureCatInputs() {
+  // Preserve whatever is currently typed in the grid so a re-render doesn't lose it.
+  getExpenseCats().forEach(c => { const el = document.getElementById(c.key); if (el) state[c.key] = Number(el.value) || 0; });
+}
+function renderExpenseCatInputs() {
+  const grid = document.getElementById('expenseCatGrid');
+  if (!grid) return;
+  grid.innerHTML = getExpenseCats().map(c => `
+    <div class="field cat-field" data-cat="${c.key}">
+      <label>
+        <span class="cat-dot" style="background:${c.color};"></span>
+        <span class="cat-label-text">${escapeHtml(c.label)}</span>
+        <span class="cat-actions">
+          <button type="button" class="cat-btn" data-cat-rename="${c.key}" title="Rename category">&#9998;</button>
+          <button type="button" class="cat-btn cat-del" data-cat-del="${c.key}" title="Delete category">&times;</button>
+        </span>
+      </label>
+      <div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" id="${c.key}" min="0" step="any" placeholder="0" value="${state[c.key] || ''}" /></div>
+    </div>`).join('');
+  grid.querySelectorAll('[data-cat-rename]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); renameExpenseCategory(b.getAttribute('data-cat-rename')); }));
+  grid.querySelectorAll('[data-cat-del]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); deleteExpenseCategory(b.getAttribute('data-cat-del')); }));
+}
+function renameExpenseCategory(key) {
+  const cur = getExpenseCats().find(c => c.key === key);
+  if (!cur) return;
+  const name = (prompt('Rename category', cur.label) || '').trim();
+  if (!name || name === cur.label) return;
+  _captureCatInputs();
+  if (!state.categoryLabels || typeof state.categoryLabels !== 'object') state.categoryLabels = {};
+  state.categoryLabels[key] = name;
+  renderExpenseCatInputs();
+  scheduleSave();
+}
+function addExpenseCategory() {
+  const name = (prompt('New category name', '') || '').trim();
+  if (!name) return;
+  _captureCatInputs();
+  if (!Array.isArray(state.customCategories)) state.customCategories = [];
+  const key = 'exCustom' + Date.now().toString(36);
+  const color = CUSTOM_CAT_COLORS[state.customCategories.length % CUSTOM_CAT_COLORS.length];
+  state.customCategories.push({ key, label: name, color });
+  state[key] = 0;
+  renderExpenseCatInputs();
+  scheduleSave();
+}
+function deleteExpenseCategory(key) {
+  const cur = getExpenseCats().find(c => c.key === key);
+  if (!cur) return;
+  if (!confirm('Delete "' + cur.label + '"?\n\nIts budgeted amount will be removed and it will no longer appear anywhere. Past logged transactions tagged to it keep their data but lose this label.')) return;
+  _captureCatInputs();
+  if (cur.builtIn) {
+    if (!Array.isArray(state.deletedCategories)) state.deletedCategories = [];
+    if (state.deletedCategories.indexOf(key) === -1) state.deletedCategories.push(key);
+  } else {
+    state.customCategories = (state.customCategories || []).filter(c => c.key !== key);
+  }
+  if (state.categoryLabels) delete state.categoryLabels[key];
+  state[key] = 0;
+  renderExpenseCatInputs();
+  scheduleSave();
+}
+
 function initWizard() {
   if (!state) state = freshState();
   document.querySelectorAll('#modeCards .rc').forEach(card => { card.classList.toggle('sel', card.dataset.mode === state.mode); });
@@ -4193,7 +4302,8 @@ function initWizard() {
   document.getElementById('p2Salary').value = state.p2Salary || '';
   document.getElementById('p2Other').value  = state.p2Other  || '';
 
-  EXPENSE_CATEGORIES.forEach(c => { document.getElementById(c.key).value = state[c.key] || ''; });
+  if (typeof renderExpenseCatInputs === 'function') renderExpenseCatInputs();
+  getExpenseCats().forEach(c => { const _el = document.getElementById(c.key); if (_el) _el.value = state[c.key] || ''; });
   const _pstEl = document.getElementById('plannedSavingsTransfer');
   if (_pstEl) _pstEl.value = state.plannedSavingsTransfer || '';
 
@@ -4239,6 +4349,8 @@ function initWizard() {
     document.getElementById('addIncomeOneOff').addEventListener('click', () => addOneOffRow('incomeOneOffs'));
     document.getElementById('addIncomeOverride').addEventListener('click', () => addIncomeOverrideRow());
     document.getElementById('addExpenseOneOff').addEventListener('click', () => addOneOffRow('expenseOneOffs'));
+    const _addCatBtn = document.getElementById('addExpenseCat');
+    if (_addCatBtn) _addCatBtn.addEventListener('click', addExpenseCategory);
     document.getElementById('addEmi').addEventListener('click', () => addEmiRow());
     document.getElementById('addInvestment').addEventListener('click', () => addInvestmentRow());
     document.getElementById('addAccount').addEventListener('click', () => addAccountRow({ type:'asset', openingBalance:0 }));
@@ -4736,7 +4848,7 @@ function runProjection(overrides={}) {
   });
   // Per-category expense series
   const expCategorySeries = {};
-  EXPENSE_CATEGORIES.forEach(c => {
+  getExpenseCats().forEach(c => {
     const base = (state[c.key] || 0) * expMul;
     const arr = new Array(n);
     for (let i = 0; i < n; i++) arr[i] = base * expGrowthMul[i];
@@ -4786,7 +4898,7 @@ function runProjection(overrides={}) {
   for (let i = 0; i < n; i++) {
     baseIncomeSeries[i] = p1Series[i] + p2Series[i] + oneOffIncSeries[i];
     let baseExp = oneOffExpSeries[i] + emiMonthly[i];
-    EXPENSE_CATEGORIES.forEach(c => { baseExp += expCategorySeries[c.key][i]; });
+    getExpenseCats().forEach(c => { baseExp += expCategorySeries[c.key][i]; });
     baseExpenseSeries[i] = baseExp;
   }
 
@@ -5363,7 +5475,7 @@ function renderBudgetActuals() {
   // Aggregate actuals from transactions for the selected month
   const monthPrefix = month + '-'; // e.g. '2026-04-' will match dates like '2026-04-15'
   const actualsByCat = {};
-  EXPENSE_CATEGORIES.forEach(c => { actualsByCat[c.key] = 0; });
+  getExpenseCats().forEach(c => { actualsByCat[c.key] = 0; });
   // Per-EMI actuals: keyed by emi.id
   const emiActuals = {};
   (state.emis || []).forEach(e => { if (e.id) emiActuals[e.id] = 0; });
@@ -5386,7 +5498,7 @@ function renderBudgetActuals() {
   });
 
   // Build category rows (only categories with a non-zero budget, OR with non-zero actuals)
-  const cats = EXPENSE_CATEGORIES.filter(c => (state[c.key] || 0) > 0 || actualsByCat[c.key] > 0);
+  const cats = getExpenseCats().filter(c => (state[c.key] || 0) > 0 || actualsByCat[c.key] > 0);
 
   // ---- Render expense-split pie chart (this month, by category + EMIs combined) ----
   // The pie shows all spending sources side-by-side so the user sees where money went.
@@ -5394,7 +5506,7 @@ function renderBudgetActuals() {
   // Hidden gracefully if nothing spent this month.
   const pieCard = document.getElementById('baPieCard');
   const pieEntries = [];
-  EXPENSE_CATEGORIES.forEach(c => {
+  getExpenseCats().forEach(c => {
     const v = actualsByCat[c.key] || 0;
     if (v > 0) pieEntries.push({ label: c.label, val: v, color: c.color || '#7fb069' });
   });
@@ -5557,7 +5669,7 @@ function renderBudgetRowDetails(filter, month) {
   const monthPrefix = month + '-';
   // Inline helpers (module-scoped equivalents of the journal IIFE's private helpers).
   const _labelForCatLocal = (key) => {
-    const c = (EXPENSE_CATEGORIES || []).find(c => c.key === key);
+    const c = (getExpenseCats() || []).find(c => c.key === key);
     return c ? c.label : (key || '—');
   };
   const _formatDateLocal = (iso) => {
@@ -5741,7 +5853,7 @@ function renderDashboard() {
   // is still active). This shared test is reused by liquidity + the debt tracker.
   const _emiNowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
   const monthIncome = (state.p1Salary||0) + (state.p1Other||0) + (state.p2Salary||0) + (state.p2Other||0);
-  const monthExp = EXPENSE_CATEGORIES.reduce((a,c)=>a+(Number(state[c.key])||0),0);
+  const monthExp = getExpenseCats().reduce((a,c)=>a+(Number(state[c.key])||0),0);
   const monthEMI = (state.emis||[]).filter(e => _emiActiveIn(e, _emiNowYM)).reduce((a,e)=>a+(Number(e.amount)||0),0);
   const monthSurplus = monthIncome - monthExp - monthEMI;
 
@@ -6081,7 +6193,7 @@ function _renderLiquidity(p, todayIdx) {
   const liqCash = p.cashSeries ? (p.cashSeries[todayIdx] || 0) : 0;
   const liquid = liqInv + liqCash;
   const _lqNowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
-  const monthExp = EXPENSE_CATEGORIES.reduce((a,c)=>a+(Number(state[c.key])||0),0)
+  const monthExp = getExpenseCats().reduce((a,c)=>a+(Number(state[c.key])||0),0)
     + (state.emis||[]).filter(e => _emiActiveIn(e, _lqNowYM)).reduce((a,e)=>a+(Number(e.amount)||0),0);
   const monthsCovered = monthExp > 0 ? liquid / monthExp : 0;
   // Score: 0 at 0 months, 100 at 6+ months, sweet spot band
@@ -6300,7 +6412,7 @@ function _legacyRenderDashboardUNUSED() {
 
   destroyChart('dashIE');
   const monthIncome = state.p1Salary + state.p1Other + state.p2Salary + state.p2Other;
-  const monthExp = EXPENSE_CATEGORIES.reduce((a,c)=>a+state[c.key],0) + state.emis.reduce((a,e)=>a+e.amount,0);
+  const monthExp = getExpenseCats().reduce((a,c)=>a+(Number(state[c.key])||0),0) + state.emis.reduce((a,e)=>a+e.amount,0);
   charts.dashIE = new Chart(document.getElementById('dashIE'), {
     type:'bar',
     data: { labels:['Income','Expenses','Surplus'], datasets:[{ data:[monthIncome, monthExp, monthIncome-monthExp], backgroundColor:['rgba(46,125,91,0.65)','rgba(197,69,62,0.65)','rgba(61,163,116,0.55)'], borderColor:['#2E7D5B','#C5453E','#3DA374'], borderWidth:1, borderRadius:4 }] },
@@ -6461,7 +6573,7 @@ function computeRetirement(p, opts) {
   }
 
   // ── Monthly need in retirement (today's money, inflated to retirement date) ──
-  const curExpense = EXPENSE_CATEGORIES.reduce((a,c) => a + (Number(state[c.key]) || 0), 0);
+  const curExpense = getExpenseCats().reduce((a,c) => a + (Number(state[c.key]) || 0), 0);
   const monthlyNeedToday = curExpense * retPct;
   const monthlyNeedAtRet = monthlyNeedToday * Math.pow(1 + inf, yearsToRet);
   const annualNeedAtRet  = monthlyNeedAtRet * 12;
@@ -6574,6 +6686,16 @@ function computeRetirement(p, opts) {
     curExpense, monthlyNeedPct: (Number(state.retExpensePct) || 60)
   };
 }
+
+// Toggle a projection-sheet one-time cell between its month total and per-item detail.
+window._toggleOneTimeCell = function(span) {
+  const cell = span.closest('td'); if (!cell) return;
+  const det = cell.querySelector('.ot-detail'); if (!det) return;
+  const open = det.style.display !== 'none';
+  det.style.display = open ? 'none' : 'block';
+  const car = span.querySelector('.ot-caret');
+  if (car) car.innerHTML = open ? '&#9656;' : '&#9662;';
+};
 
 function renderBudget() {
   const start = state.budgetStart || state.horizonStart;
@@ -7031,7 +7153,7 @@ function renderBudget() {
       // budgeted-but-not-yet-spent amount. Surplus / residue / cash will all reflect this.
       // Per category: budget might be replaced by larger actual (if over budget).
       let totalCatNumeric = 0;
-      EXPENSE_CATEGORIES.forEach(c => {
+      getExpenseCats().forEach(c => {
         const budget = (p.expCategorySeries[c.key] || [])[sliceFrom + i] || 0;
         const actual = (expActualByMonth[ym] && expActualByMonth[ym][c.key]) || 0;
         totalCatNumeric += actual + Math.max(0, budget - actual);
@@ -7355,7 +7477,7 @@ function renderBudget() {
     expenseRows.push({ label: e.name + ' (EMI)', overlay: ov });
   });
   // Expense categories — grown per month per engine, overlaid with journal actuals
-  EXPENSE_CATEGORIES.forEach(c => {
+  getExpenseCats().forEach(c => {
     if (!(state[c.key] > 0)) return;
     const slice = (p.expCategorySeries[c.key] || []).slice(sliceFrom, sliceTo);
     const ov = overlayCategoryRow(c.key, slice);
@@ -7400,18 +7522,41 @@ function renderBudget() {
     return arr;
   }
   const expGrowthRate = (typeof state.expenseGrowthRate === 'number') ? state.expenseGrowthRate : 0.06;
+  // One-time expenses collapse into ONE row. Each month cell shows that month's total;
+  // months with 2+ separate one-offs are expandable to reveal the individual line items.
+  const oneTimeCombined = new Array(n).fill(0);
+  const oneTimeDetail = Array.from({ length: n }, () => []);
   (state.expenseOneOffs || []).forEach(o => {
     const fullArr = expandSingleOneOff(o, expGrowthRate);
     const slice = fullArr.slice(sliceFrom, sliceTo);
-    if (slice.some(v => v > 0)) {
-      expenseRows.push({ label: o.note || 'One-off expense', values: slice });
-    }
+    slice.forEach((v, i) => {
+      if (v > 0) {
+        oneTimeCombined[i] += v;
+        oneTimeDetail[i].push({ note: o.note || 'One-off expense', amount: v });
+      }
+    });
   });
+  if (oneTimeCombined.some(v => v > 0)) {
+    expenseRows.push({ oneTime: true, label: 'One-time expenses', values: oneTimeCombined, detail: oneTimeDetail });
+  }
 
   document.getElementById('budgetOutflows').innerHTML =
     `<tr class="section-head"><th colspan="${colspan}">Outflows</th></tr>` +
     expenseRows.map(r => {
-      const cellHtml = r.overlay ? cellsOverlay(r.overlay) : cells(r.values);
+      let cellHtml;
+      if (r.oneTime) {
+        cellHtml = r.values.map((v, i) => {
+          const items = r.detail[i] || [];
+          const base = `num ${neg(v)}${_isCurrent(i) ? ' current-month' : ''}`;
+          if (items.length >= 2) {
+            const lines = items.map(it => `<div class="ot-line"><span>${escapeHtml(it.note)}</span><span>${fmtMoney(it.amount)}</span></div>`).join('');
+            return `<td class="${base} ot-cell" data-col="${i}"><span class="ot-total" onclick="_toggleOneTimeCell(this)">${fmtMoney(v)} <span class="ot-caret">&#9656;</span></span><div class="ot-detail" style="display:none;">${lines}</div></td>`;
+          }
+          return `<td class="${base}" data-col="${i}">${fmtMoney(v)}</td>`;
+        }).join('');
+      } else {
+        cellHtml = r.overlay ? cellsOverlay(r.overlay) : cells(r.values);
+      }
       return `<tr><th>${escapeHtml(r.label)}</th>${cellHtml}</tr>`;
     }).join('') +
     scenarioExpenseRows.map(scRowHtml).join('') +
@@ -9342,7 +9487,7 @@ function _settingsRetHint() {
   const hint = document.getElementById('setRetPctHint');
   if (!hint) return;
   const pct = Number((document.getElementById('setRetPct')||{}).value) || 60;
-  const curExp = EXPENSE_CATEGORIES.reduce((a,c)=>a+(Number(state[c.key])||0),0);
+  const curExp = getExpenseCats().reduce((a,c)=>a+(Number(state[c.key])||0),0);
   hint.innerHTML = `Today ~<strong>${fmtMoney(curExp)}</strong>/mo → <strong style="color:var(--gold-bright);">${fmtMoney(curExp*pct/100)}</strong>/mo in retirement (today's money).`;
 }
 
@@ -10382,7 +10527,7 @@ function renderEditGrid() {
   const grid = document.getElementById('editGrid');
   if (!grid) return;
   const totalIncome = state.p1Salary + state.p1Other + state.p2Salary + state.p2Other;
-  const totalExpense = EXPENSE_CATEGORIES.reduce((a,c) => a + (state[c.key]||0), 0);
+  const totalExpense = getExpenseCats().reduce((a,c) => a + (state[c.key]||0), 0);
   const cards = [
     { step:1, label:'You',         desc:`${escapeHtml(state.p1Name||'(unnamed)')}${state.mode==='partner'?' &amp; '+escapeHtml(state.p2Name||''):''} · ${state.currency}` },
     { step:2, label:'Income',      desc:`${fmtMoney(totalIncome,true)}/mo · ${(state.incomeOneOffs||[]).length} one-off, ${(state.incomeOverrides||[]).length} variable` },
@@ -10645,7 +10790,7 @@ document.addEventListener('keydown', (e) => {
 (function () {
   'use strict';
 
-  const EXPENSE_CATS_FOR_TX = EXPENSE_CATEGORIES.map(c => ({ key: c.key, label: c.label }));
+  const EXPENSE_CATS_FOR_TX = getExpenseCats().map(c => ({ key: c.key, label: c.label }));
   const INCOME_CATS = [
     { key: 'salary',   label: 'Salary' },
     { key: 'rewards',  label: 'Rewards' },
