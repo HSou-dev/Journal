@@ -2299,7 +2299,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.09';
+const APP_VERSION = '2026.05.05.10';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -7220,6 +7220,15 @@ function renderBudget() {
       _overlayTotalExpense[i] = totalCatNumeric + totalEmiNumeric;
       _overlayEmiTotal[i] = totalEmiNumeric;
     }
+    // One-off expenses are neither a category nor an EMI, so the journal-actuals overlay above
+    // never included them — they silently dropped out of past/current Total Expenses (this was
+    // the bug: a current-month one-off showed as its own row but didn't move the total). Add the
+    // engine's one-off series back on top. Future months are skipped by the _isFuture continue and
+    // keep the engine total, which already includes one-offs. Index with sliceFrom+i because the
+    // overlay loop runs over the visible window while p.oneOffExpSeries is full-horizon. This flows
+    // into the sheet's derived surplus/residue/cash automatically; engine net-worth and
+    // projectSavingsChain math (which already count one-offs) are untouched.
+    _overlayTotalExpense[i] += (p.oneOffExpSeries[sliceFrom + i] || 0);
   }
   totalExpense = _overlayTotalExpense;
   emiMonthly = _overlayEmiTotal;
