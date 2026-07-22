@@ -2299,7 +2299,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.13';
+const APP_VERSION = '2026.05.05.14';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -5907,9 +5907,9 @@ function renderDashboard() {
   const monthSurplus = monthIncome - monthExp - monthEMI;
 
   // ── Liquidity (shown beside net worth in the hero card) ──
-  // Reuses the same definition as the Net Worth page / Liquidity health: liquid
-  // investments + cash. Cash uses the SAME chain-adjusted figure as the hero net worth
-  // and composition bar (cashTotal above), so the card is internally consistent.
+  // Liquid investments (current projected balance) + live cash. The Dashboard is always "today"
+  // (current month), so cash is the live savings balance (matches the Journal), NOT the
+  // planned-surplus chain figure used for the net-worth/composition side of this card.
   const _liqInvNames = [];
   let _liqInvTotal = 0;
   (state.investments || []).forEach(inv => {
@@ -5918,9 +5918,10 @@ function renderDashboard() {
     const bal = (p.bal[k] && p.bal[k][todayIdx] != null) ? p.bal[k][todayIdx] : (inv.balance || 0);
     if (bal > 0) { _liqInvTotal += bal; _liqInvNames.push(inv.name); }
   });
-  const liquidityTotal = _liqInvTotal + (cashTotal > 0 ? cashTotal : 0);
+  const _liqLiveCash = _liveLiquidCash();
+  const liquidityTotal = _liqInvTotal + (_liqLiveCash > 0 ? _liqLiveCash : 0);
   const _liqLabelParts = _liqInvNames.slice();
-  if (cashTotal > 0) _liqLabelParts.push('Cash & Savings');
+  if (_liqLiveCash > 0) _liqLabelParts.push('Cash & Savings');
   const liquidityLabel = _liqLabelParts.length ? _liqLabelParts.join(', ') : 'no liquid assets flagged';
 
   // ═══ BUILD HTML ═══
@@ -6239,7 +6240,7 @@ function _renderLiquidity(p, todayIdx) {
   if (!el) return;
   const liqInv = (p.investments || []).filter(i => i.liquid)
     .reduce((a,inv) => { const k = inv.id+'_'+inv.name; return a + ((p.bal[k] && p.bal[k][todayIdx]) || 0); }, 0);
-  const liqCash = p.cashSeries ? (p.cashSeries[todayIdx] || 0) : 0;
+  const liqCash = _liveLiquidCash(); // live savings balance (matches hero + Journal), not the raw projected cashSeries
   const liquid = liqInv + liqCash;
   const _lqNowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
   const monthExp = getExpenseCats().reduce((a,c)=>a+(Number(state[c.key])||0),0)
@@ -6494,6 +6495,17 @@ function _legacyRenderDashboardUNUSED() {
 // where residue = surplus − scheduled investments − one-time investments.
 // Past months are reverse-walked from the live balance (true historical closing).
 // Returns an array aligned to p.isos.
+// Live liquid cash = the savings account's actual current balance, exactly as the Journal shows
+// it (raw openingBalance, kept current by reconciliation). Used to anchor CURRENT-month liquidity
+// on the Net Worth + Dashboard tiles to reality instead of the planned-surplus projection, so
+// those tiles tie to the Journal. Falls back to the sum of asset accounts if there's no 'savings'.
+function _liveLiquidCash() {
+  const accts = (state.accounts || []).filter(a => a.type === 'asset');
+  const sav = accts.find(a => a.id === 'savings');
+  return sav ? (Number(sav.openingBalance) || 0) : accts.reduce((s, a) => s + (Number(a.openingBalance) || 0), 0);
+}
+function _nowYMkey() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+
 function projectSavingsChain(p) {
   const isos = p.isos;
   const n = isos.length;
@@ -8317,7 +8329,11 @@ function renderNetWorth() {
   const cashAtDate = adjustedCashSeries[idx] || 0;
   const lqInvAtDate = p.investments.filter(i=>i.liquid).reduce((a,inv)=>a+(p.bal[inv.id+'_'+inv.name][idx]||0),0);
   const liabAtDate = p.liabSeries[idx] || 0;
-  const lqAtDate = lqInvAtDate + cashAtDate;
+  // CURRENT month → anchor the cash side of Liquidity to the live savings balance (matches the
+  // Journal); past/future keep the projected chain. Display-only; net worth + chart series
+  // untouched (user chose tiles-only). Liquid investments stay at their current projected balance.
+  const _cashForLiquidity = (valDate === _nowYMkey()) ? _liveLiquidCash() : cashAtDate;
+  const lqAtDate = lqInvAtDate + _cashForLiquidity;
   const totContrib = p.investments.reduce((a,inv)=>{ const k=inv.id+'_'+inv.name; return a+(p.contribSeries[k]?.[idx]||0); },0);
   const openInvBal = p.investments.reduce((a,i)=>a+i.balance,0);
   // Exclude salary account from opening cash (it's a transient pass-through, mirrors cashSeries)
