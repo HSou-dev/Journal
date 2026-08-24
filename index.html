@@ -243,14 +243,6 @@ h2.panel-title em { font-style: italic; color: var(--gold); font-weight: 300; }
 .field.full { grid-column: 1 / -1; }
 .field label { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-muted); font-weight: 500; }
 .field label .opt { color: var(--ink-muted); font-style: italic; letter-spacing: 0.02em; text-transform: none; margin-left: 6px; font-size: 10.5px; }
-.cat-field label { display: flex; align-items: center; gap: 6px; }
-.cat-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-.cat-label-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0.02em; font-size: 12px; }
-.cat-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity 0.15s; }
-.cat-field:hover .cat-actions, .cat-field:focus-within .cat-actions { opacity: 1; }
-.cat-btn { background: transparent; border: none; color: var(--ink-muted); cursor: pointer; font-size: 13px; line-height: 1; padding: 2px 4px; border-radius: 4px; }
-.cat-btn:hover { background: var(--accent-hover); color: var(--ink); }
-.cat-btn.cat-del:hover { color: var(--red); }
 input[type="text"], input[type="number"], input[type="date"], input[type="month"], select, textarea {
   background: var(--bg-elevated);
   border: 1px solid var(--line);
@@ -940,18 +932,6 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 .budget-grid tr.residual th, .budget-grid tr.residual td { font-weight:600; font-style:italic; background:var(--bg-elevated); border-top:1px solid var(--line); }
 .budget-grid .neg { color: var(--red); }
 .budget-grid .pos { color: var(--ink); }
-.proj-table .ot-cell .ot-total { cursor: pointer; border-bottom: 1px dotted var(--ink-muted); white-space: nowrap; }
-.proj-table .ot-cell .ot-caret { font-size: 8px; color: var(--ink-muted); }
-.ot-popover { position: fixed; z-index: 1000; background: var(--bg-card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.18); padding: 10px 12px; font-family: 'DM Sans', system-ui, sans-serif; }
-.ot-pop-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-muted); margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
-.ot-pop-close { background: transparent; border: none; color: var(--ink-muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; }
-.ot-pop-close:hover { color: var(--ink); }
-.ot-pop-row { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 3px 0; }
-.ot-pop-note { color: var(--ink-dim); font-size: 13px; line-height: 1.4; word-break: break-word; }
-.ot-pop-amt { color: var(--ink); font-family: 'JetBrains Mono', monospace; font-size: 12.5px; white-space: nowrap; }
-.ot-pop-total { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line); font-weight: 600; }
-.ot-pop-total .ot-pop-note, .ot-pop-total span:first-child { color: var(--ink); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
-.ot-pop-total span:last-child { color: var(--accent); font-family: 'JetBrains Mono', monospace; }
 
 #hamburgerBtn {
   display: none;
@@ -1459,81 +1439,6 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 .drawer-info:hover { background: transparent !important; color: var(--ink-muted) !important; }
 .drawer-logout { color: var(--red) !important; font-weight: 500; }
 .drawer-logout:hover { background: rgba(197,69,62,0.10) !important; color: var(--red) !important; }
-/* Retirement enable toggle knob */
-.ret-enable-row .switch-slider::before {
-  content: ""; position: absolute; height: 20px; width: 20px; left: 3px; top: 3px;
-  background: #fff; border-radius: 50%; transition: transform 0.2s;
-  transform: translateX(var(--knob, 2px));
-}
-.ret-enable-row input:checked + .switch-slider::before { transform: translateX(22px); }
-.ret-enable-row input:checked + .switch-slider { background: var(--gold) !important; }
-.inline-prefix[data-suffix]::after { content: attr(data-suffix); }
-/* ── Dashboard (flagship) ── */
-.dash-hero { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin-bottom: 16px; }
-@media (max-width: 860px) { .dash-hero { grid-template-columns: 1fr; } }
-.dash-card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; }
-.dash-card.feature { background: linear-gradient(135deg, var(--bg-card), var(--bg-elevated)); border-color: var(--accent-glow); }
-.dash-retire-card { transition: border-color 0.15s ease, box-shadow 0.15s ease; }
-.dash-retire-card:hover { border-color: var(--accent-glow); box-shadow: 0 2px 10px var(--accent-hover); }
-.dash-retire-toggle { font-size: 12px; color: var(--accent); letter-spacing: 0; }
-.dash-retire-assump { font-size: 11px; line-height: 1.5; color: var(--ink-muted); margin-top: 10px; }
-.dash-retire-detail { animation: dashFadeIn 0.18s ease; }
-@keyframes dashFadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-.dash-eyebrow { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-muted); margin-bottom: 10px; }
-.dash-bignum { font-family: 'Fraunces', serif; font-size: 38px; line-height: 1; color: var(--ink); font-weight: 500; }
-.dash-hero-split { display: flex; gap: 20px; align-items: flex-start; }
-.dash-hero-col { flex: 1; min-width: 0; }
-.dash-hero-col + .dash-hero-col { border-left: 1px solid var(--line); padding-left: 20px; }
-.dash-liq-label { font-size: 11px; line-height: 1.45; color: var(--ink-muted); margin-top: 6px; }
-@media (max-width: 520px) {
-  .dash-hero-split { flex-direction: column; gap: 14px; }
-  .dash-hero-col + .dash-hero-col { border-left: none; padding-left: 0; border-top: 1px solid var(--line); padding-top: 14px; }
-}
-.dash-bignum .cur { font-size: 22px; color: var(--ink-muted); margin-right: 4px; }
-.dash-sub { font-size: 12.5px; color: var(--ink-muted); margin-top: 8px; }
-.dash-delta { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
-.dash-delta.pos { color: var(--accent-bright); }
-.dash-delta.neg { color: var(--red); }
-.dash-progress-track { height: 10px; background: var(--bg-elevated); border-radius: 6px; overflow: hidden; margin: 14px 0 8px; border: 1px solid var(--line); }
-.dash-progress-fill { height: 100%; border-radius: 6px; transition: width 0.6s ease; }
-.dash-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
-@media (max-width: 720px) { .dash-grid-3 { grid-template-columns: 1fr; } }
-.dash-stat { background: var(--bg-card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
-.dash-stat .label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-muted); margin-bottom: 8px; }
-.dash-stat .val { font-family: 'Fraunces', serif; font-size: 22px; color: var(--ink); }
-.dash-stat .foot { font-size: 11.5px; color: var(--ink-muted); margin-top: 5px; }
-.dash-section-title { font-family: 'Fraunces', serif; font-style: italic; font-size: 18px; color: var(--gold-bright); margin: 26px 0 14px; }
-.dash-chart-wrap { background: var(--bg-card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
-.dash-chart-box { position: relative; height: 300px; }
-.dash-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-@media (max-width: 860px) { .dash-two-col { grid-template-columns: 1fr; } }
-.dash-insight { display: flex; gap: 12px; padding: 14px 16px; background: var(--bg-card); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; margin-bottom: 10px; }
-.dash-insight.warn { border-left-color: var(--red); }
-.dash-insight.good { border-left-color: var(--accent-bright); }
-.dash-insight-icon { font-size: 18px; flex-shrink: 0; line-height: 1.4; }
-.dash-insight-text { font-size: 13px; color: var(--ink-dim); line-height: 1.55; }
-.dash-insight-text strong { color: var(--ink); font-weight: 600; }
-.dash-composition-bar { display: flex; height: 34px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); margin: 12px 0; }
-.dash-comp-seg { height: 100%; transition: width 0.4s; }
-.dash-comp-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
-.dash-comp-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-dim); }
-.dash-comp-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
-.dash-slider-row { display: flex; align-items: center; gap: 16px; margin: 8px 0 14px; }
-.dash-slider-row input[type=range] { flex: 1; }
-.dash-slider-val { font-family: 'JetBrains Mono', monospace; font-size: 15px; color: var(--gold-bright); min-width: 90px; text-align: right; }
-.dash-whatif-result { font-size: 13px; color: var(--ink-dim); line-height: 1.6; padding: 12px 14px; background: var(--bg-elevated); border-radius: 8px; }
-.dash-whatif-result strong { color: var(--accent-bright); font-weight: 600; }
-.dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.dash-table th { text-align: left; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-muted); padding: 8px 10px; border-bottom: 1px solid var(--line); }
-.dash-table td { padding: 9px 10px; border-bottom: 1px solid var(--line-soft); color: var(--ink-dim); }
-.dash-table td.num { text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--ink); }
-.dash-table tr:last-child td { border-bottom: none; }
-.dash-loan-bar { height: 6px; background: var(--bg-elevated); border-radius: 4px; overflow: hidden; margin-top: 5px; }
-.dash-loan-fill { height: 100%; background: var(--accent); border-radius: 4px; }
-.dash-health-ring { display: flex; align-items: center; gap: 18px; }
-.dash-empty-cta { text-align: center; padding: 40px 24px; background: var(--bg-card); border: 1px dashed var(--line); border-radius: 12px; }
-.dash-empty-cta .big { font-family: 'Fraunces', serif; font-size: 20px; color: var(--ink); margin-bottom: 8px; }
-.dash-empty-cta .desc { font-size: 13px; color: var(--ink-muted); margin-bottom: 18px; max-width: 44ch; margin-left: auto; margin-right: auto; line-height: 1.6; }
 </style>
 </head>
 <body>
@@ -1601,9 +1506,8 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       <div class="step-node" data-step="4"><div class="step-circle">4</div><div class="step-label">EMIs</div></div>
       <div class="step-node" data-step="5"><div class="step-circle">5</div><div class="step-label">Investments</div></div>
       <div class="step-node" data-step="6"><div class="step-circle">6</div><div class="step-label">Accounts</div></div>
-      <div class="step-node" data-step="7"><div class="step-circle">7</div><div class="step-label">Retirement</div></div>
-      <div class="step-node" data-step="8"><div class="step-circle">8</div><div class="step-label">Rates</div></div>
-      <div class="step-node" data-step="9"><div class="step-circle">9</div><div class="step-label">Review</div></div>
+      <div class="step-node" data-step="7"><div class="step-circle">7</div><div class="step-label">Rates</div></div>
+      <div class="step-node" data-step="8"><div class="step-circle">8</div><div class="step-label">Review</div></div>
     </div>
 
     <div class="wiz-panel" id="step1">
@@ -1690,8 +1594,18 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       <div class="panel-head"><span class="panel-num">No. 03</span><span class="panel-divider"></span><span class="panel-num">Outflows</span></div>
       <h2 class="panel-title">What goes <em>out</em>?</h2>
       <p class="panel-desc">Typical monthly spending. Round values are fine — you can refine later.</p>
-      <div class="form-grid" id="expenseCatGrid"></div>
-      <button class="add-btn" id="addExpenseCat" style="margin-top:4px;">+ Add category</button>
+      <div class="form-grid">
+        <div class="field"><label>Rent &amp; maintenance</label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exRent" min="0" step="any" placeholder="0" /></div></div>
+        <div class="field"><label>Food &amp; groceries</label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exFood" min="0" step="any" placeholder="0" /></div></div>
+        <div class="field"><label>Utilities <span class="opt">power, internet, gas</span></label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exUtil" min="0" step="any" placeholder="0" /></div></div>
+        <div class="field"><label>Transport &amp; fuel</label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exTransport" min="0" step="any" placeholder="0" /></div></div>
+        <div class="field"><label>Shopping &amp; personal</label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exShopping" min="0" step="any" placeholder="0" /></div></div>
+        <div class="field"><label>Dining out &amp; entertainment</label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exDining" min="0" step="any" placeholder="0" /></div></div>
+        <div class="field"><label>Subscriptions <span class="opt">streaming, apps</span></label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exSubs" min="0" step="any" placeholder="0" /></div></div>
+        <div class="field"><label>Support &amp; family <span class="opt">parents, kids</span></label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exFamily" min="0" step="any" placeholder="0" /></div></div>
+        <div class="field"><label>Insurance premium <span class="opt">monthly equivalent</span></label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exInsurance" min="0" step="any" placeholder="0" /></div></div>
+        <div class="field"><label>Miscellaneous / buffer</label><div class="inline-prefix" data-prefix="₹"><input type="number" id="exMisc" min="0" step="any" placeholder="0" /></div></div>
+      </div>
       <div class="subsection">
         <div class="subsection-title">Planned savings transfer <span style="font-style:italic;color:var(--ink-muted);font-size:13px;font-weight:400;">(optional)</span></div>
         <div class="subsection-desc">A monthly target you intend to move into your Savings account at the start of each month — like a self-imposed forced-saving rule. We track this against actual transfers logged in the journal. The leftover (after expenses + investments + this transfer) is shown separately as Unplanned overflow.</div>
@@ -1701,7 +1615,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       </div>
       <div class="subsection">
         <div class="subsection-title">One-off <em>expenses</em> <span style="font-style:italic;color:var(--ink-muted);font-size:13px;font-weight:400;">(optional)</span></div>
-        <div class="subsection-desc">Planned big spends — a trip, a wedding, appliance purchase, annual premiums. This section is for <em>future</em> projected spends; to log a one-time expense in the current or a past month, add it on the Journal page (choose the “One-time expense” category).</div>
+        <div class="subsection-desc">Planned big spends — a trip, a wedding, appliance purchase, annual premiums.</div>
         <div class="repeater-wrap" id="expenseOneOffs"></div>
         <button class="add-btn" id="addExpenseOneOff">+ Add one-off expense</button>
       </div>
@@ -1735,83 +1649,24 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       <div class="repeater-wrap" id="accountList"></div>
       <button class="add-btn" id="addAccount">+ Add another account</button>
       <div class="callout" style="margin-top:20px;"><strong>How cash accounts work.</strong> All your asset accounts (Salary, Savings, etc.) earn the same interest rate, set on the Rates page (default 4% p.a.). Your monthly surplus lands in the Savings account in projections. Liabilities like credit cards reduce your net worth.</div>
-      <div class="wiz-nav"><button class="btn ghost" id="step6Prev">← Back</button><div class="wiz-nav-right"><button class="btn" id="step6Next">Next — Retirement →</button></div></div>
+      <div class="wiz-nav"><button class="btn ghost" id="step6Prev">← Back</button><div class="wiz-nav-right"><button class="btn" id="step6Next">Next — Rates →</button></div></div>
     </div>
 
     <div class="wiz-panel" id="step7" style="display:none;">
-      <div class="panel-head"><span class="panel-num">No. 07</span><span class="panel-divider"></span><span class="panel-num">The long game</span></div>
-      <h2 class="panel-title">Your <em>retirement</em>.</h2>
-      <p class="panel-desc">When you'll stop working, how you'll live after, and what happens to your investments. This is optional — skip it and the app works exactly as before, or set it up to unlock the retirement dashboard and corpus tracking.</p>
-
-      <div class="ret-enable-row" style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:8px;margin-bottom:22px;">
-        <label class="switch" style="position:relative;display:inline-block;width:46px;height:26px;flex-shrink:0;">
-          <input type="checkbox" id="retEnabledToggle" style="opacity:0;width:0;height:0;">
-          <span class="switch-slider" style="position:absolute;cursor:pointer;inset:0;background:var(--line);border-radius:26px;transition:0.2s;"></span>
-        </label>
-        <div style="flex:1;">
-          <div style="font-family:'Fraunces',serif;font-size:15px;color:var(--ink);">Plan for retirement</div>
-          <div style="font-size:12px;color:var(--ink-muted);">Turn on to enter retirement details and see your corpus projection.</div>
-        </div>
-      </div>
-
-      <div id="retFields" style="display:none;">
-        <!-- Retirement ages -->
-        <div class="subsection">
-          <div class="subsection-title">Retirement <em>ages</em></div>
-          <div class="subsection-desc">Your current age and the age you plan to retire. We use these to place retirement on your projection timeline.</div>
-          <div class="field-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-            <div class="field"><label id="p1AgeLabel">Your current age</label><input type="number" id="p1CurrentAge" min="18" max="90" step="1" placeholder="30" /></div>
-            <div class="field"><label id="p1RetLabel">Your retirement age</label><input type="number" id="p1RetireAge" min="30" max="90" step="1" placeholder="60" /></div>
-            <div class="field" id="p2AgeField" style="display:none;"><label id="p2AgeLabel">Partner's current age</label><input type="number" id="p2CurrentAge" min="18" max="90" step="1" placeholder="28" /></div>
-            <div class="field" id="p2RetField" style="display:none;"><label id="p2RetLabel">Partner's retirement age</label><input type="number" id="p2RetireAge" min="30" max="90" step="1" placeholder="58" /></div>
-          </div>
-          <div class="field" style="margin-top:14px;"><label>Life expectancy <span class="opt">plan until this age</span></label><input type="number" id="lifeExpectancy" min="60" max="110" step="1" placeholder="85" /></div>
-          <div id="retTimelineHint" class="callout" style="margin-top:16px;"></div>
-        </div>
-
-        <!-- Lifestyle -->
-        <div class="subsection">
-          <div class="subsection-title">Post-retirement <em>lifestyle</em></div>
-          <div class="subsection-desc">Most people spend less after retiring — no commute, no EMIs, kids independent. Set your expected spending as a percentage of today's expenses.</div>
-          <div class="field">
-            <label>Retirement expenses — <span id="retExpPctLabel">60</span>% of current</label>
-            <input type="range" id="retExpensePct" min="20" max="120" step="5" value="60" style="width:100%;" />
-            <div id="retExpAmountHint" style="font-size:12px;color:var(--ink-muted);margin-top:6px;"></div>
-          </div>
-          <div class="field" style="margin-top:14px;">
-            <label>Post-retirement return <span class="opt">what your corpus earns during drawdown</span></label>
-            <div class="inline-prefix" data-suffix="%"><input type="number" id="postRetReturn" min="0" max="20" step="0.5" placeholder="7" /></div>
-            <div style="font-size:12px;color:var(--ink-muted);margin-top:6px;">Usually lower than pre-retirement returns — the corpus shifts to safer assets. Default 7%.</div>
-          </div>
-        </div>
-
-        <!-- Per-investment strategy -->
-        <div class="subsection">
-          <div class="subsection-title">What happens to each <em>investment</em></div>
-          <div class="subsection-desc">At retirement, each investment can be handled differently. Hold it to keep compounding, withdraw it into your spending pool, set up a systematic withdrawal (SWP), take a partial withdrawal, or convert to an annuity.</div>
-          <div id="retStrategyList"></div>
-          <div id="retStrategyEmpty" style="font-size:13px;color:var(--ink-muted);font-style:italic;display:none;">Add investments in Step 5 first — they'll appear here for strategy assignment.</div>
-        </div>
-      </div>
-
-      <div class="wiz-nav"><button class="btn ghost" id="step7Prev">← Back</button><div class="wiz-nav-right"><button class="btn" id="step7Next">Next — Rates →</button></div></div>
-    </div>
-
-    <div class="wiz-panel" id="step8" style="display:none;">
-      <div class="panel-head"><span class="panel-num">No. 08</span><span class="panel-divider"></span><span class="panel-num">Assumptions</span></div>
+      <div class="panel-head"><span class="panel-num">No. 07</span><span class="panel-divider"></span><span class="panel-num">Assumptions</span></div>
       <h2 class="panel-title">Expected <em>returns</em>.</h2>
       <p class="panel-desc">The annualized rate each investment is expected to earn. Defaults reflect conservative long-run averages; adjust to your own view.</p>
       <div id="rateEditor"></div>
       <div class="callout" style="margin-top:20px;"><strong>How growth works.</strong> Salary &amp; expense growth rates compound annually — your January salary in year 2 is your January salary in year 1 × (1 + rate). Investment returns and cash interest compound monthly. Recurring one-offs (bonuses, annual expenses) grow at the salary or expense rate respectively. Market returns are long-term averages, not guarantees.</div>
-      <div class="wiz-nav"><button class="btn ghost" id="step8Prev">← Back</button><div class="wiz-nav-right"><button class="btn" id="step8Next">Next — Review →</button></div></div>
+      <div class="wiz-nav"><button class="btn ghost" id="step7Prev">← Back</button><div class="wiz-nav-right"><button class="btn" id="step7Next">Next — Review →</button></div></div>
     </div>
 
-    <div class="wiz-panel" id="step9" style="display:none;">
-      <div class="panel-head"><span class="panel-num">No. 09</span><span class="panel-divider"></span><span class="panel-num">Confirm</span></div>
+    <div class="wiz-panel" id="step8" style="display:none;">
+      <div class="panel-head"><span class="panel-num">No. 08</span><span class="panel-divider"></span><span class="panel-num">Confirm</span></div>
       <h2 class="panel-title">Everything in <em>place</em>?</h2>
       <p class="panel-desc">A quick summary before the engine runs. Click "Edit" next to any section to adjust. When ready, generate your dashboard.</p>
       <div id="reviewPanel"></div>
-      <div class="wiz-nav"><button class="btn ghost" id="step9Prev">← Back</button><div class="wiz-nav-right"><button class="btn" id="generateBtn">Generate my dashboard →</button></div></div>
+      <div class="wiz-nav"><button class="btn ghost" id="step8Prev">← Back</button><div class="wiz-nav-right"><button class="btn" id="generateBtn">Generate my dashboard →</button></div></div>
     </div>
   </div>
 </div>
@@ -1820,7 +1675,6 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 <div class="layout-outer"><div class="layout">
   <aside class="sidebar">
     <div class="nav-label">Overview</div>
-    <div class="nav-item" data-target="dashboard"><span class="dot"></span>Dashboard</div>
     <div class="nav-item active" data-target="budgetActuals"><span class="dot"></span>Budget</div>
     <div class="nav-item" data-target="today"><span class="dot"></span>Journal</div>
     <div class="nav-item" data-target="budget"><span class="dot"></span>Projection</div>
@@ -1840,12 +1694,6 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       <div class="preview-banner-text"><span class="preview-label">Previewing:</span><strong>your plan</strong> + <span class="scenarios-list" id="previewScenariosList">—</span></div>
       <button class="preview-banner-exit" id="previewExit">Exit preview</button>
     </div>
-
-    <section class="section" id="dashboard">
-      <h1 class="section-title">Your <em>financial life</em>, at a glance.</h1>
-      <p class="section-sub">Where you stand today, and where you're headed. Set up retirement in your inputs to unlock the full picture.</p>
-      <div id="dashboardBody"></div>
-    </section>
 
     <section class="section active" id="budgetActuals">
       <h1 class="section-title">This month's <em>budget</em>.</h1>
@@ -2020,10 +1868,6 @@ tr:hover td { background: rgba(255,255,255,0.01); }
         <div style="margin-top:16px;"><button class="btn" id="settingsApply">Apply &amp; Recompute</button></div>
       </div>
       <div class="card" style="margin-top:16px;">
-        <div class="card-head">Retirement planning</div>
-        <div id="settingsRetirement"></div>
-      </div>
-      <div class="card" style="margin-top:16px;">
         <div class="card-head">About the engine</div>
         <div style="color:var(--ink-dim);line-height:1.7;font-size:13.5px;">
           <p style="margin-bottom:10px;">Ledger derives every figure from your onboarding inputs. Monthly income, expenses, EMIs, and scheduled contributions are projected across the horizon. Balances are compounded monthly using the annualized rates above.</p>
@@ -2071,7 +1915,6 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     <!-- Drawer is the "More" menu — primary destinations (Budget/Journal/Projection)
          are accessed via the bottom tab bar. Drawer only contains secondary items. -->
     <div class="drawer-label">Overview</div>
-    <div class="drawer-item" data-target="dashboard">Dashboard</div>
     <div class="drawer-item" data-target="networth">Net Worth</div>
     <div class="drawer-label">Analysis</div>
     <div class="drawer-item" data-target="scenarios">Scenarios</div>
@@ -2262,31 +2105,6 @@ const EXPENSE_CATEGORIES = [
   { key:'exMisc',      label:'Miscellaneous',         color:'#7d7360' }
 ];
 
-// Color pool for user-added custom categories.
-const CUSTOM_CAT_COLORS = ['#4a8fb0','#7d9b4e','#d99a3c','#9c5fb0','#5eb3a8','#c37b52','#b5824a','#6a9fb5'];
-
-// Single source of truth for the *active* expense categories. Merges the built-in list
-// (minus any the user has deleted, with any renamed labels applied) plus user-added custom
-// categories. EVERY consumer (inputs, engine series, donut, budget tubes, projections,
-// retirement need, transaction tagging) must read through this — never the raw array —
-// so renames/additions/deletions propagate everywhere from one place.
-function getExpenseCats() {
-  const labels  = (state && state.categoryLabels)   || {};
-  const deleted = (state && state.deletedCategories) || [];
-  const custom  = (state && state.customCategories)  || [];
-  const out = [];
-  EXPENSE_CATEGORIES.forEach(c => {
-    if (deleted.indexOf(c.key) !== -1) return;
-    out.push({ key: c.key, label: labels[c.key] || c.label, color: c.color, builtIn: true });
-  });
-  custom.forEach(c => {
-    if (!c || !c.key) return;
-    out.push({ key: c.key, label: labels[c.key] || c.label || 'Category', color: c.color || '#7d7360', builtIn: false });
-  });
-  return out;
-}
-window.getExpenseCats = getExpenseCats;
-
 let state = null;
 let currentStep = 1;
 let currentUser = null;
@@ -2299,7 +2117,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.14';
+const APP_VERSION = '2026.05.05.15';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -2337,18 +2155,6 @@ function freshState() {
     // horizonStart is already set above.
     // p1BumpMonth / p2BumpMonth default to April (4) already in migrateState.
     // expenseBumpMonth default April.
-    // Retirement planning defaults (schema v14). Off until user enables.
-    s.retEnabled = false;
-    s.p1CurrentAge = 30; s.p2CurrentAge = 28;
-    s.p1RetireAge = 60;  s.p2RetireAge = 58;
-    s.lifeExpectancy = 85;
-    s.retExpensePct = 60;
-    s.postRetReturn = 0.07;
-    s.retStrategies = {};
-    // Editable expense categories (schema v15)
-    s.categoryLabels = {};
-    s.customCategories = [];
-    s.deletedCategories = [];
     return s;
   };
 })();
@@ -2574,36 +2380,7 @@ function migrateState(s) {
     });
   }
 
-  // Schema v14: retirement planning fields. All optional; retirement stays "off"
-  // until the user explicitly enables it, so existing pages and the projection
-  // engine are unaffected for users who never touch retirement.
-  if ((s.schemaVersion || 0) < 14) {
-    if (typeof s.retEnabled !== 'boolean') s.retEnabled = false;
-    if (typeof s.p1CurrentAge !== 'number') s.p1CurrentAge = 30;
-    if (typeof s.p2CurrentAge !== 'number') s.p2CurrentAge = 28;
-    if (typeof s.p1RetireAge !== 'number') s.p1RetireAge = 60;
-    if (typeof s.p2RetireAge !== 'number') s.p2RetireAge = 58;
-    if (typeof s.lifeExpectancy !== 'number') s.lifeExpectancy = 85;
-    if (typeof s.retExpensePct !== 'number') s.retExpensePct = 60;
-    if (typeof s.postRetReturn !== 'number') s.postRetReturn = 0.07;
-    // Per-investment post-retirement strategy, keyed by investment id.
-    // Shape: { [invId]: { mode:'hold'|'withdraw'|'swp'|'partial'|'annuity',
-    //                     swpRate:Number, partialPct:Number, annuityRate:Number } }
-    if (!s.retStrategies || typeof s.retStrategies !== 'object') s.retStrategies = {};
-  }
-
-  if ((s.schemaVersion || 0) < 15) {
-    // Editable expense categories (schema v15).
-    // categoryLabels: { [builtInKey]: overrideLabel } — display-only rename of built-ins.
-    // customCategories: [ { key, label, color } ] — user-added categories, key auto-generated.
-    // deletedCategories: [ builtInKey ] — built-ins the user has hidden. Their stored amount
-    //   is left in state (harmless) but the category no longer appears or contributes.
-    if (!s.categoryLabels || typeof s.categoryLabels !== 'object') s.categoryLabels = {};
-    if (!Array.isArray(s.customCategories)) s.customCategories = [];
-    if (!Array.isArray(s.deletedCategories)) s.deletedCategories = [];
-  }
-
-  s.schemaVersion = 15;
+  s.schemaVersion = 13;
   return s;
 }
 
@@ -2927,14 +2704,12 @@ function showStep(n) {
   // Mark body so mobile bottom nav + FAB stay hidden during onboarding wizard.
   document.body.classList.remove('app-active', 'auth-active');
   document.body.classList.add('wizard-active');
-  for (let i = 1; i <= 9; i++) {
+  for (let i = 1; i <= 8; i++) {
     const el = document.getElementById('step' + i);
     if (el) el.style.display = (i === n) ? 'block' : 'none';
     const node = document.querySelector('.step-node[data-step="'+i+'"]');
     if (node) { node.classList.toggle('active', i === n); node.classList.toggle('done', i < n); }
   }
-  // When entering the retirement step, populate its fields from state.
-  if (n === 7 && typeof populateRetirementStep === 'function') populateRetirementStep();
   const wr = document.getElementById('wizardRoot');
   if (wr) wr.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -2982,22 +2757,14 @@ function saveStep(step) {
       state.incomeOverrides = readIncomeOverrides();
       break;
     case 3:
-      getExpenseCats().forEach(c => { const _el = document.getElementById(c.key); if (_el) state[c.key] = Number(_el.value) || 0; });
+      EXPENSE_CATEGORIES.forEach(c => { state[c.key] = Number(document.getElementById(c.key).value) || 0; });
       state.plannedSavingsTransfer = Number((document.getElementById('plannedSavingsTransfer')||{}).value) || 0;
-      {
-        // The edit form only renders future/recurring one-offs, so readOneOffs returns just those.
-        // Re-attach legacy past/current non-recurring one-offs (hidden from the form) so they are
-        // never dropped — they stay counted via the planned path, per the agreed behavior.
-        const _s3NowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
-        const kept = (state.expenseOneOffs || []).filter(o => o && !((o.month && o.month > _s3NowYM) || o.repeat));
-        state.expenseOneOffs = kept.concat(readOneOffs('expenseOneOffs'));
-      }
+      state.expenseOneOffs = readOneOffs('expenseOneOffs');
       break;
     case 4: state.emis = readEMIs(); break;
     case 5: state.investments = readInvestments(); break;
     case 6: state.accounts = readAccounts(); break;
-    case 7: saveRetirementStep(); break;
-    case 8: readRates(); break;
+    case 7: readRates(); break;
   }
   return true;
 }
@@ -3908,207 +3675,6 @@ function readRates() {
   if (cgTog) state.growContributions = cgTog.classList.contains('on');
 }
 
-// ── Retirement wizard step (v14) ──────────────────────────────────────────
-// Strategy option definitions, shared by wizard + settings + dashboard.
-const RET_STRATEGY_OPTS = [
-  { value:'hold',     label:'Hold — keep compounding (estate)' },
-  { value:'withdraw', label:'Full withdrawal → spending pool' },
-  { value:'swp',      label:'SWP — systematic monthly withdrawal' },
-  { value:'partial',  label:'Partial withdrawal (set %)' },
-  { value:'annuity',  label:'Convert to annuity' },
-];
-
-function retDefaultStrategy() {
-  return { mode:'hold', swpRate:7, partialPct:50, annuityRate:6 };
-}
-
-// Populate the retirement wizard step from state.
-function populateRetirementStep() {
-  const on = !!state.retEnabled;
-  const toggle = document.getElementById('retEnabledToggle');
-  if (toggle) toggle.checked = on;
-  const fields = document.getElementById('retFields');
-  if (fields) fields.style.display = on ? 'block' : 'none';
-  _syncRetToggleVisual();
-
-  // Partner fields visibility
-  const isPartner = state.mode === 'partner';
-  const p2AgeField = document.getElementById('p2AgeField');
-  const p2RetField = document.getElementById('p2RetField');
-  if (p2AgeField) p2AgeField.style.display = isPartner ? '' : 'none';
-  if (p2RetField) p2RetField.style.display = isPartner ? '' : 'none';
-
-  // Labels personalised with names
-  const p1n = (state.p1Name || 'You').trim();
-  const p2n = (state.p2Name || 'Partner').trim();
-  const setTxt = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
-  setTxt('p1AgeLabel', isPartner ? `${p1n}'s current age` : 'Your current age');
-  setTxt('p1RetLabel', isPartner ? `${p1n}'s retirement age` : 'Your retirement age');
-  setTxt('p2AgeLabel', `${p2n}'s current age`);
-  setTxt('p2RetLabel', `${p2n}'s retirement age`);
-
-  // Values
-  const setVal = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
-  setVal('p1CurrentAge', state.p1CurrentAge ?? 30);
-  setVal('p1RetireAge',  state.p1RetireAge ?? 60);
-  setVal('p2CurrentAge', state.p2CurrentAge ?? 28);
-  setVal('p2RetireAge',  state.p2RetireAge ?? 58);
-  setVal('lifeExpectancy', state.lifeExpectancy ?? 85);
-  setVal('retExpensePct', state.retExpensePct ?? 60);
-  setVal('postRetReturn', ((state.postRetReturn ?? 0.07) * 100));
-
-  const pctLabel = document.getElementById('retExpPctLabel');
-  if (pctLabel) pctLabel.textContent = state.retExpensePct ?? 60;
-
-  _updateRetExpHint();
-  _updateRetTimelineHint();
-  renderRetStrategyList();
-}
-
-// Save the retirement wizard step into state.
-function saveRetirementStep() {
-  const toggle = document.getElementById('retEnabledToggle');
-  state.retEnabled = toggle ? !!toggle.checked : false;
-
-  const num = (id, def) => { const e = document.getElementById(id); const v = Number((e||{}).value); return isFinite(v) && v > 0 ? v : def; };
-  state.p1CurrentAge = num('p1CurrentAge', 30);
-  state.p1RetireAge  = num('p1RetireAge', 60);
-  state.p2CurrentAge = num('p2CurrentAge', 28);
-  state.p2RetireAge  = num('p2RetireAge', 58);
-  state.lifeExpectancy = num('lifeExpectancy', 85);
-
-  const pctEl = document.getElementById('retExpensePct');
-  state.retExpensePct = pctEl ? (Number(pctEl.value) || 60) : 60;
-
-  const prrEl = document.getElementById('postRetReturn');
-  state.postRetReturn = prrEl ? ((Number(prrEl.value) || 7) / 100) : 0.07;
-
-  // Strategies are saved live as the user edits them (see renderRetStrategyList),
-  // but do a final sweep here to capture any pending select/inputs.
-  _readRetStrategiesFromDOM();
-}
-
-function _readRetStrategiesFromDOM() {
-  if (!state.retStrategies || typeof state.retStrategies !== 'object') state.retStrategies = {};
-  document.querySelectorAll('#retStrategyList [data-ret-strat]').forEach(card => {
-    const id = card.getAttribute('data-ret-strat');
-    const modeSel = card.querySelector('[data-ret-mode]');
-    if (!modeSel) return;
-    const s = state.retStrategies[id] || retDefaultStrategy();
-    s.mode = modeSel.value;
-    const swp = card.querySelector('[data-ret-swp]');       if (swp) s.swpRate = Number(swp.value) || 7;
-    const par = card.querySelector('[data-ret-partial]');   if (par) s.partialPct = Number(par.value) || 50;
-    const ann = card.querySelector('[data-ret-annuity]');   if (ann) s.annuityRate = Number(ann.value) || 6;
-    state.retStrategies[id] = s;
-  });
-}
-
-// Render one strategy card per investment.
-function renderRetStrategyList() {
-  const wrap = document.getElementById('retStrategyList');
-  const empty = document.getElementById('retStrategyEmpty');
-  if (!wrap) return;
-  const invs = state.investments || [];
-  if (!invs.length) {
-    wrap.innerHTML = '';
-    if (empty) empty.style.display = 'block';
-    return;
-  }
-  if (empty) empty.style.display = 'none';
-  if (!state.retStrategies || typeof state.retStrategies !== 'object') state.retStrategies = {};
-
-  wrap.innerHTML = invs.map(inv => {
-    const s = state.retStrategies[inv.id] || retDefaultStrategy();
-    const opts = RET_STRATEGY_OPTS.map(o =>
-      `<option value="${o.value}"${o.value === s.mode ? ' selected' : ''}>${o.label}</option>`).join('');
-    return `
-      <div class="ret-strat-card" data-ret-strat="${inv.id}" style="border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:10px;background:var(--bg-elevated);">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-          <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${inv.color || 'var(--accent)'};"></span>
-          <span style="font-family:'Fraunces',serif;font-size:15px;color:var(--ink);">${escapeHtml(inv.name)}</span>
-          <span style="margin-left:auto;font-size:11px;color:var(--ink-muted);font-family:'JetBrains Mono',monospace;">${fmtMoney(inv.balance)}</span>
-        </div>
-        <select data-ret-mode style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg-card);color:var(--ink);font-family:'DM Sans',sans-serif;font-size:13px;">${opts}</select>
-        <div data-ret-extra style="margin-top:10px;"></div>
-      </div>`;
-  }).join('');
-
-  // Wire each card's mode select + render its extra input
-  invs.forEach(inv => {
-    const card = wrap.querySelector(`[data-ret-strat="${CSS.escape(inv.id)}"]`);
-    if (!card) return;
-    const sel = card.querySelector('[data-ret-mode]');
-    const renderExtra = () => {
-      const s = state.retStrategies[inv.id] || retDefaultStrategy();
-      const extra = card.querySelector('[data-ret-extra]');
-      const mode = sel.value;
-      let html = '';
-      const inputStyle = "width:120px;padding:6px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg-card);color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:12.5px;";
-      const lblStyle = "font-size:12px;color:var(--ink-muted);display:block;margin-bottom:4px;";
-      if (mode === 'swp') {
-        html = `<label style="${lblStyle}">Annual withdrawal rate (%)</label><input type="number" data-ret-swp value="${s.swpRate || 7}" min="1" max="20" step="0.5" style="${inputStyle}"><div style="font-size:11.5px;color:var(--ink-muted);margin-top:6px;font-style:italic;">Corpus stays invested; you draw this % each year.</div>`;
-      } else if (mode === 'partial') {
-        html = `<label style="${lblStyle}">Withdraw at retirement (%)</label><input type="number" data-ret-partial value="${s.partialPct || 50}" min="1" max="99" step="5" style="${inputStyle}"><div style="font-size:11.5px;color:var(--ink-muted);margin-top:6px;font-style:italic;">This share moves to your spending pool; the rest keeps compounding.</div>`;
-      } else if (mode === 'annuity') {
-        html = `<label style="${lblStyle}">Annuity payout rate (%)</label><input type="number" data-ret-annuity value="${s.annuityRate || 6}" min="1" max="15" step="0.5" style="${inputStyle}"><div style="font-size:11.5px;color:var(--ink-muted);margin-top:6px;font-style:italic;">Converts the corpus into a fixed lifelong monthly income.</div>`;
-      } else if (mode === 'hold') {
-        html = `<div style="font-size:11.5px;color:var(--ink-muted);font-style:italic;">Left untouched to keep compounding — part of your estate / legacy.</div>`;
-      } else {
-        html = `<div style="font-size:11.5px;color:var(--ink-muted);font-style:italic;">Full balance moves into your retirement spending pool at retirement.</div>`;
-      }
-      if (extra) extra.innerHTML = html;
-      // Re-wire the freshly-created extra input to persist on change
-      const persist = () => { _readRetStrategiesFromDOM(); };
-      const swp = card.querySelector('[data-ret-swp]');     if (swp) swp.addEventListener('input', persist);
-      const par = card.querySelector('[data-ret-partial]'); if (par) par.addEventListener('input', persist);
-      const ann = card.querySelector('[data-ret-annuity]'); if (ann) ann.addEventListener('input', persist);
-    };
-    sel.addEventListener('change', () => {
-      const s = state.retStrategies[inv.id] || retDefaultStrategy();
-      s.mode = sel.value;
-      state.retStrategies[inv.id] = s;
-      renderExtra();
-    });
-    renderExtra();
-  });
-}
-
-function _syncRetToggleVisual() {
-  const toggle = document.getElementById('retEnabledToggle');
-  if (!toggle) return;
-  const slider = toggle.parentElement ? toggle.parentElement.querySelector('.switch-slider') : null;
-  if (slider) {
-    if (toggle.checked) {
-      slider.style.background = 'var(--gold)';
-    } else {
-      slider.style.background = 'var(--line)';
-    }
-    // knob
-    slider.style.setProperty('--knob', toggle.checked ? '22px' : '2px');
-  }
-}
-
-function _updateRetExpHint() {
-  const hint = document.getElementById('retExpAmountHint');
-  if (!hint) return;
-  const pct = Number((document.getElementById('retExpensePct')||{}).value) || 60;
-  const curExp = getExpenseCats().reduce((a,c)=>a+(Number(state[c.key])||0),0);
-  const retExp = curExp * pct / 100;
-  hint.innerHTML = `Today you spend about <strong>${fmtMoney(curExp)}</strong>/mo. At ${pct}% that's <strong style="color:var(--gold-bright);">${fmtMoney(retExp)}</strong>/mo in retirement (in today's money).`;
-}
-
-function _updateRetTimelineHint() {
-  const hint = document.getElementById('retTimelineHint');
-  if (!hint) return;
-  const p1Age = Number((document.getElementById('p1CurrentAge')||{}).value) || 30;
-  const p1Ret = Number((document.getElementById('p1RetireAge')||{}).value) || 60;
-  const life  = Number((document.getElementById('lifeExpectancy')||{}).value) || 85;
-  const yrsTo = Math.max(0, p1Ret - p1Age);
-  const drawdown = Math.max(0, life - p1Ret);
-  const p1n = state.mode === 'partner' ? (state.p1Name || 'You') : 'You';
-  hint.innerHTML = `<strong>${escapeHtml(p1n)}:</strong> ${yrsTo} years to retirement, then a ${drawdown}-year drawdown to age ${life}.`;
-}
-
 function buildRateEditor() {
   const c = document.getElementById('rateEditor');
   c.innerHTML = '';
@@ -4182,11 +3748,11 @@ function buildRateEditor() {
 function buildReview() {
   const panel = document.getElementById('reviewPanel');
   const totalMonthly = state.p1Salary + state.p1Other + state.p2Salary + state.p2Other;
-  const totalExp = getExpenseCats().reduce((a,c) => a + (Number(state[c.key])||0), 0);
+  const totalExp = EXPENSE_CATEGORIES.reduce((a,c) => a + state[c.key], 0);
   const totalEMI = state.emis.reduce((a,e) => a + e.amount, 0);
   const investBal = state.investments.reduce((a,i) => a + i.balance, 0);
   const monthlyInvest = state.investments.reduce((a,i) => a + i.monthlyContribution, 0);
-  panel.innerHTML = `<div class="review-grid"><div class="review-card"><div class="review-head"><span>Household</span><span class="edit" data-goto="1">Edit</span></div><div class="review-item"><span class="k">Mode</span><span class="v">${state.mode === 'solo' ? 'Solo' : 'With partner'}</span></div><div class="review-item"><span class="k">Planner</span><span class="v">${escapeHtml(state.p1Name)}${state.mode==='partner'?' &amp; '+escapeHtml(state.p2Name):''}</span></div><div class="review-item"><span class="k">Currency</span><span class="v">${state.currency}</span></div><div class="review-item"><span class="k">Default horizon</span><span class="v">10 years</span></div></div><div class="review-card"><div class="review-head"><span>Income · monthly</span><span class="edit" data-goto="2">Edit</span></div>${state.p1Salary ? `<div class="review-item"><span class="k">${escapeHtml(state.p1Name)} salary</span><span class="v">${fmtMoney(state.p1Salary)}</span></div>` : ''}${state.p1Other ? `<div class="review-item"><span class="k">${escapeHtml(state.p1Name)} other</span><span class="v">${fmtMoney(state.p1Other)}</span></div>` : ''}${state.p2Salary ? `<div class="review-item"><span class="k">${escapeHtml(state.p2Name)} salary</span><span class="v">${fmtMoney(state.p2Salary)}</span></div>` : ''}${state.p2Other ? `<div class="review-item"><span class="k">${escapeHtml(state.p2Name)} other</span><span class="v">${fmtMoney(state.p2Other)}</span></div>` : ''}<div class="review-item"><span class="k">One-off income</span><span class="v">${state.incomeOneOffs.length} entries</span></div><div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Total monthly</span><span class="v" style="color:var(--gold-bright);">${fmtMoney(totalMonthly)}</span></div></div><div class="review-card"><div class="review-head"><span>Expenses · monthly</span><span class="edit" data-goto="3">Edit</span></div>${getExpenseCats().filter(c => state[c.key] > 0).map(c => `<div class="review-item"><span class="k">${c.label}</span><span class="v">${fmtMoney(state[c.key])}</span></div>`).join('')}<div class="review-item"><span class="k">One-off expenses</span><span class="v">${state.expenseOneOffs.length} entries</span></div><div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Total monthly</span><span class="v" style="color:var(--red);">${fmtMoney(totalExp)}</span></div></div><div class="review-card"><div class="review-head"><span>EMIs</span><span class="edit" data-goto="4">Edit</span></div>${state.emis.length === 0 ? '<div class="review-item"><span class="k">None entered</span><span class="v">—</span></div>' : state.emis.map(e => `<div class="review-item"><span class="k">${escapeHtml(e.name)}</span><span class="v">${fmtMoney(e.amount)} · ${e.months} mo</span></div>`).join('')}${state.emis.length ? `<div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Total EMI</span><span class="v" style="color:var(--red);">${fmtMoney(totalEMI)}</span></div>` : ''}</div><div class="review-card"><div class="review-head"><span>Investments</span><span class="edit" data-goto="5">Edit</span></div>${state.investments.length === 0 ? '<div class="review-item"><span class="k">None entered</span><span class="v">—</span></div>' : state.investments.map(i => `<div class="review-item"><span class="k"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${i.color};margin-right:8px;"></span>${escapeHtml(i.name)}</span><span class="v">${fmtMoney(i.balance)} · ${(i.rate*100).toFixed(2)}%</span></div>`).join('')}${state.investments.length ? `<div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Current net worth</span><span class="v" style="color:var(--gold-bright);">${fmtMoney(investBal)}</span></div>` : ''}</div><div class="review-card"><div class="review-head"><span>Accounts</span><span class="edit" data-goto="6">Edit</span></div>${(state.accounts||[]).length === 0 ? '<div class="review-item"><span class="k">None entered</span><span class="v">—</span></div>' : state.accounts.map(a => `<div class="review-item"><span class="k">${escapeHtml(a.name)} · ${a.type}</span><span class="v" style="${a.openingBalance<0?'color:var(--red)':''}">${fmtMoney(a.openingBalance)}</span></div>`).join('')}</div></div>`;
+  panel.innerHTML = `<div class="review-grid"><div class="review-card"><div class="review-head"><span>Household</span><span class="edit" data-goto="1">Edit</span></div><div class="review-item"><span class="k">Mode</span><span class="v">${state.mode === 'solo' ? 'Solo' : 'With partner'}</span></div><div class="review-item"><span class="k">Planner</span><span class="v">${escapeHtml(state.p1Name)}${state.mode==='partner'?' &amp; '+escapeHtml(state.p2Name):''}</span></div><div class="review-item"><span class="k">Currency</span><span class="v">${state.currency}</span></div><div class="review-item"><span class="k">Default horizon</span><span class="v">10 years</span></div></div><div class="review-card"><div class="review-head"><span>Income · monthly</span><span class="edit" data-goto="2">Edit</span></div>${state.p1Salary ? `<div class="review-item"><span class="k">${escapeHtml(state.p1Name)} salary</span><span class="v">${fmtMoney(state.p1Salary)}</span></div>` : ''}${state.p1Other ? `<div class="review-item"><span class="k">${escapeHtml(state.p1Name)} other</span><span class="v">${fmtMoney(state.p1Other)}</span></div>` : ''}${state.p2Salary ? `<div class="review-item"><span class="k">${escapeHtml(state.p2Name)} salary</span><span class="v">${fmtMoney(state.p2Salary)}</span></div>` : ''}${state.p2Other ? `<div class="review-item"><span class="k">${escapeHtml(state.p2Name)} other</span><span class="v">${fmtMoney(state.p2Other)}</span></div>` : ''}<div class="review-item"><span class="k">One-off income</span><span class="v">${state.incomeOneOffs.length} entries</span></div><div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Total monthly</span><span class="v" style="color:var(--gold-bright);">${fmtMoney(totalMonthly)}</span></div></div><div class="review-card"><div class="review-head"><span>Expenses · monthly</span><span class="edit" data-goto="3">Edit</span></div>${EXPENSE_CATEGORIES.filter(c => state[c.key] > 0).map(c => `<div class="review-item"><span class="k">${c.label}</span><span class="v">${fmtMoney(state[c.key])}</span></div>`).join('')}<div class="review-item"><span class="k">One-off expenses</span><span class="v">${state.expenseOneOffs.length} entries</span></div><div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Total monthly</span><span class="v" style="color:var(--red);">${fmtMoney(totalExp)}</span></div></div><div class="review-card"><div class="review-head"><span>EMIs</span><span class="edit" data-goto="4">Edit</span></div>${state.emis.length === 0 ? '<div class="review-item"><span class="k">None entered</span><span class="v">—</span></div>' : state.emis.map(e => `<div class="review-item"><span class="k">${escapeHtml(e.name)}</span><span class="v">${fmtMoney(e.amount)} · ${e.months} mo</span></div>`).join('')}${state.emis.length ? `<div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Total EMI</span><span class="v" style="color:var(--red);">${fmtMoney(totalEMI)}</span></div>` : ''}</div><div class="review-card"><div class="review-head"><span>Investments</span><span class="edit" data-goto="5">Edit</span></div>${state.investments.length === 0 ? '<div class="review-item"><span class="k">None entered</span><span class="v">—</span></div>' : state.investments.map(i => `<div class="review-item"><span class="k"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${i.color};margin-right:8px;"></span>${escapeHtml(i.name)}</span><span class="v">${fmtMoney(i.balance)} · ${(i.rate*100).toFixed(2)}%</span></div>`).join('')}${state.investments.length ? `<div class="review-item"><span class="k" style="color:var(--ink);font-weight:500;">Current net worth</span><span class="v" style="color:var(--gold-bright);">${fmtMoney(investBal)}</span></div>` : ''}</div><div class="review-card"><div class="review-head"><span>Accounts</span><span class="edit" data-goto="6">Edit</span></div>${(state.accounts||[]).length === 0 ? '<div class="review-item"><span class="k">None entered</span><span class="v">—</span></div>' : state.accounts.map(a => `<div class="review-item"><span class="k">${escapeHtml(a.name)} · ${a.type}</span><span class="v" style="${a.openingBalance<0?'color:var(--red)':''}">${fmtMoney(a.openingBalance)}</span></div>`).join('')}</div></div>`;
   panel.querySelectorAll('.edit').forEach(el => { el.addEventListener('click', () => showStep(Number(el.dataset.goto))); });
 }
 
@@ -4221,72 +3787,6 @@ function ensureDefaultAccounts() {
   }
 }
 
-// ── Editable expense categories (schema v15): dynamic Step-3 inputs + rename/add/delete ──
-// All operations write only to state.categoryLabels / customCategories / deletedCategories,
-// then re-render + scheduleSave. Category *amounts* live in state[key] exactly as before, so
-// the engine and every getExpenseCats() consumer pick up changes with no further wiring.
-function _captureCatInputs() {
-  // Preserve whatever is currently typed in the grid so a re-render doesn't lose it.
-  getExpenseCats().forEach(c => { const el = document.getElementById(c.key); if (el) state[c.key] = Number(el.value) || 0; });
-}
-function renderExpenseCatInputs() {
-  const grid = document.getElementById('expenseCatGrid');
-  if (!grid) return;
-  grid.innerHTML = getExpenseCats().map(c => `
-    <div class="field cat-field" data-cat="${c.key}">
-      <label>
-        <span class="cat-dot" style="background:${c.color};"></span>
-        <span class="cat-label-text">${escapeHtml(c.label)}</span>
-        <span class="cat-actions">
-          <button type="button" class="cat-btn" data-cat-rename="${c.key}" title="Rename category">&#9998;</button>
-          <button type="button" class="cat-btn cat-del" data-cat-del="${c.key}" title="Delete category">&times;</button>
-        </span>
-      </label>
-      <div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" id="${c.key}" min="0" step="any" placeholder="0" value="${state[c.key] || ''}" /></div>
-    </div>`).join('');
-  grid.querySelectorAll('[data-cat-rename]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); renameExpenseCategory(b.getAttribute('data-cat-rename')); }));
-  grid.querySelectorAll('[data-cat-del]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); deleteExpenseCategory(b.getAttribute('data-cat-del')); }));
-}
-function renameExpenseCategory(key) {
-  const cur = getExpenseCats().find(c => c.key === key);
-  if (!cur) return;
-  const name = (prompt('Rename category', cur.label) || '').trim();
-  if (!name || name === cur.label) return;
-  _captureCatInputs();
-  if (!state.categoryLabels || typeof state.categoryLabels !== 'object') state.categoryLabels = {};
-  state.categoryLabels[key] = name;
-  renderExpenseCatInputs();
-  scheduleSave();
-}
-function addExpenseCategory() {
-  const name = (prompt('New category name', '') || '').trim();
-  if (!name) return;
-  _captureCatInputs();
-  if (!Array.isArray(state.customCategories)) state.customCategories = [];
-  const key = 'exCustom' + Date.now().toString(36);
-  const color = CUSTOM_CAT_COLORS[state.customCategories.length % CUSTOM_CAT_COLORS.length];
-  state.customCategories.push({ key, label: name, color });
-  state[key] = 0;
-  renderExpenseCatInputs();
-  scheduleSave();
-}
-function deleteExpenseCategory(key) {
-  const cur = getExpenseCats().find(c => c.key === key);
-  if (!cur) return;
-  if (!confirm('Delete "' + cur.label + '"?\n\nIts budgeted amount will be removed and it will no longer appear anywhere. Past logged transactions tagged to it keep their data but lose this label.')) return;
-  _captureCatInputs();
-  if (cur.builtIn) {
-    if (!Array.isArray(state.deletedCategories)) state.deletedCategories = [];
-    if (state.deletedCategories.indexOf(key) === -1) state.deletedCategories.push(key);
-  } else {
-    state.customCategories = (state.customCategories || []).filter(c => c.key !== key);
-  }
-  if (state.categoryLabels) delete state.categoryLabels[key];
-  state[key] = 0;
-  renderExpenseCatInputs();
-  scheduleSave();
-}
-
 function initWizard() {
   if (!state) state = freshState();
   document.querySelectorAll('#modeCards .rc').forEach(card => { card.classList.toggle('sel', card.dataset.mode === state.mode); });
@@ -4316,8 +3816,7 @@ function initWizard() {
   document.getElementById('p2Salary').value = state.p2Salary || '';
   document.getElementById('p2Other').value  = state.p2Other  || '';
 
-  if (typeof renderExpenseCatInputs === 'function') renderExpenseCatInputs();
-  getExpenseCats().forEach(c => { const _el = document.getElementById(c.key); if (_el) _el.value = state[c.key] || ''; });
+  EXPENSE_CATEGORIES.forEach(c => { document.getElementById(c.key).value = state[c.key] || ''; });
   const _pstEl = document.getElementById('plannedSavingsTransfer');
   if (_pstEl) _pstEl.value = state.plannedSavingsTransfer || '';
 
@@ -4326,15 +3825,7 @@ function initWizard() {
   document.getElementById('incomeOverrideList').innerHTML = '';
   (state.incomeOverrides||[]).forEach(d => addIncomeOverrideRow(d));
   document.getElementById('expenseOneOffs').innerHTML = '';
-  // Edit-inputs shows PROJECTED one-offs only: future-dated or recurring. Past/current one-time
-  // expenses live on the Journal page. Legacy past one-offs remain in state (counted) but are not
-  // shown/edited here; saveStep(3) re-attaches them so they're never dropped on save.
-  {
-    const _eiNowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
-    (state.expenseOneOffs||[])
-      .filter(o => o && ((o.month && o.month > _eiNowYM) || o.repeat))
-      .forEach(d => addOneOffRow('expenseOneOffs', d));
-  }
+  (state.expenseOneOffs||[]).forEach(d => addOneOffRow('expenseOneOffs', d));
   document.getElementById('emiList').innerHTML = '';
   (state.emis||[]).forEach(d => addEmiRow(d));
   document.getElementById('investmentList').innerHTML = '';
@@ -4371,8 +3862,6 @@ function initWizard() {
     document.getElementById('addIncomeOneOff').addEventListener('click', () => addOneOffRow('incomeOneOffs'));
     document.getElementById('addIncomeOverride').addEventListener('click', () => addIncomeOverrideRow());
     document.getElementById('addExpenseOneOff').addEventListener('click', () => addOneOffRow('expenseOneOffs'));
-    const _addCatBtn = document.getElementById('addExpenseCat');
-    if (_addCatBtn) _addCatBtn.addEventListener('click', addExpenseCategory);
     document.getElementById('addEmi').addEventListener('click', () => addEmiRow());
     document.getElementById('addInvestment').addEventListener('click', () => addInvestmentRow());
     document.getElementById('addAccount').addEventListener('click', () => addAccountRow({ type:'asset', openingBalance:0 }));
@@ -4401,30 +3890,10 @@ function initWizard() {
       showStep(6);
     });
     wire('step6Prev', 'click', () => { saveStep(6); showStep(5); });
-    wire('step6Next', 'click', () => { saveStep(6); showStep(7); });
+    wire('step6Next', 'click', () => { saveStep(6); buildRateEditor(); showStep(7); });
     wire('step7Prev', 'click', () => { saveStep(7); showStep(6); });
-    wire('step7Next', 'click', () => { saveStep(7); buildRateEditor(); showStep(8); });
+    wire('step7Next', 'click', () => { readRates(); buildReview(); showStep(8); });
     wire('step8Prev', 'click', () => { showStep(7); });
-    wire('step8Next', 'click', () => { readRates(); buildReview(); showStep(9); });
-    wire('step9Prev', 'click', () => { showStep(8); });
-
-    // ── Retirement step live wiring ──
-    wire('retEnabledToggle', 'change', () => {
-      const on = document.getElementById('retEnabledToggle').checked;
-      const fields = document.getElementById('retFields');
-      if (fields) fields.style.display = on ? 'block' : 'none';
-      _syncRetToggleVisual();
-      if (on) { _updateRetExpHint(); _updateRetTimelineHint(); renderRetStrategyList(); }
-    });
-    ['p1CurrentAge','p1RetireAge','p2CurrentAge','p2RetireAge','lifeExpectancy'].forEach(id => {
-      wire(id, 'input', () => { _updateRetTimelineHint(); });
-    });
-    wire('retExpensePct', 'input', () => {
-      const pct = Number(document.getElementById('retExpensePct').value) || 60;
-      const lbl = document.getElementById('retExpPctLabel');
-      if (lbl) lbl.textContent = pct;
-      _updateRetExpHint();
-    });
     wire('generateBtn', 'click', () => { saveStep(currentStep); readRates(); launchDashboard(); });
   }
 }
@@ -4565,18 +4034,6 @@ function updatePreviewBanner() {
 // baseAmount is the instrument's default monthly contribution / EMI amount.
 // Single authoritative END month (YYYY-MM) for an EMI: close event month wins over the term.
 // Returns null if it has no valid start. Close month is the last paid month (inclusive).
-// True if EMI `e` is active in month `ym` (YYYY-MM): started on/before ym and not
-// strictly past its end month. The final payment month counts as active. Shared by
-// the Dashboard's monthly outflow, liquidity, and debt tracker so they never disagree.
-function _emiActiveIn(e, ym) {
-  const total = Number(e.months) || 0;
-  if (total <= 0 || !e.startMonth) return false;
-  if (ym < e.startMonth) return false;
-  const endIso = _emiEndIso(e);
-  if (endIso && ym > endIso) return false;
-  return true;
-}
-
 function _emiEndIso(e) {
   if (!e.startMonth || !/^\d{4}-\d{2}$/.test(e.startMonth)) return null;
   const closeEv = Array.isArray(e.events) ? e.events.find(ev => ev.type === 'close') : null;
@@ -4754,20 +4211,6 @@ function runProjection(overrides={}) {
     }
   });
 
-  // ── Retirement income cutoff (opt-in via overrides.retire) ──────────────
-  // When the Dashboard passes overrides.retire = { p1StopISO, p2StopISO }, each
-  // person's salary/other income drops to zero from their retirement month onward
-  // ("true retirement" — no more paycheck). Existing callers pass nothing, so
-  // default behavior for every other page is unchanged.
-  const _retire = overrides.retire || null;
-  if (_retire) {
-    for (let i = 0; i < n; i++) {
-      const iso = months[i].iso;
-      if (_retire.p1StopISO && iso >= _retire.p1StopISO) p1Series[i] = 0;
-      if (_retire.p2StopISO && iso >= _retire.p2StopISO) p2Series[i] = 0;
-    }
-  }
-
   // One-off income series (with optional annual repeat + salary growth applied each repeat)
   const oneOffIncSeries = new Array(n).fill(0);
   function expandOneOff(o, target, growthRate, multiplier) {
@@ -4870,7 +4313,7 @@ function runProjection(overrides={}) {
   });
   // Per-category expense series
   const expCategorySeries = {};
-  getExpenseCats().forEach(c => {
+  EXPENSE_CATEGORIES.forEach(c => {
     const base = (state[c.key] || 0) * expMul;
     const arr = new Array(n);
     for (let i = 0; i < n; i++) arr[i] = base * expGrowthMul[i];
@@ -4920,7 +4363,7 @@ function runProjection(overrides={}) {
   for (let i = 0; i < n; i++) {
     baseIncomeSeries[i] = p1Series[i] + p2Series[i] + oneOffIncSeries[i];
     let baseExp = oneOffExpSeries[i] + emiMonthly[i];
-    getExpenseCats().forEach(c => { baseExp += expCategorySeries[c.key][i]; });
+    EXPENSE_CATEGORIES.forEach(c => { baseExp += expCategorySeries[c.key][i]; });
     baseExpenseSeries[i] = baseExp;
   }
 
@@ -4986,13 +4429,7 @@ function runProjection(overrides={}) {
       const mRate = Math.pow(1 + Math.max(0, inv.rate), 1/12) - 1;
       // Contribution this month comes from the lifecycle timeline (honors step-up/pause/close),
       // then scaled by the growth/scenario multiplier. Closed/paused months → 0.
-      let contrib = (tl.amount || 0) * contribMul;
-      // Retirement cutoff: contributions stop once household retirement begins
-      // (opt-in via overrides.retire.contribStopISO). Salary funds SIPs, so when
-      // salary stops, contributions stop too.
-      if (_retire && _retire.contribStopISO && months[i].iso >= _retire.contribStopISO) {
-        contrib = 0;
-      }
+      const contrib = (tl.amount || 0) * contribMul;
       contribPerMonth[k].push(contrib);
       monthInvestContrib += contrib;
       let newBal;
@@ -5497,7 +4934,7 @@ function renderBudgetActuals() {
   // Aggregate actuals from transactions for the selected month
   const monthPrefix = month + '-'; // e.g. '2026-04-' will match dates like '2026-04-15'
   const actualsByCat = {};
-  getExpenseCats().forEach(c => { actualsByCat[c.key] = 0; });
+  EXPENSE_CATEGORIES.forEach(c => { actualsByCat[c.key] = 0; });
   // Per-EMI actuals: keyed by emi.id
   const emiActuals = {};
   (state.emis || []).forEach(e => { if (e.id) emiActuals[e.id] = 0; });
@@ -5505,17 +4942,11 @@ function renderBudgetActuals() {
   // (These are CC adjustments tagged isHiddenSpending — they pollute Misc and the user
   // should be able to drill in to see why Misc is higher than expected.)
   let adjMiscActual = 0;
-  let oneTimeActual = 0;           // journal one-time expenses this month
-  const oneTimeItems = [];         // for the expandable detail
   (state.transactions || []).forEach(tx => {
     if (!tx.date || !tx.date.startsWith(monthPrefix)) return;
     if (tx.type === 'expense' && tx.category === 'emi' && tx.emiId) {
       // EMI payment — routed to its own per-EMI tube, not to discretionary categories.
       if (emiActuals.hasOwnProperty(tx.emiId)) emiActuals[tx.emiId] += Number(tx.amount) || 0;
-    } else if (tx.type === 'expense' && tx.category === 'oneTime') {
-      // One-time expenses — their own tube (budget always 0, so any spend reads as "over").
-      oneTimeActual += Number(tx.amount) || 0;
-      oneTimeItems.push({ note: (tx.note || '').trim() || 'One-time expense', amount: Number(tx.amount) || 0, date: tx.date });
     } else if (tx.type === 'expense' && actualsByCat.hasOwnProperty(tx.category)) {
       actualsByCat[tx.category] += Number(tx.amount) || 0;
     } else if (tx.type === 'adjustment' && tx.isHiddenSpending && actualsByCat.hasOwnProperty('exMisc')) {
@@ -5526,7 +4957,7 @@ function renderBudgetActuals() {
   });
 
   // Build category rows (only categories with a non-zero budget, OR with non-zero actuals)
-  const cats = getExpenseCats().filter(c => (state[c.key] || 0) > 0 || actualsByCat[c.key] > 0);
+  const cats = EXPENSE_CATEGORIES.filter(c => (state[c.key] || 0) > 0 || actualsByCat[c.key] > 0);
 
   // ---- Render expense-split pie chart (this month, by category + EMIs combined) ----
   // The pie shows all spending sources side-by-side so the user sees where money went.
@@ -5534,7 +4965,7 @@ function renderBudgetActuals() {
   // Hidden gracefully if nothing spent this month.
   const pieCard = document.getElementById('baPieCard');
   const pieEntries = [];
-  getExpenseCats().forEach(c => {
+  EXPENSE_CATEGORIES.forEach(c => {
     const v = actualsByCat[c.key] || 0;
     if (v > 0) pieEntries.push({ label: c.label, val: v, color: c.color || '#7fb069' });
   });
@@ -5634,14 +5065,6 @@ function renderBudgetActuals() {
     }
   }
 
-  // ---- One-time expenses ----
-  // No monthly budget — the allotted amount is always 0, so any journal one-time expense this
-  // month reads as fully "over" (red tube). Only shown when there's a one-time spend this month.
-  if (oneTimeActual > 0) {
-    html += '<div class="budget-section-head">One-time expenses</div>';
-    html += renderBudgetRow('One-time expenses', '#c37b52', oneTimeActual, 0, false, 'onetime', true);
-  }
-
   // ---- Planned savings transfer ----
   // Loose mode: planned amount is a target; "actual" = sum of transfers logged this month
   // whose destination is the savings account. Difference is informational, not enforced.
@@ -5705,14 +5128,8 @@ function renderBudgetRowDetails(filter, month) {
   const monthPrefix = month + '-';
   // Inline helpers (module-scoped equivalents of the journal IIFE's private helpers).
   const _labelForCatLocal = (key) => {
-    if (key === 'oneTime') return 'One-time expense';
-    const c = (getExpenseCats() || []).find(c => c.key === key);
-    if (c) return c.label;
-    const override = (state.categoryLabels || {})[key];
-    if (override) return override;
-    const builtin = EXPENSE_CATEGORIES.find(c2 => c2.key === key);
-    if (builtin) return builtin.label;
-    return key || '—';
+    const c = (EXPENSE_CATEGORIES || []).find(c => c.key === key);
+    return c ? c.label : (key || '—');
   };
   const _formatDateLocal = (iso) => {
     if (!iso) return '';
@@ -5735,13 +5152,10 @@ function renderBudgetRowDetails(filter, month) {
       return tx.type === 'expense' && tx.category === 'emi' && tx.emiId === id;
     }
     if (filter === 'all-disc') {
-      // All discretionary expenses (any category except EMI and one-time) + adjustment-misc
-      if (tx.type === 'expense' && tx.category !== 'emi' && tx.category !== 'oneTime') return true;
+      // All discretionary expenses (any category except EMI) + adjustment-misc
+      if (tx.type === 'expense' && tx.category !== 'emi') return true;
       if (tx.type === 'adjustment' && tx.isHiddenSpending) return true;
       return false;
-    }
-    if (filter === 'onetime') {
-      return tx.type === 'expense' && tx.category === 'oneTime';
     }
     if (filter === 'all-emi') {
       return tx.type === 'expense' && tx.category === 'emi';
@@ -5793,25 +5207,21 @@ function renderBudgetRowDetails(filter, month) {
 
 // Render a single budget row (tube + label). Optionally accepts a filter string used by
 // the click-to-expand handler to identify which transactions to show.
-function renderBudgetRow(name, color, actual, budget, master, filter, zeroIsOver) {
+function renderBudgetRow(name, color, actual, budget, master, filter) {
   const safeActual = Math.max(0, Number(actual) || 0);
   const safeBudget = Math.max(0, Number(budget) || 0);
   const hasLimit = safeBudget > 0;
-  // Rows with an intentional 0 budget (e.g. One-time expenses): any spend is "over" → full red.
-  const zeroOver = !hasLimit && zeroIsOver && safeActual > 0;
-  const pct = hasLimit ? (safeActual / safeBudget) : (zeroOver ? 1 : 0);
-  const over = (hasLimit && pct > 1) || zeroOver;
-  const fillWidth = hasLimit ? Math.min(100, pct * 100) : (zeroOver ? 100 : 0);
-  const pctText = hasLimit ? Math.round(pct * 100) + '%' : (zeroOver ? 'over' : '—');
+  const pct = hasLimit ? (safeActual / safeBudget) : 0;
+  const over = hasLimit && pct > 1;
+  const fillWidth = hasLimit ? Math.min(100, pct * 100) : 0;
+  const pctText = hasLimit ? Math.round(pct * 100) + '%' : '—';
   const amountsClass = over ? 'budget-row-amounts over' : 'budget-row-amounts';
   const fillClass = over ? 'tube-fill over' : 'tube-fill';
   const rowClass = master ? 'budget-row budget-master-row' : 'budget-row';
   const dot = `<span class="dot" style="background:${color};"></span>`;
   const numbers = hasLimit
     ? `${fmtMoney(safeActual, true)} / ${fmtMoney(safeBudget, true)}<span class="pct">${pctText}</span>`
-    : (zeroOver
-        ? `${fmtMoney(safeActual, true)} / ${fmtMoney(0, true)}<span class="pct">over budget</span>`
-        : `${fmtMoney(safeActual, true)}<span class="pct">no budget set</span>`);
+    : `${fmtMoney(safeActual, true)}<span class="pct">no budget set</span>`;
   const filterAttr = filter ? ` data-filter="${escapeHtml(filter)}"` : '';
   const chevron = filter ? '<span class="budget-chevron" aria-hidden="true">›</span>' : '';
   return `<div class="${rowClass}"${filterAttr} role="${filter ? 'button' : ''}" tabindex="${filter ? '0' : ''}">
@@ -5828,590 +5238,11 @@ function renderBudgetRow(name, color, actual, budget, master, filter, zeroIsOver
 
 <script>
 function renderDashboard() {
-  const host = document.getElementById('dashboardBody');
-  if (!host) return;
-
-  // Run the projection over the full horizon (extend to retirement if needed).
-  let projEnd = state.horizonEnd;
-  let retireOverride = null;
-  if (state.retEnabled) {
-    const p1Age = Number(state.p1CurrentAge) || 30;
-    const p1Ret = Number(state.p1RetireAge) || 60;
-    const [sy, sm] = (state.horizonStart || '2026-01').split('-').map(Number);
-    const life = Number(state.lifeExpectancy) || 85;
-    const endY = sy + Math.max(0, life - p1Age);
-    const wantEnd = endY + '-' + String(sm).padStart(2, '0');
-    if (wantEnd > projEnd) projEnd = wantEnd;
-    // Compute each person's retirement month for the true-retirement cutoff.
-    const smStr = String(sm).padStart(2, '0');
-    const p1StopISO = (sy + Math.max(0, p1Ret - p1Age)) + '-' + smStr;
-    let p2StopISO = null;
-    if (state.mode === 'partner') {
-      const p2Age = Number(state.p2CurrentAge) || 28;
-      const p2Ret = Number(state.p2RetireAge) || 58;
-      p2StopISO = (sy + Math.max(0, p2Ret - p2Age)) + '-' + smStr;
-    }
-    // Contributions stop when the LAST earner retires (household still invests
-    // while anyone draws a salary). Corpus is snapshotted at P1 retirement anyway.
-    const contribStopISO = (p2StopISO && p2StopISO > p1StopISO) ? p2StopISO : p1StopISO;
-    retireOverride = { p1StopISO, p2StopISO, contribStopISO };
-  }
-  const p = runProjection({ horizonEnd: projEnd, scenarios: activeScenariosForRender(), retire: retireOverride });
-
-  const _nowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
-  let todayIdx = p.isos.indexOf(_nowYM);
-  if (todayIdx < 0) todayIdx = 0;
-
-  // Net worth must match the Net Worth page exactly. That page uses the shared
-  // projectSavingsChain for the cash component (reverse-walks past months to true
-  // closing balances and removes the engine's double-count of past contributions),
-  // NOT the raw p.cashSeries baked into p.netWorth. Recompute the same way here so
-  // the Dashboard and Net Worth page never disagree.
-  const _dashCashChain = (typeof projectSavingsChain === 'function') ? projectSavingsChain(p) : null;
-  function _dashNetWorthAt(i) {
-    const inv = (p.investments || []).reduce((a, v) => a + ((p.bal[v.id + '_' + v.name] || [])[i] || 0), 0);
-    const liab = (p.liabSeries || [])[i] || 0;
-    const cash = _dashCashChain ? (_dashCashChain[i] || 0) : ((p.cashSeries || [])[i] || 0);
-    return inv + cash + liab;
-  }
-  const nwToday = _dashNetWorthAt(todayIdx);
-  // Full chain-adjusted net worth series, so the trajectory chart, annual review,
-  // and corpus projection all use the SAME definition as the Net Worth page.
-  const adjNetWorth = p.isos.map((ym, i) => _dashNetWorthAt(i));
-  const ret = computeRetirement(p, { nwSeries: adjNetWorth });   // null if retirement off
-
-  // ── Assemble current asset composition ──
-  // Cash uses the SAME chain-adjusted value as the hero net worth (not raw opening
-  // balances), so the composition, hero number, and Net Worth page all agree.
-  const compEntries = [];
-  (state.investments || []).forEach(inv => {
-    const k = inv.id + '_' + inv.name;
-    const bal = (p.bal[k] && p.bal[k][todayIdx] != null) ? p.bal[k][todayIdx] : inv.balance;
-    if (bal > 0) compEntries.push({ name: inv.name, color: inv.color || 'var(--accent)', value: bal });
-  });
-  const cashTotal = _dashCashChain ? (_dashCashChain[todayIdx] || 0)
-    : (state.accounts || []).filter(a => a.type === 'asset').reduce((s,a) => s + (Number(a.openingBalance) || 0), 0);
-  if (cashTotal > 0) compEntries.push({ name: 'Cash & Savings', color: '#C9A84C', value: cashTotal });
-  const liabTotal = (state.accounts || []).filter(a => a.type === 'liability')
-    .reduce((s,a) => s + Math.abs(Number(a.openingBalance) || 0), 0);
-  const totalAssets = compEntries.reduce((s,e) => s + e.value, 0);
-
-  // ── Monthly cash flow (this month) ──
-  // An EMI counts toward this month's outflow only if it is ACTIVE this month:
-  // started on or before now AND not past its end month (the final payment month
-  // is still active). This shared test is reused by liquidity + the debt tracker.
-  const _emiNowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
-  const monthIncome = (state.p1Salary||0) + (state.p1Other||0) + (state.p2Salary||0) + (state.p2Other||0);
-  const monthExp = getExpenseCats().reduce((a,c)=>a+(Number(state[c.key])||0),0);
-  const monthEMI = (state.emis||[]).filter(e => _emiActiveIn(e, _emiNowYM)).reduce((a,e)=>a+(Number(e.amount)||0),0);
-  const monthSurplus = monthIncome - monthExp - monthEMI;
-
-  // ── Liquidity (shown beside net worth in the hero card) ──
-  // Liquid investments (current projected balance) + live cash. The Dashboard is always "today"
-  // (current month), so cash is the live savings balance (matches the Journal), NOT the
-  // planned-surplus chain figure used for the net-worth/composition side of this card.
-  const _liqInvNames = [];
-  let _liqInvTotal = 0;
-  (state.investments || []).forEach(inv => {
-    if (!inv.liquid) return;
-    const k = inv.id + '_' + inv.name;
-    const bal = (p.bal[k] && p.bal[k][todayIdx] != null) ? p.bal[k][todayIdx] : (inv.balance || 0);
-    if (bal > 0) { _liqInvTotal += bal; _liqInvNames.push(inv.name); }
-  });
-  const _liqLiveCash = _liveLiquidCash();
-  const liquidityTotal = _liqInvTotal + (_liqLiveCash > 0 ? _liqLiveCash : 0);
-  const _liqLabelParts = _liqInvNames.slice();
-  if (_liqLiveCash > 0) _liqLabelParts.push('Cash & Savings');
-  const liquidityLabel = _liqLabelParts.length ? _liqLabelParts.join(', ') : 'no liquid assets flagged';
-
-  // ═══ BUILD HTML ═══
-  let html = '';
-
-  // ── HERO ROW: net worth + retirement corpus progress ──
-  html += '<div class="dash-hero">';
-
-  // Net worth card
-  const nwFmt = fmtShortUnit(nwToday);
-  const lqFmt = fmtShortUnit(liquidityTotal);
-  html += `
-    <div class="dash-card feature">
-      <div class="dash-hero-split">
-        <div class="dash-hero-col">
-          <div class="dash-eyebrow">Net worth today · ${_nowYM}</div>
-          <div class="dash-bignum"><span class="cur">${currencySymbol()}</span>${nwFmt.val}${nwFmt.unit ? '<span style="font-size:22px;color:var(--ink-muted);"> '+nwFmt.unit+'</span>' : ''}</div>
-        </div>
-        <div class="dash-hero-col">
-          <div class="dash-eyebrow">Liquidity</div>
-          <div class="dash-bignum" style="font-size:30px;"><span class="cur" style="font-size:18px;">${currencySymbol()}</span>${lqFmt.val}${lqFmt.unit ? '<span style="font-size:16px;color:var(--ink-muted);"> '+lqFmt.unit+'</span>' : ''}</div>
-          <div class="dash-liq-label">${escapeHtml(liquidityLabel)}</div>
-        </div>
-      </div>
-      <div class="dash-sub">Assets ${fmtMoney(totalAssets, true)}${liabTotal>0 ? ' · Liabilities '+fmtMoney(liabTotal, true) : ''}</div>
-      <div class="dash-composition-bar">
-        ${totalAssets>0 ? compEntries.map(e => `<div class="dash-comp-seg" style="width:${(e.value/totalAssets*100).toFixed(2)}%;background:${e.color};" title="${escapeHtml(e.name)}: ${fmtMoney(e.value)}"></div>`).join('') : '<div class="dash-comp-seg" style="width:100%;background:var(--line);"></div>'}
-      </div>
-      <div class="dash-comp-legend">
-        ${compEntries.map(e => `<div class="dash-comp-item"><span class="dash-comp-dot" style="background:${e.color};"></span>${escapeHtml(e.name)} · ${totalAssets>0?(e.value/totalAssets*100).toFixed(0):0}%</div>`).join('')}
-      </div>
-    </div>`;
-
-  // Retirement corpus card (or CTA if off)
-  if (ret) {
-    const pct = Math.min(100, Math.max(0, ret.pctFunded * 100));
-    const barColor = ret.onTrack ? 'var(--accent-bright)' : (pct > 60 ? '#C9A84C' : 'var(--red)');
-    const _infPct = ((Number(state.expenseGrowthRate) || 0.06) * 100).toFixed(0);
-    const _postRetPct = ((Number(state.postRetReturn) || 0.07) * 100).toFixed(0);
-    html += `
-      <div class="dash-card dash-retire-card" id="dashRetireCard" style="cursor:pointer;">
-        <div class="dash-eyebrow" style="display:flex;justify-content:space-between;align-items:center;">Retirement corpus · age ${ret.p1Ret}<span class="dash-retire-toggle" id="dashRetireToggle" aria-hidden="true">▸</span></div>
-        <div class="dash-bignum" style="font-size:30px;"><span class="cur">${currencySymbol()}</span>${fmtShortUnit(ret.projectedCorpus).val}<span style="font-size:16px;color:var(--ink-muted);"> ${fmtShortUnit(ret.projectedCorpus).unit}</span></div>
-        <div class="dash-sub">of ${fmtMoney(ret.requiredCorpus, true)} needed · ${ret.yearsToRet} years to go</div>
-        <div class="dash-progress-track"><div class="dash-progress-fill" style="width:${pct}%;background:${barColor};"></div></div>
-        <div class="dash-delta ${ret.onTrack?'pos':'neg'}">${ret.onTrack ? '▲ On track — surplus of '+fmtMoney(ret.gap, true) : '▼ Shortfall of '+fmtMoney(Math.abs(ret.gap), true)}</div>
-        <div class="dash-retire-assump">Assumes ${ret.monthlyNeedPct}% of current expenses, inflated ${_infPct}%/yr to age ${ret.p1Ret}, sustained ${ret.drawdownYears} yrs at ${_postRetPct}% post-retirement return. <span style="color:var(--accent);">Tap for details ▸</span></div>
-      </div>`;
-  } else {
-    html += `
-      <div class="dash-card" style="display:flex;flex-direction:column;justify-content:center;">
-        <div class="dash-eyebrow">Retirement</div>
-        <div style="font-family:'Fraunces',serif;font-size:19px;color:var(--ink);margin-bottom:6px;">Plan your finish line.</div>
-        <div class="dash-sub" style="margin-bottom:14px;">Set a retirement age and lifestyle to see your corpus target, funding progress, and drawdown projection.</div>
-        <button class="btn" id="dashSetupRetBtn" style="width:auto;align-self:flex-start;">Set up retirement →</button>
-      </div>`;
-  }
-  html += '</div>'; // end hero
-
-  // ── RETIREMENT DETAIL (expands on card click) ──
-  if (ret) {
-    html += `<div class="dash-card dash-retire-detail" id="dashRetireDetail" style="display:none;margin-bottom:16px;"></div>`;
-  }
-
-  // ── MONTHLY PULSE: 3 stat cards ──
-  html += `
-    <div class="dash-grid-3">
-      <div class="dash-stat"><div class="label">Monthly income</div><div class="val" style="color:var(--accent-bright);">${fmtMoney(monthIncome, true)}</div><div class="foot">Salary + other, both partners</div></div>
-      <div class="dash-stat"><div class="label">Monthly outflow</div><div class="val" style="color:var(--red);">${fmtMoney(monthExp + monthEMI, true)}</div><div class="foot">Expenses ${fmtMoney(monthExp,true)} + EMIs ${fmtMoney(monthEMI,true)}</div></div>
-      <div class="dash-stat"><div class="label">Monthly surplus</div><div class="val" style="color:${monthSurplus>=0?'var(--accent-bright)':'var(--red)'};">${fmtMoney(monthSurplus, true)}</div><div class="foot">${monthIncome>0?(monthSurplus/monthIncome*100).toFixed(0):0}% of income saved</div></div>
-    </div>`;
-
-  // ── (Net-worth trajectory chart removed per user preference) ──
-
-  // ── LIQUIDITY HEALTH (full-width) ──
-  html += `
-      <div class="dash-card" style="margin-bottom:16px;">
-        <div class="dash-eyebrow">Liquidity health</div>
-        <div id="dashLiquidity"></div>
-      </div>`;
-
-  // ── DEBT PAYOFF TRACKER ──
-  // Only show if there's at least one EMI that isn't already fully paid off.
-  const _hasActiveDebt = (state.emis || []).some(e => {
-    const total = Number(e.months) || 0;
-    if (total <= 0 || !e.startMonth) return false;
-    const endIso = (typeof _emiEndIso === 'function') ? _emiEndIso(e) : null;
-    const nowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
-    return !(endIso && nowYM > endIso);   // active or future
-  });
-  if (_hasActiveDebt) {
-    html += `<div class="dash-section-title">Debt payoff</div><div class="dash-card" style="margin-bottom:16px;"><div id="dashDebt"></div></div>`;
-  }
-
-  // ── ASSET DETAIL TABLE ──
-  html += `
-    <div class="dash-section-title">Assets & growth</div>
-    <div class="dash-card" style="margin-bottom:16px;">
-      <table class="dash-table"><thead><tr><th>Asset</th><th style="text-align:right;">Balance today</th><th style="text-align:right;">Rate</th>${ret?'<th style="text-align:right;">At retirement</th>':''}</tr></thead>
-      <tbody id="dashAssetRows"></tbody></table>
-    </div>`;
-
-  // ── ANNUAL REVIEW ──
-  html += `<div class="dash-section-title">Year in review</div>
-    <div class="dash-card" style="margin-bottom:16px;">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
-        <span style="font-size:12px;color:var(--ink-muted);">Compare start vs end of</span>
-        <select id="dashReviewYear" style="padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg-card);color:var(--ink);font-family:'DM Sans',sans-serif;font-size:13px;"></select>
-      </div>
-      <div id="dashReviewBody"></div>
-    </div>`;
-
-  // ── INSIGHTS ──
-  html += `<div class="dash-section-title">Insights</div><div id="dashInsights"></div>`;
-
-  host.innerHTML = html;
-
-  // ═══ WIRE + RENDER DYNAMIC PARTS ═══
-
-  // Setup-retirement CTA
-  const setupBtn = document.getElementById('dashSetupRetBtn');
-  if (setupBtn) setupBtn.addEventListener('click', () => { if (typeof openSingleStepEdit === 'function') openSingleStepEdit(7); });
-
-  // Trajectory chart with retirement target line + event annotations
-  // (Trajectory chart removed per user preference)
-
-  // Retirement card → expand/collapse detail panel
-  if (ret) {
-    const _rCard = document.getElementById('dashRetireCard');
-    const _rDetail = document.getElementById('dashRetireDetail');
-    const _rToggle = document.getElementById('dashRetireToggle');
-    if (_rCard && _rDetail) {
-      _rCard.addEventListener('click', () => {
-        const open = _rDetail.style.display !== 'none';
-        if (open) {
-          _rDetail.style.display = 'none';
-          if (_rToggle) _rToggle.textContent = '▸';
-        } else {
-          if (!_rDetail.dataset.built) { _rDetail.innerHTML = _renderRetireDetail(ret); _rDetail.dataset.built = '1'; }
-          _rDetail.style.display = 'block';
-          if (_rToggle) _rToggle.textContent = '▾';
-        }
-      });
-    }
-  }
-
-  // Liquidity health
-  _renderLiquidity(p, todayIdx);
-
-  // Debt payoff
-  if (_hasActiveDebt) _renderDebtTracker();
-
-  // Asset rows
-  _renderAssetRows(p, ret, todayIdx);
-
-  // Insights
-  _renderInsights(p, ret, todayIdx, { monthIncome, monthExp, monthEMI, monthSurplus, totalAssets, liabTotal, compEntries });
-
-  // Annual review (Priority 7)
-  _wireAnnualReview(p, adjNetWorth);
+  // No-op. The Dashboard section was removed in v18 — its KPIs and charts duplicated
+  // what's visible on Budget Actuals and Projection. The function is kept (empty) so any
+  // remaining callers don't throw.
+  return;
 }
-
-// Priority 7: Annual review — compare Jan vs Dec of a chosen year.
-function _wireAnnualReview(p, nwSeries) {
-  const _nw = nwSeries || p.netWorth;
-  const sel = document.getElementById('dashReviewYear');
-  const body = document.getElementById('dashReviewBody');
-  if (!sel || !body) return;
-  // Available years = distinct calendar years present in the projection horizon.
-  const years = Array.from(new Set((p.isos || []).map(iso => iso.split('-')[0]))).sort();
-  if (!years.length) { body.innerHTML = '<div style="color:var(--ink-muted);font-style:italic;">No data yet.</div>'; return; }
-  // Default to the current year if present, else first.
-  const nowYear = String(new Date().getFullYear());
-  const defaultYear = years.includes(nowYear) ? nowYear : years[0];
-  sel.innerHTML = years.map(y => `<option value="${y}"${y===defaultYear?' selected':''}>${y}</option>`).join('');
-
-  const render = () => {
-    const y = sel.value;
-    const janISO = y + '-01', decISO = y + '-12';
-    let iJan = p.isos.indexOf(janISO), iDec = p.isos.indexOf(decISO);
-    // Fall back to first/last month of that year within horizon
-    const yearIdxs = p.isos.map((iso,i)=>iso.startsWith(y)?i:-1).filter(i=>i>=0);
-    if (!yearIdxs.length) { body.innerHTML = '<div style="color:var(--ink-muted);font-style:italic;">No months for this year in the projection.</div>'; return; }
-    if (iJan < 0) iJan = yearIdxs[0];
-    if (iDec < 0) iDec = yearIdxs[yearIdxs.length - 1];
-
-    const nwJan = _nw[iJan] || 0, nwDec = _nw[iDec] || 0;
-    const nwGrowth = nwDec - nwJan;
-    const nwGrowthPct = nwJan !== 0 ? (nwGrowth / Math.abs(nwJan) * 100) : 0;
-
-    // Income & surplus summed across the year's months
-    let incSum = 0, surSum = 0;
-    yearIdxs.forEach(i => {
-      incSum += (p.totalIncome ? p.totalIncome[i] : 0) || 0;
-      surSum += (p.surplus ? p.surplus[i] : 0) || 0;
-    });
-    const savingsRate = incSum > 0 ? (surSum / incSum * 100) : 0;
-
-    // Income growth across the year. The very first horizon month can carry a
-    // doubled/partial salary (opening-month or journal-override artifact), which
-    // produces a bogus swing. Guard against it: never use the global first index
-    // as the baseline, and if the two endpoints look artifact-driven (start month
-    // more than 25% above the year's median monthly income), fall back to the
-    // median so the % reflects real salary growth, not a data glitch.
-    const yearIncomes = yearIdxs.map(i => (p.totalIncome && p.totalIncome[i]) || 0).filter(v => v > 0).sort((a,b)=>a-b);
-    const medianInc = yearIncomes.length ? yearIncomes[Math.floor(yearIncomes.length/2)] : 0;
-    let baseIdx = iJan;
-    if (baseIdx === 0 && yearIdxs.length > 1) baseIdx = yearIdxs[1]; // skip artifact-prone first month
-    let incBase = (p.totalIncome && p.totalIncome[baseIdx]) || 0;
-    let incEnd  = (p.totalIncome && p.totalIncome[iDec]) || 0;
-    // If either endpoint is an outlier vs the median, use the median as a stable baseline.
-    if (medianInc > 0 && incBase > medianInc * 1.25) incBase = medianInc;
-    if (medianInc > 0 && incEnd > medianInc * 1.75) incEnd = medianInc;
-    const incGrowthPct = incBase > 0 ? ((incEnd - incBase) / incBase * 100) : 0;
-    const incJan = incBase, incDec = incEnd;
-
-    const stat = (label, val, foot, color) => `
-      <div class="dash-stat"><div class="label">${label}</div><div class="val" style="${color?'color:'+color+';':''}">${val}</div><div class="foot">${foot}</div></div>`;
-
-    body.innerHTML = `
-      <div class="dash-grid-3" style="margin-bottom:0;">
-        ${stat('Net worth change', (nwGrowth>=0?'+':'')+fmtMoney(nwGrowth, true), `${nwGrowthPct>=0?'+':''}${nwGrowthPct.toFixed(0)}% · ${fmtMoney(nwJan,true)} → ${fmtMoney(nwDec,true)}`, nwGrowth>=0?'var(--accent-bright)':'var(--red)')}
-        ${stat('Monthly income growth', (incGrowthPct>=0?'+':'')+incGrowthPct.toFixed(0)+'%', `${fmtMoney(incJan,true)} → ${fmtMoney(incDec,true)}/mo`, incGrowthPct>=0?'var(--accent-bright)':'var(--ink)')}
-        ${stat('Savings rate', savingsRate.toFixed(0)+'%', `${fmtMoney(surSum,true)} saved on ${fmtMoney(incSum,true)} income`, savingsRate>=20?'var(--accent-bright)':'var(--ink)')}
-      </div>`;
-  };
-  sel.addEventListener('change', render);
-  render();
-}
-
-function _renderDashTrajectory(p, ret, todayIdx, nwSeries) {
-  destroyChart('dashTrajectory');
-  const canvas = document.getElementById('dashTrajectory');
-  if (!canvas) return;
-  const nwData = nwSeries || p.netWorth;
-  const datasets = [{
-    label: 'Net Worth', data: nwData,
-    borderColor: 'var(--accent)', backgroundColor: 'var(--accent-soft)',
-    borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4
-  }];
-  // Retirement target line
-  if (ret) {
-    datasets.push({
-      label: 'Corpus target', data: p.isos.map(() => ret.requiredCorpus),
-      borderColor: 'var(--red)', borderWidth: 1.5, borderDash: [6,4],
-      fill: false, pointRadius: 0, tension: 0
-    });
-  }
-  charts.dashTrajectory = new Chart(canvas, {
-    type: 'line',
-    data: { labels: p.labels, datasets },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { display: true, labels: { boxWidth: 12, font: { size: 11 }, color: 'var(--ink-muted)' } },
-        tooltip: { callbacks: { label: c => ' ' + c.dataset.label + ': ' + fmtMoney(c.parsed.y) } }
-      },
-      scales: {
-        x: { ...axisOpt(), ticks: { ...axisOpt().ticks, maxTicksLimit: 10 } },
-        y: { ...axisOpt(), ticks: { ...axisOpt().ticks, callback: fmtAxis } }
-      }
-    }
-  });
-}
-
-// Build the expandable retirement detail: summary + year-by-year drawdown of the
-// PROJECTED corpus (the card headline), so the panel and card headline always agree.
-// Withdrawals grow at inflation; corpus earns the post-retirement return. This is a
-// display-only projection — no engine math is touched.
-function _renderRetireDetail(ret) {
-  const inf = Number(state.expenseGrowthRate) || 0.06;
-  const postRet = Number(state.postRetReturn) || 0.07;
-  const retYear = parseInt((ret.retISO || '').split('-')[0], 10) || (new Date().getFullYear() + ret.yearsToRet);
-
-  // ── Summary rows ──
-  const summary = [
-    ['Projected corpus at ' + ret.p1Ret, fmtMoney(ret.projectedCorpus, true)],
-    ['Present value (today\u2019s money)', fmtMoney(ret.pvProjected, true)],
-    ['Required corpus', fmtMoney(ret.requiredCorpus, true)],
-    [(ret.onTrack ? 'Surplus' : 'Shortfall'), fmtMoney(Math.abs(ret.gap), true)],
-    ['Monthly need at retirement', fmtMoney(ret.monthlyNeedAtRet, true)]
-  ];
-  let html = '<div class="dash-eyebrow">Retirement detail</div>';
-  html += '<table class="dash-table" style="margin-bottom:18px;"><tbody>';
-  summary.forEach(([k, v], i) => {
-    const strong = (i === 3);
-    const col = strong ? (ret.onTrack ? 'var(--accent-bright)' : 'var(--red)') : 'var(--ink)';
-    html += `<tr><td style="color:var(--ink-muted);">${k}</td><td style="text-align:right;font-weight:${strong?600:400};color:${col};">${v}</td></tr>`;
-  });
-  html += '</tbody></table>';
-
-  // ── Drawdown table: from projected corpus, age p1Ret → life expectancy ──
-  html += `<div class="dash-eyebrow">Drawdown — age ${ret.p1Ret} to ${ret.life}</div>`;
-  html += '<table class="dash-table"><thead><tr><th>Year</th><th>Age</th><th style="text-align:right;">Annual withdrawal</th><th style="text-align:right;">Corpus remaining</th></tr></thead><tbody>';
-  let corpus = ret.projectedCorpus;
-  let exhaustedAge = null;
-  for (let k = 0; k < ret.drawdownYears; k++) {
-    const age = ret.p1Ret + k;
-    const yearNeed = ret.annualNeedAtRet * Math.pow(1 + inf, k);
-    corpus = corpus * (1 + postRet) - yearNeed;
-    let remaining = corpus;
-    if (corpus < 0 && exhaustedAge === null) { exhaustedAge = age; }
-    if (remaining < 0) remaining = 0;
-    const rowCol = corpus < 0 ? 'var(--red)' : 'var(--ink)';
-    html += `<tr><td>${retYear + k}</td><td>${age}</td><td style="text-align:right;">${fmtMoney(yearNeed, true)}</td><td style="text-align:right;color:${rowCol};">${fmtMoney(remaining, true)}</td></tr>`;
-  }
-  html += '</tbody></table>';
-  html += `<div class="dash-retire-assump" style="margin-top:12px;">${exhaustedAge === null
-    ? 'On this projection the corpus sustains withdrawals through age ' + ret.life + '.'
-    : 'On this projection the corpus is exhausted at age ' + exhaustedAge + ' — before life expectancy of ' + ret.life + '.'}</div>`;
-  return html;
-}
-
-function _renderLiquidity(p, todayIdx) {
-  const el = document.getElementById('dashLiquidity');
-  if (!el) return;
-  const liqInv = (p.investments || []).filter(i => i.liquid)
-    .reduce((a,inv) => { const k = inv.id+'_'+inv.name; return a + ((p.bal[k] && p.bal[k][todayIdx]) || 0); }, 0);
-  const liqCash = _liveLiquidCash(); // live savings balance (matches hero + Journal), not the raw projected cashSeries
-  const liquid = liqInv + liqCash;
-  const _lqNowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
-  const monthExp = getExpenseCats().reduce((a,c)=>a+(Number(state[c.key])||0),0)
-    + (state.emis||[]).filter(e => _emiActiveIn(e, _lqNowYM)).reduce((a,e)=>a+(Number(e.amount)||0),0);
-  const monthsCovered = monthExp > 0 ? liquid / monthExp : 0;
-  // Score: 0 at 0 months, 100 at 6+ months, sweet spot band
-  const score = Math.min(100, Math.round(monthsCovered / 6 * 100));
-  let verdict, color;
-  if (monthsCovered < 3) { verdict = 'Below the 3-month emergency buffer — consider building liquid savings.'; color = 'var(--red)'; }
-  else if (monthsCovered < 6) { verdict = 'A reasonable buffer. Aim for 6 months of expenses in liquid assets.'; color = '#C9A84C'; }
-  else if (monthsCovered <= 18) { verdict = 'Healthy emergency cushion — well protected against income shocks.'; color = 'var(--accent-bright)'; }
-  else { verdict = 'Very high liquidity — you may be under-invested. Consider deploying excess cash.'; color = '#C9A84C'; }
-  el.innerHTML = `
-    <div class="dash-health-ring">
-      <div style="font-family:'Fraunces',serif;font-size:34px;color:${color};line-height:1;">${monthsCovered.toFixed(1)}<span style="font-size:15px;color:var(--ink-muted);"> mo</span></div>
-      <div style="flex:1;">
-        <div class="dash-progress-track" style="margin:0 0 6px;"><div class="dash-progress-fill" style="width:${score}%;background:${color};"></div></div>
-        <div style="font-size:11.5px;color:var(--ink-muted);">Liquid assets cover ${monthsCovered.toFixed(1)} months of outflow</div>
-      </div>
-    </div>
-    <div style="font-size:12.5px;color:var(--ink-dim);margin-top:12px;line-height:1.5;">${verdict}</div>`;
-}
-
-function _renderDebtTracker() {
-  const el = document.getElementById('dashDebt');
-  if (!el) return;
-  const nowYM = (function(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); })();
-
-  // Months between two YYYY-MM strings (b - a), can be negative.
-  const monthDiff = (a, b) => {
-    const [ay, am] = a.split('-').map(Number);
-    const [by, bm] = b.split('-').map(Number);
-    return (by - ay) * 12 + (bm - am);
-  };
-
-  const rows = [];
-  (state.emis || []).forEach(e => {
-    const total = Number(e.months) || 0;
-    if (total <= 0 || !e.startMonth) return;
-    const endIso = _emiEndIso(e);               // respects close events
-    // Payments made = months from this EMI's OWN start up to (and including) the current month.
-    let paid = monthDiff(e.startMonth, nowYM) + 1;   // +1: the start month itself counts as paid
-    paid = Math.max(0, Math.min(total, paid));
-    const remaining = Math.max(0, total - paid);
-    const started = nowYM >= e.startMonth;
-    // "Done" only when STRICTLY past the end month — the final payment month is
-    // still active and must remain visible. (remaining===0 alone is wrong: an EMI
-    // whose last payment is the current month has remaining 0 but is still active.)
-    const done = (endIso && nowYM > endIso);
-
-    // Per your preference: completed EMIs drop off the tracker entirely.
-    if (done) return;
-
-    const pct = total > 0 ? (paid / total * 100) : 0;
-    if (!started) {
-      // Future EMI — hasn't begun yet.
-      const startsIn = monthDiff(nowYM, e.startMonth);
-      rows.push(`
-        <div style="margin-bottom:14px;">
-          <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--ink);">
-            <span>${escapeHtml(e.name)}</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-muted);">${fmtMoney(e.amount)}/mo · starts in ${startsIn} mo</span>
-          </div>
-          <div class="dash-loan-bar"><div class="dash-loan-fill" style="width:0%;"></div></div>
-          <div style="font-size:11px;color:var(--ink-muted);margin-top:3px;">Not started · ${total} payments scheduled</div>
-        </div>`);
-    } else {
-      rows.push(`
-        <div style="margin-bottom:14px;">
-          <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--ink);">
-            <span>${escapeHtml(e.name)}</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-muted);">${fmtMoney(e.amount)}/mo · ${remaining} mo left</span>
-          </div>
-          <div class="dash-loan-bar"><div class="dash-loan-fill" style="width:${pct}%;"></div></div>
-          <div style="font-size:11px;color:var(--ink-muted);margin-top:3px;">${paid} of ${total} payments made · ${pct.toFixed(0)}% done</div>
-        </div>`);
-    }
-  });
-
-  el.innerHTML = rows.length
-    ? rows.join('')
-    : '<div style="font-size:13px;color:var(--ink-muted);font-style:italic;">No active loans — all EMIs are paid off. 🎉</div>';
-}
-
-function _renderAssetRows(p, ret, todayIdx) {
-  const tb = document.getElementById('dashAssetRows');
-  if (!tb) return;
-  let rows = '';
-  (state.investments || []).forEach(inv => {
-    const k = inv.id + '_' + inv.name;
-    const bal = (p.bal[k] && p.bal[k][todayIdx] != null) ? p.bal[k][todayIdx] : inv.balance;
-    const atRet = (ret && p.bal[k]) ? (p.bal[k][ret.retIdx] || 0) : null;
-    rows += `<tr>
-      <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${inv.color||'var(--accent)'};margin-right:8px;"></span>${escapeHtml(inv.name)}</td>
-      <td class="num">${fmtMoney(bal)}</td>
-      <td class="num">${((inv.rate||0)*100).toFixed(1)}%</td>
-      ${ret ? `<td class="num" style="color:var(--accent-bright);">${atRet!=null?fmtMoney(atRet, true):'—'}</td>` : ''}
-    </tr>`;
-  });
-  (state.accounts || []).forEach(a => {
-    const bal = Number(a.openingBalance) || 0;
-    rows += `<tr>
-      <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${a.color||'var(--ink-muted)'};margin-right:8px;"></span>${escapeHtml(a.name)} <span style="color:var(--ink-muted);font-size:11px;">· ${a.type}</span></td>
-      <td class="num" style="${bal<0?'color:var(--red);':''}">${fmtMoney(bal)}</td>
-      <td class="num">${a.type==='asset'?((state.cashRate||0.04)*100).toFixed(1)+'%':'—'}</td>
-      ${ret ? '<td class="num">—</td>' : ''}
-    </tr>`;
-  });
-  tb.innerHTML = rows || `<tr><td colspan="${ret?4:3}" style="color:var(--ink-muted);font-style:italic;">No assets entered yet.</td></tr>`;
-}
-
-function _renderInsights(p, ret, todayIdx, ctx) {
-  const el = document.getElementById('dashInsights');
-  if (!el) return;
-  const insights = [];
-
-  // Savings rate insight
-  if (ctx.monthIncome > 0) {
-    const rate = ctx.monthSurplus / ctx.monthIncome * 100;
-    if (rate >= 30) insights.push({ type:'good', icon:'✓', text:`You're saving <strong>${rate.toFixed(0)}%</strong> of your income — an excellent rate that puts you well ahead of most households.` });
-    else if (rate >= 15) insights.push({ type:'', icon:'○', text:`Your savings rate is <strong>${rate.toFixed(0)}%</strong>. Nudging it toward 30% would meaningfully accelerate your goals.` });
-    else if (rate >= 0) insights.push({ type:'warn', icon:'!', text:`Your savings rate is <strong>${rate.toFixed(0)}%</strong> — on the low side. Review discretionary categories on the Budget page for room to trim.` });
-    else insights.push({ type:'warn', icon:'!', text:`You're spending <strong>more than you earn</strong> this month. Your savings will draw down until this reverses.` });
-  }
-
-  // EMI-to-income ratio
-  if (ctx.monthIncome > 0 && ctx.monthEMI > 0) {
-    const emiRatio = ctx.monthEMI / ctx.monthIncome * 100;
-    if (emiRatio > 40) insights.push({ type:'warn', icon:'!', text:`Your EMIs consume <strong>${emiRatio.toFixed(0)}%</strong> of income — above the 40% caution threshold lenders watch. New borrowing may be constrained.` });
-    else if (emiRatio > 30) insights.push({ type:'', icon:'○', text:`EMIs are <strong>${emiRatio.toFixed(0)}%</strong> of income. Manageable, but approaching the 40% comfort ceiling.` });
-  }
-
-  // Retirement insights
-  if (ret) {
-    if (ret.onTrack) {
-      insights.push({ type:'good', icon:'✓', text:`At your current trajectory you'll reach <strong>${fmtMoney(ret.projectedCorpus, true)}</strong> by age ${ret.p1Ret} — <strong>${fmtMoney(ret.gap, true)}</strong> beyond your target.` });
-    } else {
-      // Estimate extra monthly needed to close the gap
-      const invs = state.investments || [];
-      const avgAnnual = invs.length ? invs.reduce((a,i)=>a+(Number(i.rate)||0),0)/invs.length : 0.10;
-      const rM = avgAnnual/12, nM = ret.yearsToRet*12;
-      const fvFactor = rM>0 ? ((Math.pow(1+rM,nM)-1)/rM) : nM;
-      const extraNeeded = fvFactor>0 ? Math.abs(ret.gap)/fvFactor : 0;
-      insights.push({ type:'warn', icon:'!', text:`You're <strong>${fmtMoney(Math.abs(ret.gap), true)}</strong> short of your retirement target. Investing about <strong>${fmtMoney(extraNeeded, true)}</strong>/mo more could close the gap.` });
-    }
-    if (ret.exhaustedAge) {
-      insights.push({ type:'warn', icon:'!', text:`At your planned spending, the corpus would run out around age <strong>${ret.exhaustedAge}</strong> — before your life expectancy of ${ret.life}. Consider a lower withdrawal or larger corpus.` });
-    } else if (ret.terminalValue > 0) {
-      insights.push({ type:'good', icon:'✓', text:`Your plan funds retirement fully to age ${ret.life}, leaving an estimated <strong>${fmtMoney(ret.terminalValue, true)}</strong> as legacy.` });
-    }
-    if (ret.passiveMonthly > 0) {
-      insights.push({ type:'', icon:'○', text:`Your SWP and annuity choices generate about <strong>${fmtMoney(ret.passiveMonthly, true)}</strong>/mo of passive income in retirement, reducing pressure on the drawdown pool.` });
-    }
-  }
-
-  // Concentration insight
-  if (ctx.totalAssets > 0 && ctx.compEntries.length) {
-    const largest = ctx.compEntries.slice().sort((a,b)=>b.value-a.value)[0];
-    const share = largest.value / ctx.totalAssets * 100;
-    if (share > 60) insights.push({ type:'', icon:'○', text:`<strong>${escapeHtml(largest.name)}</strong> makes up <strong>${share.toFixed(0)}%</strong> of your assets. If you're within a few years of a goal, consider diversifying to reduce concentration risk.` });
-  }
-
-  if (!insights.length) insights.push({ type:'', icon:'○', text:'Add your income, expenses, and investments to see personalised insights here.' });
-
-  el.innerHTML = insights.map(i => `
-    <div class="dash-insight ${i.type}">
-      <div class="dash-insight-icon">${i.icon}</div>
-      <div class="dash-insight-text">${i.text}</div>
-    </div>`).join('');
-}
-
 function _legacyRenderDashboardUNUSED() {
   const snapDate = state.snapshotDate || state.horizonStart;
   document.getElementById('dashDate').value = snapDate;
@@ -6462,7 +5293,7 @@ function _legacyRenderDashboardUNUSED() {
 
   destroyChart('dashIE');
   const monthIncome = state.p1Salary + state.p1Other + state.p2Salary + state.p2Other;
-  const monthExp = getExpenseCats().reduce((a,c)=>a+(Number(state[c.key])||0),0) + state.emis.reduce((a,e)=>a+e.amount,0);
+  const monthExp = EXPENSE_CATEGORIES.reduce((a,c)=>a+state[c.key],0) + state.emis.reduce((a,e)=>a+e.amount,0);
   charts.dashIE = new Chart(document.getElementById('dashIE'), {
     type:'bar',
     data: { labels:['Income','Expenses','Surplus'], datasets:[{ data:[monthIncome, monthExp, monthIncome-monthExp], backgroundColor:['rgba(46,125,91,0.65)','rgba(197,69,62,0.65)','rgba(61,163,116,0.55)'], borderColor:['#2E7D5B','#C5453E','#3DA374'], borderWidth:1, borderRadius:4 }] },
@@ -6495,17 +5326,6 @@ function _legacyRenderDashboardUNUSED() {
 // where residue = surplus − scheduled investments − one-time investments.
 // Past months are reverse-walked from the live balance (true historical closing).
 // Returns an array aligned to p.isos.
-// Live liquid cash = the savings account's actual current balance, exactly as the Journal shows
-// it (raw openingBalance, kept current by reconciliation). Used to anchor CURRENT-month liquidity
-// on the Net Worth + Dashboard tiles to reality instead of the planned-surplus projection, so
-// those tiles tie to the Journal. Falls back to the sum of asset accounts if there's no 'savings'.
-function _liveLiquidCash() {
-  const accts = (state.accounts || []).filter(a => a.type === 'asset');
-  const sav = accts.find(a => a.id === 'savings');
-  return sav ? (Number(sav.openingBalance) || 0) : accts.reduce((s, a) => s + (Number(a.openingBalance) || 0), 0);
-}
-function _nowYMkey() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
-
 function projectSavingsChain(p) {
   const isos = p.isos;
   const n = isos.length;
@@ -6595,210 +5415,6 @@ function projectSavingsChain(p) {
   return chain;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// RETIREMENT CORPUS ENGINE (v14) — the computational core consumed by the
-// Dashboard, corpus tracker, and what-if slider. Self-contained: reads state +
-// a projection object, returns required corpus, projected corpus, gap, terminal
-// value, and the per-strategy income bridge. Returns null if retirement is off.
-// ═══════════════════════════════════════════════════════════════════════════
-function computeRetirement(p, opts) {
-  opts = opts || {};
-  if (!state.retEnabled) return null;
-
-  const p1Age    = Number(state.p1CurrentAge) || 30;
-  const p1Ret    = Number(state.p1RetireAge)  || 60;
-  const life     = Number(state.lifeExpectancy) || 85;
-  const inf      = Number(state.expenseGrowthRate) || 0.06;      // general inflation proxy
-  const postRet  = Number(state.postRetReturn) || 0.07;
-  const retPct   = (Number(state.retExpensePct) || 60) / 100;
-  const extraMonthly = Number(opts.extraMonthly) || 0;           // for what-if slider
-
-  // Years to retirement uses the EARLIER of the two people (household retires when first does),
-  // but corpus must fund until life expectancy. We anchor on P1 for the primary timeline and
-  // treat P2 as informational; the projection engine already handles dual income cutoffs.
-  const yearsToRet = Math.max(0, p1Ret - p1Age);
-  const drawdownYears = Math.max(1, life - p1Ret);
-
-  // Retirement month on the projection timeline.
-  const isos = p.isos || [];
-  const startISO = isos[0] || state.horizonStart;
-  const [sy, sm] = (startISO || '2026-01').split('-').map(Number);
-  // retirement calendar month = start + yearsToRet years
-  const retY = sy + yearsToRet;
-  const retISO = retY + '-' + String(sm).padStart(2, '0');
-  // Find the index at/just before retirement within the projection horizon.
-  let retIdx = isos.indexOf(retISO);
-  if (retIdx < 0) {
-    // retirement may be beyond horizon; clamp to last available month
-    retIdx = isos.length - 1;
-  }
-
-  // ── Monthly need in retirement (today's money, inflated to retirement date) ──
-  const curExpense = getExpenseCats().reduce((a,c) => a + (Number(state[c.key]) || 0), 0);
-  const monthlyNeedToday = curExpense * retPct;
-  const monthlyNeedAtRet = monthlyNeedToday * Math.pow(1 + inf, yearsToRet);
-  const annualNeedAtRet  = monthlyNeedAtRet * 12;
-
-  // ── Required corpus via growing-annuity present value ──
-  // PV = PMT × [1 − ((1+g)/(1+r))^n] / (r − g), with g=inflation, r=postRet return.
-  let requiredCorpus;
-  if (Math.abs(postRet - inf) < 0.0001) {
-    requiredCorpus = annualNeedAtRet * drawdownYears;
-  } else {
-    requiredCorpus = annualNeedAtRet *
-      (1 - Math.pow((1 + inf) / (1 + postRet), drawdownYears)) / (postRet - inf);
-  }
-
-  // ── Projected corpus at retirement = net worth at retIdx from the projection ──
-  // If a what-if extraMonthly is supplied, approximate its future value added to corpus:
-  // it compounds at a blended investment rate for the remaining months.
-  let projectedCorpus = (opts.nwSeries ? opts.nwSeries[retIdx] : (p.netWorth && p.netWorth[retIdx])) || 0;
-  if (extraMonthly > 0) {
-    // Blended monthly rate: average of investment rates, fallback to 10% annual.
-    const invs = state.investments || [];
-    const avgAnnual = invs.length
-      ? invs.reduce((a,i) => a + (Number(i.rate) || 0), 0) / invs.length
-      : 0.10;
-    const rM = avgAnnual / 12;
-    const nM = yearsToRet * 12;
-    const fv = rM > 0
-      ? extraMonthly * ((Math.pow(1 + rM, nM) - 1) / rM)
-      : extraMonthly * nM;
-    projectedCorpus += fv;
-  }
-
-  const gap = projectedCorpus - requiredCorpus;
-  const pctFunded = requiredCorpus > 0 ? (projectedCorpus / requiredCorpus) : 0;
-  // PV of projected corpus in today's money
-  const pvProjected = projectedCorpus / Math.pow(1 + inf, yearsToRet);
-
-  // ── Per-investment strategy → post-retirement monthly income bridge ──
-  // Pull each investment's projected balance at retirement from the projection.
-  const strategies = state.retStrategies || {};
-  let poolAtRet = 0;          // lump available for drawdown (withdrawals + savings)
-  let passiveMonthly = 0;     // SWP + annuity monthly income
-  let heldCorpus = 0;         // hold-to-compound (estate)
-  const strategyRows = [];
-
-  // Savings-account portion of net worth is always part of the drawdown pool.
-  const savChain = (typeof projectSavingsChain === 'function') ? projectSavingsChain(p) : null;
-  const savAtRet = savChain ? (savChain[retIdx] || 0) : 0;
-  poolAtRet += savAtRet;
-
-  (state.investments || []).forEach(inv => {
-    const k = inv.id + '_' + inv.name;
-    const balAtRet = (p.bal && p.bal[k]) ? (p.bal[k][retIdx] || 0) : 0;
-    const s = strategies[inv.id] || { mode:'hold', swpRate:7, partialPct:50, annuityRate:6 };
-    let contribToPool = 0, contribToPassive = 0, contribToHeld = 0;
-    if (s.mode === 'withdraw') {
-      contribToPool = balAtRet;
-      poolAtRet += balAtRet;
-    } else if (s.mode === 'swp') {
-      contribToPassive = balAtRet * ((s.swpRate || 7) / 100) / 12;
-      passiveMonthly += contribToPassive;
-    } else if (s.mode === 'partial') {
-      const pct = (s.partialPct || 50) / 100;
-      contribToPool = balAtRet * pct;
-      poolAtRet += contribToPool;
-      heldCorpus += balAtRet * (1 - pct);
-      contribToHeld = balAtRet * (1 - pct);
-    } else if (s.mode === 'annuity') {
-      contribToPassive = balAtRet * ((s.annuityRate || 6) / 100) / 12;
-      passiveMonthly += contribToPassive;
-    } else { // hold
-      heldCorpus += balAtRet;
-      contribToHeld = balAtRet;
-    }
-    strategyRows.push({
-      id: inv.id, name: inv.name, color: inv.color,
-      mode: s.mode, balAtRet,
-      toPool: contribToPool, toPassiveMonthly: contribToPassive, toHeld: contribToHeld
-    });
-  });
-
-  // ── Terminal value: simulate drawdown from retirement to life expectancy ──
-  // Pool earns postRet, is drawn down for (need − passive income) each year.
-  // Held corpus keeps compounding. Passive streams continue.
-  let pool = poolAtRet;
-  let held = heldCorpus;
-  let exhaustedAge = null;
-  for (let k = 0; k < drawdownYears; k++) {
-    const yearNeed = annualNeedAtRet * Math.pow(1 + inf, k);
-    const passiveAnnual = passiveMonthly * 12 * Math.pow(1 + inf, k * 0); // passive assumed level
-    const draw = Math.max(0, yearNeed - passiveAnnual);
-    pool = pool * (1 + postRet) - draw;
-    if (pool < 0 && exhaustedAge === null) {
-      exhaustedAge = p1Ret + k;
-      pool = 0;
-    }
-    held = held * (1 + postRet);
-  }
-  const terminalValue = Math.max(0, pool) + held;
-
-  return {
-    enabled: true,
-    p1Age, p1Ret, life, yearsToRet, drawdownYears,
-    retISO, retIdx,
-    monthlyNeedToday, monthlyNeedAtRet, annualNeedAtRet,
-    requiredCorpus, projectedCorpus, gap, pctFunded, pvProjected,
-    poolAtRet, passiveMonthly, heldCorpus, terminalValue, exhaustedAge,
-    savAtRet, strategyRows,
-    onTrack: gap >= 0,
-    curExpense, monthlyNeedPct: (Number(state.retExpensePct) || 60)
-  };
-}
-
-// One-time cell → floating detail popover. Rendered at body level with position:fixed so it
-// escapes the projection table's horizontal scroll clipping and can show full expense names,
-// and it's width-capped to the viewport so it stays readable on mobile.
-function _otOutside(e) {
-  const p = document.getElementById('_otPopover');
-  if (!p) return;
-  if (p.contains(e.target)) return;
-  if (e.target.closest && e.target.closest('.ot-total')) return;
-  _closeOneTimePopover();
-}
-function _otEsc(e) { if (e.key === 'Escape') _closeOneTimePopover(); }
-window._closeOneTimePopover = function() {
-  const p = document.getElementById('_otPopover');
-  if (p) p.remove();
-  document.removeEventListener('click', _otOutside, true);
-  document.removeEventListener('keydown', _otEsc, true);
-};
-window._openOneTimePopover = function(anchor, cid) {
-  const data = (window._otRegistry || {})[cid];
-  if (!data) return;
-  const already = document.getElementById('_otPopover');
-  _closeOneTimePopover();
-  if (already && already.getAttribute('data-cid') === cid) return; // second tap on same cell closes it
-  const total = data.items.reduce((a, it) => a + (it.amount || 0), 0);
-  const rows = data.items
-    .slice().sort((a, b) => (b.amount || 0) - (a.amount || 0))
-    .map(it => `<div class="ot-pop-row"><span class="ot-pop-note">${escapeHtml(it.note)}</span><span class="ot-pop-amt">${fmtMoney(it.amount)}</span></div>`).join('');
-  const pop = document.createElement('div');
-  pop.className = 'ot-popover';
-  pop.id = '_otPopover';
-  pop.setAttribute('data-cid', cid);
-  pop.innerHTML = `<div class="ot-pop-head"><span>One-time · ${escapeHtml(data.month)}</span><button type="button" class="ot-pop-close" onclick="_closeOneTimePopover()" aria-label="Close">&times;</button></div>${rows}<div class="ot-pop-row ot-pop-total"><span>Total</span><span>${fmtMoney(total)}</span></div>`;
-  document.body.appendChild(pop);
-  // Position: anchored under the cell on desktop; clamped to the viewport (mobile-safe).
-  const r = anchor.getBoundingClientRect();
-  const vw = window.innerWidth, vh = window.innerHeight;
-  const pw = Math.min(280, vw - 24);
-  pop.style.width = pw + 'px';
-  let left = r.left + r.width / 2 - pw / 2;
-  left = Math.max(12, Math.min(left, vw - pw - 12));
-  const ph = pop.offsetHeight;
-  let top = r.bottom + 6;
-  if (top + ph > vh - 12) top = Math.max(12, r.top - ph - 6);
-  pop.style.left = left + 'px';
-  pop.style.top = top + 'px';
-  setTimeout(() => {
-    document.addEventListener('click', _otOutside, true);
-    document.addEventListener('keydown', _otEsc, true);
-  }, 0);
-};
-
 function renderBudget() {
   const start = state.budgetStart || state.horizonStart;
   const end   = state.budgetEnd   || state.horizonEnd;
@@ -6838,11 +5454,6 @@ function renderBudget() {
   const emiActualByMonth = {};
   const investActualByMonth = {};
   const expActualMisc = {}; // adjustments tagged isHiddenSpending
-  // Journal one-time expenses (reserved category 'oneTime'). Kept SEPARATE from category actuals
-  // so they never fold into a normal category or the past-month "sum of all categories" — this is
-  // what guarantees they're counted exactly once (in the One-time row + the overlay total).
-  const oneTimeActualByMonth = {};   // ym -> [{ note, amount }]
-  const oneTimeActualTotal = {};     // ym -> sum
   (state.transactions || []).forEach(tx => {
     if (!tx.date) return;
     const ym = tx.date.slice(0, 7);
@@ -6852,10 +5463,6 @@ function renderBudget() {
       if (tx.category === 'emi' && tx.emiId) {
         if (!emiActualByMonth[ym]) emiActualByMonth[ym] = {};
         emiActualByMonth[ym][tx.emiId] = (emiActualByMonth[ym][tx.emiId] || 0) + amt;
-      } else if (tx.category === 'oneTime') {
-        if (!oneTimeActualByMonth[ym]) oneTimeActualByMonth[ym] = [];
-        oneTimeActualByMonth[ym].push({ note: (tx.note || '').trim() || 'One-time expense', amount: amt });
-        oneTimeActualTotal[ym] = (oneTimeActualTotal[ym] || 0) + amt;
       } else if (tx.category) {
         if (!expActualByMonth[ym]) expActualByMonth[ym] = {};
         expActualByMonth[ym][tx.category] = (expActualByMonth[ym][tx.category] || 0) + amt;
@@ -7264,7 +5871,7 @@ function renderBudget() {
       // budgeted-but-not-yet-spent amount. Surplus / residue / cash will all reflect this.
       // Per category: budget might be replaced by larger actual (if over budget).
       let totalCatNumeric = 0;
-      getExpenseCats().forEach(c => {
+      EXPENSE_CATEGORIES.forEach(c => {
         const budget = (p.expCategorySeries[c.key] || [])[sliceFrom + i] || 0;
         const actual = (expActualByMonth[ym] && expActualByMonth[ym][c.key]) || 0;
         totalCatNumeric += actual + Math.max(0, budget - actual);
@@ -7283,17 +5890,6 @@ function renderBudget() {
       _overlayTotalExpense[i] = totalCatNumeric + totalEmiNumeric;
       _overlayEmiTotal[i] = totalEmiNumeric;
     }
-    // One-off expenses are neither a category nor an EMI, so the journal-actuals overlay above
-    // never included them — they silently dropped out of past/current Total Expenses (this was
-    // the bug: a current-month one-off showed as its own row but didn't move the total). Add the
-    // engine's one-off series back on top. Future months are skipped by the _isFuture continue and
-    // keep the engine total, which already includes one-offs. Index with sliceFrom+i because the
-    // overlay loop runs over the visible window while p.oneOffExpSeries is full-horizon. Also add
-    // journal one-time expenses (reserved 'oneTime' category, kept out of category actuals above)
-    // for this month. This flows into the sheet's derived surplus/residue/cash automatically;
-    // engine net-worth and projectSavingsChain math (which don't see journal one-times, so no
-    // double-count) are untouched.
-    _overlayTotalExpense[i] += (p.oneOffExpSeries[sliceFrom + i] || 0) + (oneTimeActualTotal[ym] || 0);
   }
   totalExpense = _overlayTotalExpense;
   emiMonthly = _overlayEmiTotal;
@@ -7454,21 +6050,26 @@ function renderBudget() {
       _eomSavingsChain[i] = _savingsAtEndOfMonth(ym);
       _eomRunning = _eomSavingsChain[i];
     } else if (_isCurrent(i)) {
-      // Current month: end-of-month SAVINGS = start-of-month savings, grown by one month's
-      // cash interest, plus this month's planned residue (surplus − investments). Same formula
-      // as future months and as the engine's savings series (prev × (1+mRate) + residue).
-      let prev;
-      if (_eomRunning !== null) {
-        prev = _eomRunning;                       // running chain from the prior (past) month
-      } else {
-        // Current month is the first in the window: start-of-month savings = end of the
-        // immediately preceding calendar month, reverse-walked from live balance.
-        const [cy, cm] = ym.split('-').map(Number);
-        let py = cy, pm = cm - 1; if (pm < 1) { pm = 12; py--; }
-        const prevYM = py + '-' + String(pm).padStart(2, '0');
-        prev = _savingsAtEndOfMonth(prevYM);
-      }
-      _eomSavingsChain[i] = prev * (1 + _cashRateMonthly) + _plannedTargetForFuture(i, ym);
+      // ---- CURRENT MONTH: live-anchored EOM savings (v2026.05.05.15) ----
+      // Previously this used the planned chain (prev × (1+mRate) + planned residue), which
+      // ignored the live savings balance entirely. That produced an EOM figure that could sit
+      // BELOW the money already in the account — e.g. live ₹8.44L displaying a ₹7.92L close,
+      // because the chain was still seeded from the prior month's PLANNED close.
+      //
+      // New model — the live balance already embeds everything that has happened this month
+      // (salary credited, transfers done, every expense and investment contribution logged).
+      // The only thing it does NOT yet reflect is the month-end credit-card settlement. So:
+      //
+      //   EOM savings = live savings − (CC outstanding − salary account balance, floored at 0)
+      //
+      // Salary is a transit account that zeroes out at month end: it pays down the card first,
+      // and savings only funds the shortfall. Every further expense logged before month end
+      // lowers the live balance, so this figure updates on its own — no re-plan required.
+      const _liveSav = savAcc ? (Number(savAcc.openingBalance) || 0) : 0;
+      const _liveSal = salAcc ? (Number(salAcc.openingBalance) || 0) : 0;
+      const _liveCc  = ccAcc  ? Math.abs(Number(ccAcc.openingBalance) || 0) : 0;
+      const _savingsToCc = Math.max(0, _liveCc - Math.max(0, _liveSal));
+      _eomSavingsChain[i] = _liveSav - _savingsToCc;
       _eomRunning = _eomSavingsChain[i];
     } else {
       const prev = _eomRunning !== null ? _eomRunning : (_eomSavingsChain[i - 1] || 0);
@@ -7599,7 +6200,7 @@ function renderBudget() {
     expenseRows.push({ label: e.name + ' (EMI)', overlay: ov });
   });
   // Expense categories — grown per month per engine, overlaid with journal actuals
-  getExpenseCats().forEach(c => {
+  EXPENSE_CATEGORIES.forEach(c => {
     if (!(state[c.key] > 0)) return;
     const slice = (p.expCategorySeries[c.key] || []).slice(sliceFrom, sliceTo);
     const ov = overlayCategoryRow(c.key, slice);
@@ -7644,54 +6245,18 @@ function renderBudget() {
     return arr;
   }
   const expGrowthRate = (typeof state.expenseGrowthRate === 'number') ? state.expenseGrowthRate : 0.06;
-  // One-time expenses collapse into ONE row. Each month cell shows that month's total;
-  // months with 2+ separate one-offs are expandable to reveal the individual line items.
-  const oneTimeCombined = new Array(n).fill(0);
-  const oneTimeDetail = Array.from({ length: n }, () => []);
   (state.expenseOneOffs || []).forEach(o => {
     const fullArr = expandSingleOneOff(o, expGrowthRate);
     const slice = fullArr.slice(sliceFrom, sliceTo);
-    slice.forEach((v, i) => {
-      if (v > 0) {
-        oneTimeCombined[i] += v;
-        oneTimeDetail[i].push({ note: o.note || 'One-off expense', amount: v });
-      }
-    });
+    if (slice.some(v => v > 0)) {
+      expenseRows.push({ label: o.note || 'One-off expense', values: slice });
+    }
   });
-  // Merge journal one-time expenses (past/current) into the same row, so all sources — planned
-  // (Edit-inputs, future) and journaled (past/current) — appear as ONE row. No overlap: Edit-inputs
-  // is future-only and Journal is past/current-only, so a month draws from at most one source
-  // (except legacy planned one-offs left in place, which simply add alongside).
-  for (let i = 0; i < n; i++) {
-    const acts = oneTimeActualByMonth[isos[i]] || [];
-    acts.forEach(a => {
-      oneTimeCombined[i] += a.amount;
-      oneTimeDetail[i].push({ note: a.note, amount: a.amount });
-    });
-  }
-  if (oneTimeCombined.some(v => v > 0)) {
-    expenseRows.push({ oneTime: true, label: 'One-time expenses', values: oneTimeCombined, detail: oneTimeDetail });
-  }
 
   document.getElementById('budgetOutflows').innerHTML =
     `<tr class="section-head"><th colspan="${colspan}">Outflows</th></tr>` +
     expenseRows.map(r => {
-      let cellHtml;
-      if (r.oneTime) {
-        const _otReg = (window._otRegistry = {});
-        cellHtml = r.values.map((v, i) => {
-          const items = r.detail[i] || [];
-          const base = `num ${neg(v)}${_isCurrent(i) ? ' current-month' : ''}`;
-          if (items.length >= 1) {
-            const cid = 'ot' + i;
-            _otReg[cid] = { month: labels[i], items };
-            return `<td class="${base} ot-cell" data-col="${i}"><span class="ot-total" onclick="_openOneTimePopover(this,'${cid}')">${fmtMoney(v)} <span class="ot-caret">&#9656;</span></span></td>`;
-          }
-          return `<td class="${base}" data-col="${i}">${fmtMoney(v)}</td>`;
-        }).join('');
-      } else {
-        cellHtml = r.overlay ? cellsOverlay(r.overlay) : cells(r.values);
-      }
+      const cellHtml = r.overlay ? cellsOverlay(r.overlay) : cells(r.values);
       return `<tr><th>${escapeHtml(r.label)}</th>${cellHtml}</tr>`;
     }).join('') +
     scenarioExpenseRows.map(scRowHtml).join('') +
@@ -7805,12 +6370,7 @@ function renderBudget() {
       } else if (tx.type === 'income' && tx.accountId === 'savings') {
         actualTransfer += amt;
       } else if (tx.type === 'expense' && tx.accountId === 'savings') {
-        // A one-time expense is a spending event, not an "un-saving." It already reduces the
-        // TARGET (via surplus) and shows in Total Expenses, so it must NOT also reduce the
-        // actual transfer the user deliberately made into savings — otherwise a ₹60k advance
-        // transfer would wrongly shrink to ₹15k after logging a ₹45k one-time. Regular expenses
-        // paid from savings keep the established net-inflow behavior.
-        if (tx.category !== 'oneTime') actualTransfer -= amt;
+        actualTransfer -= amt;
       } else if (tx.type === 'investment_contrib' && tx.accountId === 'savings') {
         actualTransfer -= amt;
       }
@@ -8179,46 +6739,6 @@ function _applyProjSheetCollapse() {
     });
   });
 }
-// Priority 6: compute timeline milestones for the net-worth chart.
-// Returns [{ label (chart x-label), y (net worth at that month), text }].
-function _computeNetWorthMilestones(p, nwSeries) {
-  const out = [];
-  const isos = p.isos || [];
-  const labels = p.labels || [];
-  const push = (iso, text) => {
-    const i = isos.indexOf(iso);
-    if (i < 0) return;
-    out.push({ label: labels[i], y: nwSeries[i] || 0, text, idx: i });
-  };
-  // EMI end dates
-  const winMonths = isos.map(iso => ({ iso }));
-  (state.emis || []).forEach(e => {
-    if (typeof _emiActiveWindow === 'function') {
-      const win = _emiActiveWindow(e, winMonths);
-      if (win && win.endIdx < isos.length - 1) {
-        out.push({ label: labels[win.endIdx], y: nwSeries[win.endIdx] || 0, text: e.name + ' paid off', idx: win.endIdx });
-      }
-    }
-  });
-  // Retirement date
-  if (state.retEnabled) {
-    const p1Age = Number(state.p1CurrentAge)||30, p1Ret = Number(state.p1RetireAge)||60;
-    const [sy, sm] = (state.horizonStart||'2026-01').split('-').map(Number);
-    const retISO = (sy + Math.max(0, p1Ret - p1Age)) + '-' + String(sm).padStart(2,'0');
-    push(retISO, 'Retirement (age ' + p1Ret + ')');
-  }
-  // Scenario start dates
-  (state.scenarios || []).forEach(sc => {
-    if (!sc || sc.enabled === false) return;
-    const m = sc.params && (sc.params.startMonth || sc.params.month || sc.startMonth);
-    if (m) push(m, (sc.label || sc.type || 'Scenario') + ' begins');
-  });
-  // De-dupe by idx keeping first, cap to avoid clutter
-  const seen = new Set();
-  return out.filter(o => { if (seen.has(o.idx)) return false; seen.add(o.idx); return true; })
-            .sort((a,b) => a.idx - b.idx).slice(0, 12);
-}
-
 function renderNetWorth() {
   const valDate = state.valuationDate || state.horizonEnd;
   document.getElementById('nwDate').value = valDate;
@@ -8329,11 +6849,7 @@ function renderNetWorth() {
   const cashAtDate = adjustedCashSeries[idx] || 0;
   const lqInvAtDate = p.investments.filter(i=>i.liquid).reduce((a,inv)=>a+(p.bal[inv.id+'_'+inv.name][idx]||0),0);
   const liabAtDate = p.liabSeries[idx] || 0;
-  // CURRENT month → anchor the cash side of Liquidity to the live savings balance (matches the
-  // Journal); past/future keep the projected chain. Display-only; net worth + chart series
-  // untouched (user chose tiles-only). Liquid investments stay at their current projected balance.
-  const _cashForLiquidity = (valDate === _nowYMkey()) ? _liveLiquidCash() : cashAtDate;
-  const lqAtDate = lqInvAtDate + _cashForLiquidity;
+  const lqAtDate = lqInvAtDate + cashAtDate;
   const totContrib = p.investments.reduce((a,inv)=>{ const k=inv.id+'_'+inv.name; return a+(p.contribSeries[k]?.[idx]||0); },0);
   const openInvBal = p.investments.reduce((a,i)=>a+i.balance,0);
   // Exclude salary account from opening cash (it's a transient pass-through, mirrors cashSeries)
@@ -8372,26 +6888,10 @@ function renderNetWorth() {
 
   destroyChart('nwLine');
   const _nwAccent = resolveCssColor('var(--accent)', '#2E7D5B');
-  // Compute milestone markers (Priority 6): EMI end dates, retirement, salary bumps, scenario starts.
-  const milestones = _computeNetWorthMilestones(p, adjustedNetWorth);
-  const nwDatasets = [{ label:'Net Worth', data:adjustedNetWorth, borderColor:_nwAccent, backgroundColor:'rgba(46,125,91,0.12)', borderWidth:2, fill:true, tension:0.3, pointRadius:0 }];
-  if (milestones.length) {
-    nwDatasets.push({
-      label: 'Milestones', type: 'scatter',
-      data: milestones.map(m => ({ x: m.label, y: m.y, _text: m.text })),
-      borderColor: '#C9A84C', backgroundColor: '#C9A84C',
-      pointRadius: 5, pointHoverRadius: 8, pointStyle: 'rectRot', showLine: false
-    });
-  }
   charts.nwLine = new Chart(document.getElementById('nwLine'), {
     type:'line',
-    data: { labels: p.labels, datasets: nwDatasets },
-    options: { responsive:true, maintainAspectRatio:false,
-      plugins:{
-        legend:{display: milestones.length>0, labels:{boxWidth:12,font:{size:11},color:'var(--ink-muted)',filter:i=>i.text==='Milestones'}},
-        tooltip:{callbacks:{label:c=>{ if (c.dataset.label==='Milestones'){ const t=c.raw&&c.raw._text?c.raw._text:'Milestone'; return ' ◆ '+t; } return ' '+fmtMoney(c.parsed.y); }}}
-      },
-      scales:{x:axisOpt(), y:{...axisOpt(), ticks:{...axisOpt().ticks,callback:fmtAxis}}} }
+    data: { labels: p.labels, datasets: [{ label:'Net Worth', data:adjustedNetWorth, borderColor:_nwAccent, backgroundColor:'rgba(46,125,91,0.12)', borderWidth:2, fill:true, tension:0.3, pointRadius:0 }] },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>' '+fmtMoney(c.parsed.y)}}}, scales:{x:axisOpt(), y:{...axisOpt(), ticks:{...axisOpt().ticks,callback:fmtAxis}}} }
   });
 
   // Composition donut at chosen date: investments + cash. Liabilities skipped (don't fit in donut).
@@ -9558,149 +8058,7 @@ function renderSettings() {
     row.innerHTML = `<div><div class="rate-name"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${inv.color};"></span>${escapeHtml(inv.name)}</div><div class="rate-note">balance ${fmtMoney(inv.balance)} · ${inv.liquid?'liquid':'illiquid'}</div></div><div class="rate-input-wrap"><input type="number" step="0.25" min="0" max="50" value="${(inv.rate*100).toFixed(2)}" data-rate-key="inv:${i}" /><span>% p.a.</span></div>`;
     wrap.appendChild(row);
   });
-  if (typeof renderRetirementSettings === 'function') renderRetirementSettings();
 }
-
-// Retirement editor on the Settings page — mirrors the onboarding step but standalone.
-function renderRetirementSettings() {
-  const host = document.getElementById('settingsRetirement');
-  if (!host) return;
-  const on = !!state.retEnabled;
-  const isPartner = state.mode === 'partner';
-  const p1n = (state.p1Name || 'You').trim();
-  const p2n = (state.p2Name || 'Partner').trim();
-
-  host.innerHTML = `
-    <div class="toggle ${on?'on':''}" data-ret-settings-toggle style="margin-bottom:${on?'18px':'0'};">
-      <div class="toggle-info"><div class="name">Plan for retirement</div><div class="desc">Enter retirement details to unlock corpus tracking on the Dashboard.</div></div>
-      <div class="switch"></div>
-    </div>
-    <div id="settingsRetFields" style="display:${on?'block':'none'};">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
-        <div class="field"><label>${isPartner?escapeHtml(p1n)+"'s":'Your'} current age</label><input type="number" id="setP1Age" min="18" max="90" value="${state.p1CurrentAge||30}"></div>
-        <div class="field"><label>${isPartner?escapeHtml(p1n)+"'s":'Your'} retirement age</label><input type="number" id="setP1Ret" min="30" max="90" value="${state.p1RetireAge||60}"></div>
-        ${isPartner?`<div class="field"><label>${escapeHtml(p2n)}'s current age</label><input type="number" id="setP2Age" min="18" max="90" value="${state.p2CurrentAge||28}"></div>
-        <div class="field"><label>${escapeHtml(p2n)}'s retirement age</label><input type="number" id="setP2Ret" min="30" max="90" value="${state.p2RetireAge||58}"></div>`:''}
-      </div>
-      <div class="field" style="margin-bottom:14px;"><label>Life expectancy — plan until this age</label><input type="number" id="setLifeExp" min="60" max="110" value="${state.lifeExpectancy||85}"></div>
-      <div class="field" style="margin-bottom:14px;">
-        <label>Post-retirement expenses — <span id="setRetPctLabel">${state.retExpensePct||60}</span>% of current</label>
-        <input type="range" id="setRetPct" min="20" max="120" step="5" value="${state.retExpensePct||60}" style="width:100%;">
-        <div id="setRetPctHint" style="font-size:12px;color:var(--ink-muted);margin-top:6px;"></div>
-      </div>
-      <div class="field" style="margin-bottom:16px;"><label>Post-retirement return % p.a. <span style="font-size:11px;color:var(--ink-muted);font-style:italic;">— corpus drawdown phase</span></label><input type="number" id="setPostRet" min="0" max="20" step="0.5" value="${((state.postRetReturn||0.07)*100).toFixed(1)}"></div>
-      <div style="font-family:'Fraunces',serif;font-style:italic;font-size:14px;color:var(--gold-bright);margin:18px 0 10px;">Per-investment strategy at retirement</div>
-      <div id="setRetStrategyList"></div>
-      <div id="setRetStrategyEmpty" style="font-size:13px;color:var(--ink-muted);font-style:italic;display:none;">Add investments first — they'll appear here.</div>
-      <button class="btn" id="setRetApply" style="margin-top:16px;">Apply retirement settings</button>
-    </div>`;
-
-  // Toggle
-  const toggleEl = host.querySelector('[data-ret-settings-toggle]');
-  toggleEl.querySelector('.switch').addEventListener('click', () => {
-    toggleEl.classList.toggle('on');
-    const nowOn = toggleEl.classList.contains('on');
-    state.retEnabled = nowOn;
-    document.getElementById('settingsRetFields').style.display = nowOn ? 'block' : 'none';
-    if (nowOn) { _settingsRetHint(); _renderSettingsStrategyList(); }
-    scheduleSave();
-  });
-
-  if (on) {
-    _settingsRetHint();
-    _renderSettingsStrategyList();
-    // Live hint updates
-    const pctEl = document.getElementById('setRetPct');
-    if (pctEl) pctEl.addEventListener('input', () => {
-      document.getElementById('setRetPctLabel').textContent = pctEl.value;
-      _settingsRetHint();
-    });
-    // Apply button
-    const applyBtn = document.getElementById('setRetApply');
-    if (applyBtn) applyBtn.addEventListener('click', () => {
-      _saveSettingsRetirement();
-      scheduleSave();
-      renderAll();
-      applyBtn.textContent = 'Saved ✓';
-      setTimeout(() => { applyBtn.textContent = 'Apply retirement settings'; }, 1500);
-    });
-  }
-}
-
-function _settingsRetHint() {
-  const hint = document.getElementById('setRetPctHint');
-  if (!hint) return;
-  const pct = Number((document.getElementById('setRetPct')||{}).value) || 60;
-  const curExp = getExpenseCats().reduce((a,c)=>a+(Number(state[c.key])||0),0);
-  hint.innerHTML = `Today ~<strong>${fmtMoney(curExp)}</strong>/mo → <strong style="color:var(--gold-bright);">${fmtMoney(curExp*pct/100)}</strong>/mo in retirement (today's money).`;
-}
-
-function _renderSettingsStrategyList() {
-  const wrap = document.getElementById('setRetStrategyList');
-  const empty = document.getElementById('setRetStrategyEmpty');
-  if (!wrap) return;
-  const invs = state.investments || [];
-  if (!invs.length) { wrap.innerHTML=''; if (empty) empty.style.display='block'; return; }
-  if (empty) empty.style.display='none';
-  if (!state.retStrategies) state.retStrategies = {};
-  wrap.innerHTML = invs.map(inv => {
-    const s = state.retStrategies[inv.id] || { mode:'hold', swpRate:7, partialPct:50, annuityRate:6 };
-    const opts = RET_STRATEGY_OPTS.map(o=>`<option value="${o.value}"${o.value===s.mode?' selected':''}>${o.label}</option>`).join('');
-    return `<div data-set-strat="${inv.id}" style="border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:8px;background:var(--bg-elevated);">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${inv.color||'var(--accent)'};"></span><span style="font-size:13.5px;color:var(--ink);">${escapeHtml(inv.name)}</span><span style="margin-left:auto;font-size:11px;color:var(--ink-muted);font-family:'JetBrains Mono',monospace;">${fmtMoney(inv.balance)}</span></div>
-      <select data-set-mode style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg-card);color:var(--ink);font-size:13px;">${opts}</select>
-      <div data-set-extra style="margin-top:8px;"></div>
-    </div>`;
-  }).join('');
-  invs.forEach(inv => {
-    const card = wrap.querySelector(`[data-set-strat="${CSS.escape(inv.id)}"]`);
-    if (!card) return;
-    const sel = card.querySelector('[data-set-mode]');
-    const renderExtra = () => {
-      const s = state.retStrategies[inv.id] || { mode:'hold', swpRate:7, partialPct:50, annuityRate:6 };
-      const extra = card.querySelector('[data-set-extra]');
-      const mode = sel.value;
-      const iS = "width:110px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg-card);color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:12px;";
-      const lS = "font-size:11.5px;color:var(--ink-muted);display:block;margin-bottom:3px;";
-      let h = '';
-      if (mode==='swp') h=`<label style="${lS}">Annual withdrawal %</label><input type="number" data-set-swp value="${s.swpRate||7}" min="1" max="20" step="0.5" style="${iS}">`;
-      else if (mode==='partial') h=`<label style="${lS}">Withdraw at retirement %</label><input type="number" data-set-partial value="${s.partialPct||50}" min="1" max="99" step="5" style="${iS}">`;
-      else if (mode==='annuity') h=`<label style="${lS}">Annuity payout %</label><input type="number" data-set-annuity value="${s.annuityRate||6}" min="1" max="15" step="0.5" style="${iS}">`;
-      else h=`<div style="font-size:11px;color:var(--ink-muted);font-style:italic;">${mode==='hold'?'Keeps compounding as estate.':'Full balance to spending pool.'}</div>`;
-      if (extra) extra.innerHTML = h;
-    };
-    sel.addEventListener('change', renderExtra);
-    renderExtra();
-  });
-}
-
-function _saveSettingsRetirement() {
-  const num = (id, def) => { const e=document.getElementById(id); const v=Number((e||{}).value); return isFinite(v)&&v>0?v:def; };
-  state.p1CurrentAge = num('setP1Age', 30);
-  state.p1RetireAge  = num('setP1Ret', 60);
-  if (state.mode === 'partner') {
-    state.p2CurrentAge = num('setP2Age', 28);
-    state.p2RetireAge  = num('setP2Ret', 58);
-  }
-  state.lifeExpectancy = num('setLifeExp', 85);
-  const pctEl = document.getElementById('setRetPct');
-  state.retExpensePct = pctEl ? (Number(pctEl.value)||60) : 60;
-  const prrEl = document.getElementById('setPostRet');
-  state.postRetReturn = prrEl ? ((Number(prrEl.value)||7)/100) : 0.07;
-  if (!state.retStrategies) state.retStrategies = {};
-  document.querySelectorAll('#setRetStrategyList [data-set-strat]').forEach(card => {
-    const id = card.getAttribute('data-set-strat');
-    const modeSel = card.querySelector('[data-set-mode]');
-    if (!modeSel) return;
-    const s = state.retStrategies[id] || { mode:'hold', swpRate:7, partialPct:50, annuityRate:6 };
-    s.mode = modeSel.value;
-    const swp=card.querySelector('[data-set-swp]'); if (swp) s.swpRate=Number(swp.value)||7;
-    const par=card.querySelector('[data-set-partial]'); if (par) s.partialPct=Number(par.value)||50;
-    const ann=card.querySelector('[data-set-annuity]'); if (ann) s.annuityRate=Number(ann.value)||6;
-    state.retStrategies[id] = s;
-  });
-}
-
 
 let dashboardWired = false;
 function wireDashboard() {
@@ -9730,7 +8088,6 @@ function wireDashboard() {
     renderBudgetActuals();
   });
   const sectionRenderMap = {
-    'dashboard':     renderDashboard,
     'today':         () => { if (window.renderTodayPage) window.renderTodayPage(); },
     'budgetActuals': renderBudgetActuals,
     'budget':        renderBudget,
@@ -10671,7 +9028,7 @@ function renderEditGrid() {
   const grid = document.getElementById('editGrid');
   if (!grid) return;
   const totalIncome = state.p1Salary + state.p1Other + state.p2Salary + state.p2Other;
-  const totalExpense = getExpenseCats().reduce((a,c) => a + (state[c.key]||0), 0);
+  const totalExpense = EXPENSE_CATEGORIES.reduce((a,c) => a + (state[c.key]||0), 0);
   const cards = [
     { step:1, label:'You',         desc:`${escapeHtml(state.p1Name||'(unnamed)')}${state.mode==='partner'?' &amp; '+escapeHtml(state.p2Name||''):''} · ${state.currency}` },
     { step:2, label:'Income',      desc:`${fmtMoney(totalIncome,true)}/mo · ${(state.incomeOneOffs||[]).length} one-off, ${(state.incomeOverrides||[]).length} variable` },
@@ -10679,8 +9036,7 @@ function renderEditGrid() {
     { step:4, label:'EMIs',        desc:`${(state.emis||[]).length} active` },
     { step:5, label:'Investments', desc:`${(state.investments||[]).length} instruments` },
     { step:6, label:'Accounts',    desc:`${(state.accounts||[]).length} accounts` },
-    { step:7, label:'Retirement',  desc: state.retEnabled ? `Retire at ${state.p1RetireAge}${state.mode==='partner'?' / '+state.p2RetireAge:''} · ${state.retExpensePct}% expenses` : 'Not set up — tap to plan' },
-    { step:8, label:'Rates',       desc:`Cash ${((state.cashRate||0.04)*100).toFixed(2)}% · ${(state.investments||[]).length} investment rate(s)` }
+    { step:7, label:'Rates',       desc:`Cash ${((state.cashRate||0.04)*100).toFixed(2)}% · ${(state.investments||[]).length} investment rate(s)` }
   ];
   grid.innerHTML = cards.map(c =>
     `<div class="rc edit-card" data-step="${c.step}" style="cursor:pointer;">
@@ -10716,7 +9072,7 @@ function applyEditModeUI() {
   const stepper = document.querySelector('.stepper');
   if (stepper) stepper.style.display = editing ? 'none' : '';
   // Hide all wiz-nav rows and replace with a single "Save & Return" row inside whichever step is visible
-  for (let i = 1; i <= 9; i++) {
+  for (let i = 1; i <= 8; i++) {
     const panel = document.getElementById('step' + i);
     if (!panel) continue;
     const nav = panel.querySelector('.wiz-nav');
@@ -10934,10 +9290,7 @@ document.addEventListener('keydown', (e) => {
 (function () {
   'use strict';
 
-  // Live category list — recomputed on every use so renames / additions / deletions made in
-  // Edit-inputs immediately reflect in the Journal picker and transaction labels (previously this
-  // was a const captured once at load, so category edits never reached the Journal).
-  const expenseCatsForTx = () => getExpenseCats().map(c => ({ key: c.key, label: c.label }));
+  const EXPENSE_CATS_FOR_TX = EXPENSE_CATEGORIES.map(c => ({ key: c.key, label: c.label }));
   const INCOME_CATS = [
     { key: 'salary',   label: 'Salary' },
     { key: 'rewards',  label: 'Rewards' },
@@ -11100,7 +9453,7 @@ document.addEventListener('keydown', (e) => {
         const emiObj = isEmi ? (state.emis || []).find(e => e.id === tx.emiId) : null;
         const catLabel = isEmi
           ? (emiObj ? `EMI · ${emiObj.name}` : 'EMI')
-          : labelForCat(tx.category, expenseCatsForTx());
+          : labelForCat(tx.category, EXPENSE_CATS_FOR_TX);
         line1 = (tx.note || catLabel || 'Expense');
         line2 = `${formatDate(tx.date)} · ${catLabel} · ${acc ? acc.name : '—'}`;
         amtClass = 'neg'; amtPrefix = '−';
@@ -11189,19 +9542,7 @@ document.addEventListener('keydown', (e) => {
   }
   window.renderAdjustmentsHistory = renderAdjustmentsHistory;
 
-  function labelForCat(key, list) {
-    if (key === 'oneTime') return 'One-time expense';
-    if (key === 'emi') return 'EMI';
-    const c = list.find(c => c.key === key);
-    if (c) return c.label;
-    // Category was deleted: fall back to a rename override or the built-in default label so old
-    // transactions still read sensibly rather than showing the raw key (e.g. "exInsurance").
-    const override = (state.categoryLabels || {})[key];
-    if (override) return override;
-    const builtin = EXPENSE_CATEGORIES.find(c2 => c2.key === key);
-    if (builtin) return builtin.label;
-    return key || '—';
-  }
+  function labelForCat(key, list) { const c = list.find(c => c.key === key); return c ? c.label : (key || '—'); }
   function formatDate(iso) { const d = new Date(iso + 'T00:00'); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
 
   const modal = {
@@ -11333,7 +9674,7 @@ document.addEventListener('keydown', (e) => {
         }
       }
       if (single && type !== 'adjustment' && type !== 'investment_contrib' && type !== 'investment_redemption') {
-        const cats = type === 'income' ? INCOME_CATS : expenseCatsForTx();
+        const cats = type === 'income' ? INCOME_CATS : EXPENSE_CATS_FOR_TX;
         // Active EMIs as of selected date (only for expense type) — each becomes its own chip.
         const activeEmis = (type === 'expense') ? (state.emis || []).filter(e => {
           if (!e.startMonth) return false;
@@ -11354,12 +9695,7 @@ document.addEventListener('keydown', (e) => {
           }).join('');
         }
         const groupedRegular = cats.length > 0 ? '<div class="tx-cat-group-label">Categories</div>' + regularHtml : regularHtml;
-        let chipHtml = (activeEmis.length > 0 ? groupedRegular + emiHtml : regularHtml);
-        if (type === 'expense') {
-          chipHtml += '<div class="tx-cat-group-label">Other</div>'
-            + '<div class="tx-cat-chip' + (chosenCat === 'oneTime' ? ' selected' : '') + '" data-cat="oneTime" title="A single non-recurring expense — appears in the One-time expenses row on the projection sheet">One-time expense</div>';
-        }
-        document.getElementById('txCatChips').innerHTML = chipHtml;
+        document.getElementById('txCatChips').innerHTML = (activeEmis.length > 0 ? groupedRegular + emiHtml : regularHtml);
         document.querySelectorAll('#txCatChips .tx-cat-chip').forEach(chip => {
           chip.addEventListener('click', () => {
             document.querySelectorAll('#txCatChips .tx-cat-chip').forEach(c => c.classList.remove('selected'));
@@ -11447,7 +9783,6 @@ document.addEventListener('keydown', (e) => {
         const catChip = document.querySelector('#txCatChips .tx-cat-chip.selected');
         const category = catChip ? catChip.dataset.cat : null;
         if (!category) { alert('Pick a category.'); return; }
-        if (category === 'oneTime' && !note) { alert('Give the one-time expense a name using the Note field (it shows in the One-time expenses breakdown).'); return; }
         tx = { type, amount, date, accountId: acc, category, note };
         // EMI selection: store the specific EMI id so we can route it in budget actuals.
         if (category === 'emi' && catChip && catChip.dataset.emiId) {
