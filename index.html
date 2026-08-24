@@ -2299,7 +2299,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.05.15';
+const APP_VERSION = '2026.05.05.14';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -7454,29 +7454,21 @@ function renderBudget() {
       _eomSavingsChain[i] = _savingsAtEndOfMonth(ym);
       _eomRunning = _eomSavingsChain[i];
     } else if (_isCurrent(i)) {
-      // ---- CURRENT MONTH: live-anchored EOM savings (v2026.05.05.15) ----
-      // Previously this used the planned chain (prev × (1+mRate) + planned residue), which
-      // ignored the live savings balance entirely. Because the prior month's chain value was
-      // itself seeded from that month's PLANNED close rather than its ACTUAL close, the error
-      // rode forward — e.g. a live balance of ₹8,44,600 displaying a ₹7,92,397 close. A
-      // projected close BELOW the money already in the account reads as nonsense.
-      //
-      // New model — the live savings balance already embeds everything that has happened this
-      // month (salary credited, transfers completed, every logged expense and investment
-      // contribution). The one thing it does NOT yet reflect is the month-end credit-card
-      // settlement. So:
-      //
-      //   EOM savings = live savings − max(0, CC outstanding − max(0, salary balance))
-      //
-      // Salary is a transit account that zeroes out at month end: it pays the card down first,
-      // and savings funds only the shortfall. Because the figure derives from the live balance,
-      // every further expense logged before month end lowers it automatically — no re-plan and
-      // no reconciliation step required.
-      const _liveSav = savAcc ? (Number(savAcc.openingBalance) || 0) : 0;
-      const _liveSal = salAcc ? (Number(salAcc.openingBalance) || 0) : 0;
-      const _liveCc  = ccAcc  ? Math.abs(Number(ccAcc.openingBalance) || 0) : 0;
-      const _savingsToCc = Math.max(0, _liveCc - Math.max(0, _liveSal));
-      _eomSavingsChain[i] = _liveSav - _savingsToCc;
+      // Current month: end-of-month SAVINGS = start-of-month savings, grown by one month's
+      // cash interest, plus this month's planned residue (surplus − investments). Same formula
+      // as future months and as the engine's savings series (prev × (1+mRate) + residue).
+      let prev;
+      if (_eomRunning !== null) {
+        prev = _eomRunning;                       // running chain from the prior (past) month
+      } else {
+        // Current month is the first in the window: start-of-month savings = end of the
+        // immediately preceding calendar month, reverse-walked from live balance.
+        const [cy, cm] = ym.split('-').map(Number);
+        let py = cy, pm = cm - 1; if (pm < 1) { pm = 12; py--; }
+        const prevYM = py + '-' + String(pm).padStart(2, '0');
+        prev = _savingsAtEndOfMonth(prevYM);
+      }
+      _eomSavingsChain[i] = prev * (1 + _cashRateMonthly) + _plannedTargetForFuture(i, ym);
       _eomRunning = _eomSavingsChain[i];
     } else {
       const prev = _eomRunning !== null ? _eomRunning : (_eomSavingsChain[i - 1] || 0);
