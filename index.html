@@ -2325,7 +2325,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.06.01';
+const APP_VERSION = '2026.05.06.02';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -9340,6 +9340,50 @@ function _dcEmi(p) {
   return (loan <= 0 || yrs <= 0) ? 0 : computeEMI(loan, Number(p.loanRate) || 0, yrs);
 }
 
+
+/* Total LUMPY expense per month: base one-offs plus every one-off a scenario injects
+   (down payments, upfront costs). Identified structurally — a row that is non-zero in
+   at most two months of the whole horizon is a lump, not a commitment — so this stays
+   correct regardless of how a scenario labels its rows, and it automatically catches
+   the candidate purchase's own deposit, since the candidate is itself a scenario.
+
+   This matters because the raw totalExpense of a month containing a deposit is not a
+   monthly outflow. Multiplying such a month by the cover-floor factor produced floors
+   in the tens of lakhs and made every month look unaffordable. */
+function _dcOneOffSeries(proj) {
+  const n = proj.isos.length;
+  const out = new Array(n).fill(0);
+  for (let i = 0; i < n; i++) out[i] += (proj.oneOffExpSeries && proj.oneOffExpSeries[i]) || 0;
+  (proj.scenarioBreakdowns || []).forEach(bd => {
+    (bd.rows || []).forEach(row => {
+      if (!row || row.kind !== 'expense' || !Array.isArray(row.values)) return;
+      let nz = 0;
+      for (let i = 0; i < row.values.length; i++) if (row.values[i]) nz++;
+      if (nz === 0 || nz > 2) return;            // recurring commitment — leave it in
+      for (let i = 0; i < Math.min(n, row.values.length); i++) out[i] += (row.values[i] || 0);
+    });
+  });
+  return out;
+}
+
+
+/* Liquid assets per month, matching the definition the Dashboard's liquidity health
+   already uses: cash plus any investment flagged liquid. Using cash alone would hold
+   decisions to a stricter bar than the rest of the app reports, so the same purchase
+   could look affordable on the Dashboard and blocked here. */
+function _dcLiquidSeries(proj) {
+  const n = proj.isos.length;
+  const out = new Array(n).fill(0);
+  for (let i = 0; i < n; i++) out[i] = proj.cashSeries[i] || 0;
+  (proj.investments || []).forEach(inv => {
+    if (!inv || !inv.liquid) return;
+    const series = proj.bal[inv.id + '_' + inv.name];
+    if (!Array.isArray(series)) return;
+    for (let i = 0; i < n; i++) out[i] += (series[i] || 0);
+  });
+  return out;
+}
+
 /* Evaluate one candidate month. Exactly ONE runProjection call.
    Each constraint is tracked at its own worst month across the whole tenure,
    so the UI can name which month binds and by how much. */
@@ -9362,19 +9406,23 @@ function evaluateDecisionAt(dec, appetiteKey, monthIso) {
   const worst = {};
   DC_CONSTRAINTS.forEach(k => { worst[k] = { pass:true, slack:Infinity, i:idx, iso:monthIso, label:withD.labels[idx] }; });
 
+  // Lumpy items — this purchase's deposit, a backdrop scenario's deposit, a holiday,
+  // an upfront child cost — are BALANCE-SHEET events, not recurring cashflow. They are
+  // stripped from the three cashflow tests, which measure the capacity to service an EMI
+  // month after month, and judged instead by the liquidity test, which asks whether
+  // enough cash survives them. Leaving them in judged ordinary months as though a
+  // once-off lakh-scale outlay recurred every month.
+  const oneOffs = _dcOneOffSeries(withD);
+  const liquid  = _dcLiquidSeries(withD);
+
   for (let i = idx; i <= endIdx; i++) {
-    // The down payment lands as a one-off expense in the purchase month. It is a
-    // BALANCE-SHEET event, not recurring cashflow, so it is stripped out of all three
-    // cashflow tests below and judged solely by the liquidity test (which asks whether
-    // enough cash survives it). Leaving it in would make the purchase month fail by
-    // roughly the size of the down payment and no month would ever look affordable.
-    const oneOff  = (i === idx) ? down : 0;
+    const lump    = oneOffs[i] || 0;
     const income  = withD.totalIncome[i] || 0;
-    const surplus = (withD.surplus[i] || 0) + oneOff;   // recurring surplus, net of this EMI
+    const surplus = (withD.surplus[i] || 0) + lump;     // recurring surplus, net of this EMI
     const preEmi  = surplus + emi;                      // spare cash before servicing it
-    const outflow = Math.max(0, (withD.totalExpense[i] || 0) - oneOff);
+    const outflow = Math.max(0, (withD.totalExpense[i] || 0) - lump);
     const floor   = A.floorMonths * outflow;
-    const cash    = withD.cashSeries[i] || 0;
+    const cash    = liquid[i] || 0;
 
     const slacks = {
       emiVsIncome:  (A.salaryCap  * income) - emi,
