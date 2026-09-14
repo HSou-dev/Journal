@@ -1954,11 +1954,21 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       <h1 class="section-title">Should you, and <em>when</em>?</h1>
       <p class="section-sub">A scenario is something you assume will happen. A decision is a question you're answering. Each one is tested against your real logged numbers, with your enabled scenarios as the backdrop — so a car is judged in a world that already has the child, the loan closing, and everything else you expect.</p>
 
-      <div class="card" style="margin-bottom:16px;"><div class="card-head">Backdrop</div><div id="dcBackdrop"></div></div>
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-head">Assumptions in play</div>
+        <div style="font-size:12px;color:var(--ink-muted);margin-bottom:10px;line-height:1.6;">Switch these on and off to see how each one moves the answer below. Everything here is applied to every decision.</div>
+        <div id="dcScenToggles"></div>
+        <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn ghost" id="dcAddScen" style="font-size:11.5px;padding:5px 11px;">+ Add an assumption</button>
+          <button class="btn ghost" id="dcMeasure" style="font-size:11.5px;padding:5px 11px;">Measure what each one costs</button>
+        </div>
+        <div id="dcScenImpact" style="margin-top:10px;"></div>
+      </div>
 
       <div id="dcList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:16px;"></div>
-      <div style="margin-bottom:24px;"><button class="btn" id="dcAdd">+ Ask a new question</button></div>
+      <div style="margin-bottom:20px;"><button class="btn" id="dcAdd">+ Ask a new question</button></div>
 
+      <div id="dcCompare" style="margin-bottom:16px;"></div>
       <div id="dcDetail"></div>
     </section>
 
@@ -2325,7 +2335,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.06.02';
+const APP_VERSION = '2026.05.06.03';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -9415,6 +9425,8 @@ function evaluateDecisionAt(dec, appetiteKey, monthIso) {
   const oneOffs = _dcOneOffSeries(withD);
   const liquid  = _dcLiquidSeries(withD);
 
+  const cats = (typeof getExpenseCats === 'function') ? getExpenseCats() : [];
+
   for (let i = idx; i <= endIdx; i++) {
     const lump    = oneOffs[i] || 0;
     const income  = withD.totalIncome[i] || 0;
@@ -9435,8 +9447,19 @@ function evaluateDecisionAt(dec, appetiteKey, monthIso) {
       const k = DC_CONSTRAINTS[c];
       const sl = slacks[k];
       if (sl < worst[k].slack) {
-        worst[k] = { pass: sl >= 0, slack: sl, i, iso: withD.isos[i], label: withD.labels[i],
-                     income, surplus, preEmi, cash, floor, outflow };
+        // Decompose the month so the UI can show the working, not just the verdict.
+        let household = 0;
+        cats.forEach(ct => { household += ((withD.expCategorySeries[ct.key] || [])[i] || 0); });
+        const baseEmis = withD.emiMonthly[i] || 0;
+        const otherScen = Math.max(0, outflow - household - baseEmis - emi);
+        worst[k] = {
+          pass: sl >= 0, slack: sl, i, iso: withD.isos[i], label: withD.labels[i],
+          income, surplus, preEmi, cash, floor, outflow, lump,
+          p1: withD.p1Series[i] || 0, p2: withD.p2Series[i] || 0,
+          household, baseEmis, otherScen,
+          cashOnly: withD.cashSeries[i] || 0,
+          liquidInv: (liquid[i] || 0) - (withD.cashSeries[i] || 0)
+        };
       }
     }
   }
@@ -9598,22 +9621,13 @@ function _dcPaintEditor() {
 function renderDecisions() {
   if (!Array.isArray(state.decisions)) state.decisions = [];
 
-  const bd = _dcBackdrop();
-  const bdEl = document.getElementById('dcBackdrop');
-  if (bdEl) {
-    bdEl.innerHTML = bd.length
-      ? `<div style="font-size:12.5px;color:var(--ink-muted);margin-bottom:8px;">Every decision below is judged in a world that already contains:</div>
-         <div style="display:flex;gap:6px;flex-wrap:wrap;">${bd.map(s => {
-             const t = SCENARIO_TEMPLATES.find(x => x.type === s.type) || { icon:'•', color:'#888', label:s.type };
-             return `<span style="font-size:11.5px;padding:4px 11px;border-radius:20px;border:1px solid ${t.color};">${t.icon} ${escapeHtml(s.name || t.label)}</span>`;
-           }).join('')}</div>`
-      : `<div style="font-size:12.5px;color:var(--ink-muted);font-style:italic;line-height:1.6;">No scenarios are enabled, so decisions are judged against your plan exactly as it stands today. Enable scenarios on the Scenarios page to test against a future you already expect — a child, a loan closing, a sabbatical.</div>`;
-  }
+  _dcRenderScenToggles();
 
   const listEl = document.getElementById('dcList');
   if (state.decisions.length === 0) {
     listEl.innerHTML = `<div style="grid-column:1 / -1;color:var(--ink-muted);font-style:italic;font-family:'Fraunces',serif;padding:22px;text-align:center;border:1px dashed var(--line);border-radius:10px;">Nothing being weighed up yet. Tap <strong>Ask a new question</strong> to test one.</div>`;
     document.getElementById('dcDetail').innerHTML = '';
+    document.getElementById('dcCompare').innerHTML = '';
     return;
   }
 
@@ -9654,6 +9668,7 @@ function renderDecisions() {
     scheduleSave(); renderDecisions();
   }));
 
+  _dcRenderCompare();
   renderDecisionDetail();
 }
 
@@ -9675,6 +9690,173 @@ function renderDecisionDetail() {
     if (token !== _dcRenderToken) return;   // superseded by a newer request
     host.innerHTML = html;
   }, 20);
+}
+
+/* Scenario toggles, rendered inside the Decisions page. Assumptions and the questions
+   they affect belong on one screen: flipping an assumption and watching the answer move
+   IS the analysis, and sending the user to another tab to do it breaks that loop. */
+function _dcRenderScenToggles() {
+  const host = document.getElementById('dcScenToggles');
+  if (!host) return;
+  const all = state.scenarios || [];
+  if (!all.length) {
+    host.innerHTML = `<div style="font-size:12.5px;color:var(--ink-muted);font-style:italic;">Nothing assumed yet. Decisions are being judged against your plan exactly as it stands today.</div>`;
+    return;
+  }
+  host.innerHTML = all.map(sc => {
+    const t = SCENARIO_TEMPLATES.find(x => x.type === sc.type) || { icon:'•', color:'#888', label:sc.type };
+    const on = sc.enabled !== false;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);">
+      <div class="toggle ${on?'on':''}" data-dcscen="${sc.id}" style="width:auto;padding:0;border:none;background:transparent;flex-shrink:0;cursor:pointer;"><div class="switch" style="margin:0;"></div></div>
+      <div style="flex:1;min-width:0;opacity:${on?1:0.5};">
+        <div style="font-size:12.5px;font-weight:600;">${t.icon} ${escapeHtml(sc.name || t.label)}</div>
+        <div style="font-size:11px;color:var(--ink-muted);">${escapeHtml(scenarioSummary(sc))}</div>
+      </div>
+      <button class="btn ghost" data-dcscenedit="${sc.id}" style="font-size:10.5px;padding:4px 9px;flex-shrink:0;">Edit</button>
+    </div>`;
+  }).join('');
+
+  host.querySelectorAll('[data-dcscen]').forEach(el => el.addEventListener('click', () => {
+    const sc = state.scenarios.find(x => x.id === el.dataset.dcscen);
+    if (!sc) return;
+    sc.enabled = (sc.enabled === false);
+    scheduleSave();
+    document.getElementById('dcScenImpact').innerHTML = '';
+    renderDecisions();
+  }));
+  host.querySelectorAll('[data-dcscenedit]').forEach(el => el.addEventListener('click', () => {
+    if (typeof openScenarioEditor === 'function') openScenarioEditor(el.dataset.dcscenedit);
+  }));
+}
+
+/* What each assumption actually costs, in months of delay. Answers "which of these is
+   holding me back?" directly, rather than leaving the user to toggle one at a time. */
+function _dcMeasureScenarios() {
+  const host = document.getElementById('dcScenImpact');
+  const d = (state.decisions || []).find(x => x.id === _dcSelected) || (state.decisions || [])[0];
+  if (!d) { host.innerHTML = `<div style="font-size:12px;color:var(--ink-muted);">Add a decision first — impact is measured against one.</div>`; return; }
+  host.innerHTML = `<div style="font-size:12px;color:var(--ink-muted);font-style:italic;">Measuring…</div>`;
+
+  setTimeout(() => {
+    const app = d.appetite || 'comfortable';
+    const from = d.params.month;
+    const saved = (state.scenarios || []).map(s => s.enabled !== false);
+    const on = (state.scenarios || []).filter(s => s.enabled !== false);
+    const baseline = findEarliestFeasible(d, app, from);
+    const baseIso = baseline.found ? baseline.iso : null;
+
+    const rows = on.map(sc => {
+      sc.enabled = false;
+      const r = findEarliestFeasible(d, app, from);
+      sc.enabled = true;
+      const iso = r.found ? r.iso : null;
+      let delta = '—';
+      if (baseIso && iso) {
+        const m = (parseInt(baseIso.slice(0,4))*12+parseInt(baseIso.slice(5,7))) - (parseInt(iso.slice(0,4))*12+parseInt(iso.slice(5,7)));
+        delta = m === 0 ? 'no effect' : ('delays by ' + m + ' month' + (m===1?'':'s'));
+      } else if (!baseIso && iso) { delta = 'this is what blocks it entirely'; }
+      return { name: sc.name || sc.type, without: iso, delta };
+    });
+    (state.scenarios || []).forEach((s,i) => { s.enabled = saved[i]; });
+
+    host.innerHTML = `<div style="border:1px solid var(--line);border-radius:8px;padding:11px 12px;">
+      <div style="font-size:12px;font-weight:600;margin-bottom:3px;">Cost of each assumption, for “${escapeHtml(d.name || 'this decision')}”</div>
+      <div style="font-size:11px;color:var(--ink-muted);margin-bottom:9px;">With everything on, the earliest that works is <strong>${baseIso ? baseIso : 'nothing in range'}</strong>.</div>
+      ${rows.map(r => `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:12px;border-top:1px solid var(--line);">
+        <span>${escapeHtml(r.name)}</span>
+        <span style="color:var(--ink-muted);">without it: ${r.without || 'still blocked'} · ${r.delta}</span></div>`).join('')}
+    </div>`;
+  }, 20);
+}
+
+/* Side-by-side comparison. The point of the page is choosing between options, which
+   means seeing them together rather than one at a time. */
+function _dcRenderCompare() {
+  const host = document.getElementById('dcCompare');
+  const ds = state.decisions || [];
+  if (ds.length < 2) { host.innerHTML = ''; return; }
+  const rows = ds.map(d => {
+    const app = d.appetite || 'comfortable';
+    const r = evaluateDecisionAt(d, app, d.params.month);
+    const e = (r && r.ok) ? { found:true, iso:d.params.month } : findEarliestFeasible(d, app, d.params.month);
+    return {
+      name: d.name || (DECISION_KINDS[d.params.purchaseKind]||DECISION_KINDS.other).label,
+      icon: (DECISION_KINDS[d.params.purchaseKind]||DECISION_KINDS.other).icon,
+      cost: Number(d.params.cost)||0, emi: _dcEmi(d.params),
+      asked: d.params.month, ok: r ? r.ok : false,
+      earliest: e.found ? e.iso : 'not in range', app
+    };
+  });
+  host.innerHTML = `<div class="card"><div class="card-head">Side by side</div>
+    <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+      <thead><tr style="color:var(--ink-muted);font-size:11px;text-align:left;">
+        <th style="padding:6px 8px 6px 0;">Option</th><th style="padding:6px 8px;">Cost</th><th style="padding:6px 8px;">EMI</th>
+        <th style="padding:6px 8px;">Asked for</th><th style="padding:6px 8px;">Works then?</th><th style="padding:6px 8px;">Earliest that works</th></tr></thead>
+      <tbody>${rows.map(r => `<tr style="border-top:1px solid var(--line);">
+        <td style="padding:8px 8px 8px 0;">${r.icon} ${escapeHtml(r.name)}<div style="font-size:10.5px;color:var(--ink-muted);">${DECISION_APPETITES[r.app].name}</div></td>
+        <td style="padding:8px;">${_dcMs(r.cost)}</td>
+        <td style="padding:8px;">${_dcMs(r.emi)}</td>
+        <td style="padding:8px;">${r.asked}</td>
+        <td style="padding:8px;color:${r.ok?'var(--accent-bright)':'var(--red)'};font-weight:600;">${r.ok?'yes':'no'}</td>
+        <td style="padding:8px;font-weight:600;">${r.earliest}</td></tr>`).join('')}</tbody>
+    </table></div></div>`;
+}
+
+/* One test, with its arithmetic laid out. Collapsed by default so the page stays
+   readable, expandable because "it fails" is not an explanation. */
+function _dcTestBlock(k, w, A, at) {
+  const pass = w.pass;
+  const badge = pass ? 'clears by ' + _dcM(w.slack) : 'short by ' + _dcM(Math.abs(w.slack));
+  const line = (lbl, val, opts) => {
+    const o = opts || {};
+    return `<div style="display:flex;justify-content:space-between;gap:12px;padding:${o.tight?'2px':'4px'} 0;${o.rule?'border-top:1px solid var(--line);margin-top:4px;padding-top:7px;':''}font-size:12px;${o.sub?'color:var(--ink-muted);padding-left:14px;':''}">
+      <span>${lbl}</span><span style="${o.bold?'font-weight:600;':''}${o.col?'color:'+o.col+';':''}white-space:nowrap;">${val}</span></div>`;
+  };
+
+  let body = '', rule = '';
+  if (k === 'emiVsIncome') {
+    rule = `Your EMI should stay within ${Math.round(A.salaryCap*100)}% of what you earn that month.`;
+    body = line('Take-home that month', _dcM(w.income), {bold:true})
+         + (w.p2 ? line('you', _dcM(w.p1), {sub:true,tight:true}) + line('partner', _dcM(w.p2), {sub:true,tight:true}) : '')
+         + line('Ceiling at ' + Math.round(A.salaryCap*100) + '%', _dcM(A.salaryCap * w.income))
+         + line('This EMI', '− ' + _dcM(at.emi))
+         + line(pass?'Room to spare':'Over by', _dcM(Math.abs(w.slack)), {rule:true,bold:true,col:pass?'var(--accent-bright)':'var(--red)'});
+  } else if (k === 'emiVsSurplus') {
+    rule = `Your EMI should take no more than ${Math.round(A.surplusCap*100)}% of the spare cash you have that month, so one payment never swallows everything left over.`;
+    body = line('Spare each month before this EMI', _dcM(w.preEmi), {bold:true})
+         + line('Ceiling at ' + Math.round(A.surplusCap*100) + '%', _dcM(A.surplusCap * w.preEmi))
+         + line('This EMI', '− ' + _dcM(at.emi))
+         + line(pass?'Room to spare':'Over by', _dcM(Math.abs(w.slack)), {rule:true,bold:true,col:pass?'var(--accent-bright)':'var(--red)'});
+  } else if (k === 'buffer') {
+    rule = `After absolutely everything — bills, existing loans, investments and this new EMI — at least ${_dcM(A.minBuffer)} should still be left that month.`;
+    body = line('Left over after everything', _dcM(w.surplus), {bold:true})
+         + line('Floor you set', '− ' + _dcM(A.minBuffer))
+         + line(pass?'Room to spare':'Short by', _dcM(Math.abs(w.slack)), {rule:true,bold:true,col:pass?'var(--accent-bright)':'var(--red)'});
+  } else {
+    rule = `Your liquid money should still cover ${A.floorMonths} months of normal running costs. One-off lumps such as a deposit or a holiday are counted here, where they belong, rather than in the monthly tests.`;
+    body = line('Normal running cost, that month', _dcM(w.outflow), {bold:true})
+         + line('household bills', _dcM(w.household), {sub:true,tight:true})
+         + line('existing EMIs', _dcM(w.baseEmis), {sub:true,tight:true})
+         + (w.otherScen ? line('from your assumptions', _dcM(w.otherScen), {sub:true,tight:true}) : '')
+         + line('this decision\u2019s EMI', _dcM(at.emi), {sub:true,tight:true})
+         + line('Cover needed (' + A.floorMonths + ' months)', _dcM(w.floor))
+         + line('Liquid money you\u2019d have', _dcM(w.cash), {bold:true})
+         + line('cash and savings', _dcM(w.cashOnly), {sub:true,tight:true})
+         + line('investments marked liquid', _dcM(w.liquidInv), {sub:true,tight:true})
+         + line(pass?'Room to spare':'Short by', _dcM(Math.abs(w.slack)), {rule:true,bold:true,col:pass?'var(--accent-bright)':'var(--red)'})
+         + (w.liquidInv === 0 ? `<div style="font-size:11px;color:var(--ink-muted);margin-top:7px;line-height:1.55;">None of your investments are marked liquid, so none of them count here. If any could genuinely be redeemed within a few days, marking it liquid on the Instruments page would change this figure.</div>` : '');
+  }
+
+  return `<details style="border-bottom:1px solid var(--line);">
+    <summary style="cursor:pointer;padding:10px 0;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+      <span style="font-size:12.5px;font-weight:600;">${DC_LABEL[k]}<span style="font-weight:400;color:var(--ink-muted);"> · tightest in ${w.label||'—'}</span></span>
+      <span style="font-size:10.5px;padding:3px 9px;border-radius:20px;background:${pass?'var(--accent-bright)':'var(--red)'};color:var(--bg);font-weight:600;flex-shrink:0;white-space:nowrap;">${badge}</span>
+    </summary>
+    <div style="padding:2px 0 12px;">
+      <div style="font-size:11.5px;color:var(--ink-muted);margin-bottom:9px;line-height:1.6;">${rule}</div>
+      ${body}
+    </div>
+  </details>`;
 }
 
 function _dcBuildDetail(d) {
@@ -9727,24 +9909,10 @@ function _dcBuildDetail(d) {
   </div>`;
 
   // ---------- the four tests
-  html += `<div class="card" style="margin-bottom:16px;"><div class="card-head">The four tests · ${A.name} · at ${askedLabel}</div>
-    <div style="font-size:11.5px;color:var(--ink-muted);margin-bottom:12px;line-height:1.55;">Each test is measured at <em>its own</em> worst month across the whole tenure, not at purchase and not averaged. The down payment is judged by emergency cover, not by the monthly tests.</div>`;
-  DC_CONSTRAINTS.forEach(k => {
-    const w = atAsked.worst[k];
-    const detail =
-      k === 'emiVsIncome'  ? `EMI ${_dcM(atAsked.emi)} against income ${_dcM(w.income)} — ceiling ${Math.round(A.salaryCap*100)}% = ${_dcM(A.salaryCap*w.income)}`
-    : k === 'emiVsSurplus' ? `EMI ${_dcM(atAsked.emi)} against ${_dcM(w.preEmi)} spare — ceiling ${Math.round(A.surplusCap*100)}% = ${_dcM(A.surplusCap*w.preEmi)}`
-    : k === 'buffer'       ? `${_dcM(w.surplus)} still free after everything — floor ${_dcM(A.minBuffer)}`
-    :                        `${_dcM(w.cash)} liquid against a ${A.floorMonths}-month floor of ${_dcM(w.floor)}`;
-    html += `<div style="padding:10px 0;border-bottom:1px solid var(--line);">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-        <div style="font-size:12.5px;font-weight:600;">${DC_LABEL[k]}<span style="font-weight:400;color:var(--ink-muted);"> · worst at ${w.label||'—'}</span></div>
-        <span style="font-size:10.5px;padding:3px 9px;border-radius:20px;background:${w.pass?'var(--accent-bright)':'var(--red)'};color:var(--bg);font-weight:600;flex-shrink:0;white-space:nowrap;">${w.pass?'clears by '+_dcM(w.slack):'short by '+_dcM(Math.abs(w.slack))}</span>
-      </div>
-      <div style="font-size:11.5px;color:var(--ink-muted);margin-top:4px;">${detail}</div>
-    </div>`;
-  });
-  html += `</div>`;
+  html += `<div class="card" style="margin-bottom:16px;"><div class="card-head">Why — the four tests · ${A.name} · asked for ${askedLabel}</div>
+    <div style="font-size:11.5px;color:var(--ink-muted);margin-bottom:10px;line-height:1.6;">Tap any test to see the arithmetic. Each is measured at <em>its own</em> tightest month across the whole ${Number(p.loanYears)||0}-year tenure — not at purchase, and not averaged — because the month that breaks you is the one that decides this.</div>`;
+  DC_CONSTRAINTS.forEach(k => { html += _dcTestBlock(k, atAsked.worst[k], A, atAsked); });
+  html += `<div style="font-size:11.5px;color:var(--ink-muted);margin-top:11px;line-height:1.6;">All four must clear. The tightest one is what decides the date.</div></div>`;
 
   // ---------- blockers over time
   if (!atAsked.ok && earliest.timeline && earliest.timeline.length > 1) {
@@ -9793,6 +9961,26 @@ function _dcNoPriceWorks(at, askedLabel) {
 function initDecisionsUI() {
   const add = document.getElementById('dcAdd');
   if (add) add.addEventListener('click', () => { _dcDraft = null; _dcEditingId = null; openDecisionEditor(null); });
+
+  const addScen = document.getElementById('dcAddScen');
+  if (addScen) addScen.addEventListener('click', () => {
+    if (typeof openTemplateChooser === 'function') openTemplateChooser();
+  });
+  const measure = document.getElementById('dcMeasure');
+  if (measure) measure.addEventListener('click', _dcMeasureScenarios);
+
+  // A scenario saved from the shared editor must refresh this page too, otherwise the
+  // assumption list and every verdict silently go stale.
+  if (typeof renderScenarios === 'function' && !renderScenarios.__dcHooked) {
+    const orig = renderScenarios;
+    window.renderScenarios = function () {
+      const r = orig.apply(this, arguments);
+      const sec = document.getElementById('decisions');
+      if (sec && sec.classList.contains('active')) renderDecisions();
+      return r;
+    };
+    window.renderScenarios.__dcHooked = true;
+  }
 
   const save = document.getElementById('dcEditSave');
   if (save) save.addEventListener('click', () => {
