@@ -2335,7 +2335,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.06.03';
+const APP_VERSION = '2026.05.06.04';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -9394,6 +9394,30 @@ function _dcLiquidSeries(proj) {
   return out;
 }
 
+
+/* Which assumptions are actually costing money in a given month, itemised by name.
+   Lumps are excluded (they belong to the liquidity test) and so is the candidate
+   purchase itself, which is shown on its own line. Without this the working can only
+   say "from your assumptions", which leaves the user unable to tell whether a cost
+   they expect in September is being charged in April. */
+function _dcScenAt(proj, i, excludeId) {
+  const out = [];
+  (proj.scenarioBreakdowns || []).forEach(bd => {
+    if (bd.scenarioId === excludeId) return;
+    let amt = 0, startsIso = null;
+    (bd.rows || []).forEach(row => {
+      if (!row || row.kind !== 'expense' || !Array.isArray(row.values)) return;
+      let nz = 0, first = null;
+      for (let j = 0; j < row.values.length; j++) if (row.values[j]) { nz++; if (first === null) first = j; }
+      if (nz === 0 || nz <= 2) return;                 // a lump, not a commitment
+      amt += (row.values[i] || 0);
+      if (first !== null && startsIso === null) startsIso = proj.isos[first];
+    });
+    if (amt > 0) out.push({ name: bd.scenarioName, amount: amt, startsIso });
+  });
+  return out;
+}
+
 /* Evaluate one candidate month. Exactly ONE runProjection call.
    Each constraint is tracked at its own worst month across the whole tenure,
    so the UI can name which month binds and by how much. */
@@ -9458,7 +9482,8 @@ function evaluateDecisionAt(dec, appetiteKey, monthIso) {
           p1: withD.p1Series[i] || 0, p2: withD.p2Series[i] || 0,
           household, baseEmis, otherScen,
           cashOnly: withD.cashSeries[i] || 0,
-          liquidInv: (liquid[i] || 0) - (withD.cashSeries[i] || 0)
+          liquidInv: (liquid[i] || 0) - (withD.cashSeries[i] || 0),
+          scenAt: _dcScenAt(withD, i, '__dc__')
         };
       }
     }
@@ -9830,6 +9855,9 @@ function _dcTestBlock(k, w, A, at) {
   } else if (k === 'buffer') {
     rule = `After absolutely everything — bills, existing loans, investments and this new EMI — at least ${_dcM(A.minBuffer)} should still be left that month.`;
     body = line('Left over after everything', _dcM(w.surplus), {bold:true})
+         + ((w.scenAt && w.scenAt.length)
+              ? `<div style="font-size:11px;color:var(--ink-muted);padding:2px 0 4px 14px;">after your assumptions: ${w.scenAt.map(x => escapeHtml(x.name) + ' ' + _dcM(x.amount) + (x.startsIso ? ' (from ' + x.startsIso + ')' : '')).join(' · ')}</div>`
+              : '')
          + line('Floor you set', '− ' + _dcM(A.minBuffer))
          + line(pass?'Room to spare':'Short by', _dcM(Math.abs(w.slack)), {rule:true,bold:true,col:pass?'var(--accent-bright)':'var(--red)'});
   } else {
@@ -9837,7 +9865,9 @@ function _dcTestBlock(k, w, A, at) {
     body = line('Normal running cost, that month', _dcM(w.outflow), {bold:true})
          + line('household bills', _dcM(w.household), {sub:true,tight:true})
          + line('existing EMIs', _dcM(w.baseEmis), {sub:true,tight:true})
-         + (w.otherScen ? line('from your assumptions', _dcM(w.otherScen), {sub:true,tight:true}) : '')
+         + ((w.scenAt && w.scenAt.length)
+              ? w.scenAt.map(x => line(escapeHtml(x.name) + (x.startsIso ? ' <span style="opacity:.7;">(from ' + x.startsIso + ')</span>' : ''), _dcM(x.amount), {sub:true,tight:true})).join('')
+              : (w.otherScen ? line('from your assumptions', _dcM(w.otherScen), {sub:true,tight:true}) : ''))
          + line('this decision\u2019s EMI', _dcM(at.emi), {sub:true,tight:true})
          + line('Cover needed (' + A.floorMonths + ' months)', _dcM(w.floor))
          + line('Liquid money you\u2019d have', _dcM(w.cash), {bold:true})
@@ -9849,11 +9879,12 @@ function _dcTestBlock(k, w, A, at) {
 
   return `<details style="border-bottom:1px solid var(--line);">
     <summary style="cursor:pointer;padding:10px 0;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;">
-      <span style="font-size:12.5px;font-weight:600;">${DC_LABEL[k]}<span style="font-weight:400;color:var(--ink-muted);"> · tightest in ${w.label||'—'}</span></span>
+      <span style="font-size:12.5px;font-weight:600;">${DC_LABEL[k]}<span style="font-weight:400;color:var(--ink-muted);"> · tightest in ${w.label||'—'}${(at.labels && w.i !== at.idx) ? ', not ' + at.labels[at.idx] : ''}</span></span>
       <span style="font-size:10.5px;padding:3px 9px;border-radius:20px;background:${pass?'var(--accent-bright)':'var(--red)'};color:var(--bg);font-weight:600;flex-shrink:0;white-space:nowrap;">${badge}</span>
     </summary>
     <div style="padding:2px 0 12px;">
       <div style="font-size:11.5px;color:var(--ink-muted);margin-bottom:9px;line-height:1.6;">${rule}</div>
+      ${(at.labels && w.i !== at.idx) ? `<div style="font-size:11px;color:var(--ink-muted);margin-bottom:9px;line-height:1.6;padding:7px 9px;border-left:2px solid var(--line);">The figures below are from <strong>${w.label}</strong>, not ${at.labels[at.idx]}. Buying in ${at.labels[at.idx]} means still paying this loan in ${w.label}, so the month that squeezes hardest is the one that decides it — nothing extra is being charged to ${at.labels[at.idx]}.</div>` : ''}
       ${body}
     </div>
   </details>`;
@@ -9909,7 +9940,7 @@ function _dcBuildDetail(d) {
   </div>`;
 
   // ---------- the four tests
-  html += `<div class="card" style="margin-bottom:16px;"><div class="card-head">Why — the four tests · ${A.name} · asked for ${askedLabel}</div>
+  html += `<div class="card" style="margin-bottom:16px;"><div class="card-head">Why — the four tests · ${A.name} · buying in ${askedLabel}</div>
     <div style="font-size:11.5px;color:var(--ink-muted);margin-bottom:10px;line-height:1.6;">Tap any test to see the arithmetic. Each is measured at <em>its own</em> tightest month across the whole ${Number(p.loanYears)||0}-year tenure — not at purchase, and not averaged — because the month that breaks you is the one that decides this.</div>`;
   DC_CONSTRAINTS.forEach(k => { html += _dcTestBlock(k, atAsked.worst[k], A, atAsked); });
   html += `<div style="font-size:11.5px;color:var(--ink-muted);margin-top:11px;line-height:1.6;">All four must clear. The tightest one is what decides the date.</div></div>`;
