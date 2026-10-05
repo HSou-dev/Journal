@@ -2336,7 +2336,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.07.03';
+const APP_VERSION = '2026.05.07.04';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -7506,8 +7506,19 @@ function renderBudget() {
     // _isFuture continue above and keep the engine total, which already contains the plan.
     const _otActual = oneTimeActualTotal[ym] || 0;
     if (_isCurrent(i)) {
-      const _otPlan = plannedOneOffsInMonth(ym).reduce((a, x) => a + x.amount, 0);
-      _overlayTotalExpense[i] += _otActual + Math.max(0, _otPlan - _otActual);
+      // The rule is applied PER PLANNED ITEM, exactly as it is per category — never once
+      // across the group. Applying it to the group total would let unbudgeted spending hide
+      // inside another plan's unspent headroom: an Rs 8,537 unplanned night out would simply
+      // disappear into an Rs 1,00,000 trip that had barely started, and the month would look
+      // no worse for it. Unplanned spending therefore ADDS on top; it has no budget to consume.
+      const _ot = oneTimeActualsInMonth(ym);
+      let _otCounted = 0;
+      _ot.planned.forEach(pl => {
+        const got = _ot.byPlan[pl.id] || 0;
+        _otCounted += got + Math.max(0, pl.amount - got);
+      });
+      _ot.loose.forEach(x => { _otCounted += x.amount; });
+      _overlayTotalExpense[i] += _otCounted;
     } else {
       _overlayTotalExpense[i] += _otActual;
     }
@@ -7687,11 +7698,52 @@ function renderBudget() {
       // Salary is a transit account that zeroes at month end, so it pays the card down first
       // and savings funds only the shortfall. Because this derives from the live balance,
       // every further expense logged before month end lowers it automatically.
-      const _liveSav = savAcc ? (Number(savAcc.openingBalance) || 0) : 0;
+      // v2026.05.07.04 — the current month now closes the same way every FUTURE month does:
+      //      previous close + this month's net flow to savings
+      // The live-anchored version (live balance - card shortfall) looked only at money that
+      // had already moved, so a month could report a large negative net-to-savings and still
+      // close flat. Spending the sheet says is coming has to land somewhere.
+      //
+      // Note this is algebraically identical to "live balance + (target - what has already
+      // moved)", since live balance = previous close + what has already moved. Using the
+      // previous close is simply the cheaper of the two to compute here.
+      //
+      // The card term is retained and is NOT double-counting: the outstanding balance is
+      // spending from EARLIER months, which this month's surplus does not contain, so it is
+      // an extra outflow. The salary account is deliberately NOT added — its balance mixes
+      // carried-over cash with this month's salary, which surplus already counts, and adding
+      // it wholesale would double-count the salary.
       const _liveSal = salAcc ? (Number(salAcc.openingBalance) || 0) : 0;
       const _liveCc  = ccAcc  ? Math.abs(Number(ccAcc.openingBalance) || 0) : 0;
       const _savingsToCc = Math.max(0, _liveCc - Math.max(0, _liveSal));
-      _eomSavingsChain[i] = _liveSav - _savingsToCc;
+
+      // Investment contributions for this month, on the same actual-or-scheduled basis the
+      // expense lines use. Computed here because contribRows is built further down the file.
+      let _invThisMonth = 0;
+      (p.investments || []).forEach(inv => {
+        const sched = (p.contribPerMonth[inv.id + '_' + inv.name] || [])[sliceFrom + i] || 0;
+        let act = 0;
+        (state.transactions || []).forEach(tx => {
+          if (tx.type !== 'investment_contrib' || tx.investmentId !== inv.id) return;
+          if (!tx.date || tx.date.slice(0, 7) !== ym) return;
+          act += Number(tx.amount) || 0;
+        });
+        _invThisMonth += act + Math.max(0, sched - act);
+      });
+
+      const _netToSavings = (surplus[i] || 0) - _invThisMonth;
+
+      let _prevClose;
+      if (_eomRunning !== null) {
+        _prevClose = _eomRunning;
+      } else {
+        // Current month is first in the window: reverse-walk the preceding calendar month.
+        const [cy, cm] = ym.split('-').map(Number);
+        let py = cy, pm = cm - 1; if (pm < 1) { pm = 12; py--; }
+        _prevClose = _savingsAtEndOfMonth(py + '-' + String(pm).padStart(2, '0'));
+      }
+
+      _eomSavingsChain[i] = _prevClose + _netToSavings - _savingsToCc;
       _eomRunning = _eomSavingsChain[i];
     } else {
       const prev = _eomRunning !== null ? _eomRunning : (_eomSavingsChain[i - 1] || 0);
