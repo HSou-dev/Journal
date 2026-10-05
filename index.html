@@ -2336,7 +2336,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.07.04';
+const APP_VERSION = '2026.05.07.05';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -7939,7 +7939,16 @@ function renderBudget() {
     const linkedTot  = planned.reduce((a, x) => a + (byPlan[x.id] || 0), 0);
     const looseTot   = loose.reduce((a, x) => a + x.amount, 0);
     const actualTot  = linkedTot + looseTot;
-    oneTimePlannedTot[i] = plannedTot;
+    // What this row actually contributes to Total Expenses for the current month: the
+    // larger of spent-or-planned per item, PLUS unplanned spending, which has no budget to
+    // consume. The displayed denominator must be this figure and not the bare plan total,
+    // otherwise the cell compares an actual that includes unplanned spending against a plan
+    // that excludes it — and the row visibly fails to tie to the total beneath it.
+    const countedTot = planned.reduce((a, pl) => {
+      const got = byPlan[pl.id] || 0;
+      return a + got + Math.max(0, pl.amount - got);
+    }, 0) + looseTot;
+    oneTimePlannedTot[i] = _isCurrent(i) ? countedTot : plannedTot;
 
     if (_isFuture(i)) {
       oneTimeCombined[i] = plannedTot;
@@ -7954,8 +7963,8 @@ function renderBudget() {
       });
       loose.forEach(a => oneTimeDetail[i].push({ note: a.note, amount: a.amount, planned: 0, mode: 'unplanned' }));
     }
-    oneTimeDisplay[i] = _isCurrent(i) && plannedTot > 0
-      ? fmtDual(oneTimeCombined[i], plannedTot)
+    oneTimeDisplay[i] = _isCurrent(i) && countedTot > 0
+      ? fmtDual(oneTimeCombined[i], countedTot)
       : fmtMoney(oneTimeCombined[i]);
   }
   if (oneTimeCombined.some(v => v > 0) || oneTimePlannedTot.some(v => v > 0)) {
