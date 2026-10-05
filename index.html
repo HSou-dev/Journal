@@ -2336,7 +2336,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.07.08';
+const APP_VERSION = '2026.05.08.01';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -6687,6 +6687,102 @@ function _liveLiquidCash() {
 }
 function _nowYMkey() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
 
+
+/* ============================================================================
+   SHARED: the current month's closing savings balance.
+   ----------------------------------------------------------------------------
+   One implementation, called by BOTH the Projection sheet and projectSavingsChain
+   (which Dashboard and Net Worth read). They previously had separate logic and had
+   drifted ~Rs 92,000 apart on the same data — the Projection sheet had every fix
+   from this round and the other did not.
+
+        close = savings now + salary now
+                + income still expected + redemptions still expected
+                - spending still expected - card outstanding - contributions still due
+
+   Scenario-safe: it starts from the engine's planned expense for the month, which
+   already contains scenario effects, and adds only the OVERSPEND on each line.
+   Since counted = max(actual, budget) = budget + max(0, actual - budget), summing
+   over lines gives engine_planned + total_overspend. A line with no budget at all
+   (unplanned one-time spending) contributes its full amount, which is correct.
+   ========================================================================== */
+function sharedCurrentMonthClose(p) {
+  if (!p || !Array.isArray(p.isos)) return null;
+  const d = new Date();
+  const ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  const i = p.isos.indexOf(ym);
+  if (i < 0) return null;
+
+  const accOf = id => (state.accounts || []).find(a => a.id === id);
+  const liveSav = Number((accOf('savings') || {}).openingBalance) || 0;
+  const liveSal = Number((accOf('salary')  || {}).openingBalance) || 0;
+  const liveCc  = Math.abs(Number((accOf('cc') || {}).openingBalance) || 0);
+
+  // ---- what the journal says has already happened this month
+  let cardCharged = 0, incomeIn = 0, paidInCash = 0, redeemTaken = 0;
+  const invPaidById = {}, actualByCat = {}, actualByEmi = {};
+  (state.transactions || []).forEach(tx => {
+    if (!tx || !tx.date || tx.date.slice(0, 7) !== ym) return;
+    const amt = Number(tx.amount) || 0;
+    if (tx.type === 'expense') {
+      if (tx.accountId === 'cc') cardCharged += amt; else paidInCash += amt;
+      if (tx.category === 'emi' && tx.emiId) actualByEmi[tx.emiId] = (actualByEmi[tx.emiId] || 0) + amt;
+      else if (tx.category && tx.category !== 'oneTime') actualByCat[tx.category] = (actualByCat[tx.category] || 0) + amt;
+    } else if (tx.type === 'income') {
+      incomeIn += amt;
+    } else if (tx.type === 'investment_contrib') {
+      invPaidById[tx.investmentId] = (invPaidById[tx.investmentId] || 0) + amt;
+    } else if (tx.type === 'investment_redemption') {
+      redeemTaken += amt;
+      incomeIn += amt;               // folded into totalIncome as an inflow, so already received
+    } else if (tx.type === 'adjustment' && tx.isHiddenSpending) {
+      actualByCat.exMisc = (actualByCat.exMisc || 0) + amt;
+    }
+  });
+
+  // ---- overspend per line, which is all the engine's planned figure is missing
+  let overspend = 0;
+  (typeof getExpenseCats === 'function' ? getExpenseCats() : []).forEach(c => {
+    overspend += Math.max(0, (actualByCat[c.key] || 0) - (Number(state[c.key]) || 0));
+  });
+  (state.emis || []).forEach(e => {
+    if (typeof _emiActiveIn === 'function' && !_emiActiveIn(e, ym)) return;
+    overspend += Math.max(0, (actualByEmi[e.id] || 0) - (Number(e.amount) || 0));
+  });
+  if (typeof oneTimeActualsInMonth === 'function') {
+    const ot = oneTimeActualsInMonth(ym);
+    ot.planned.forEach(pl => { overspend += Math.max(0, (ot.byPlan[pl.id] || 0) - pl.amount); });
+    ot.loose.forEach(x => { overspend += x.amount; });   // no budget behind it at all
+  }
+
+  const plannedExpense = (p.totalExpense && p.totalExpense[i]) || 0;
+  const countedExpense = plannedExpense + overspend;
+
+  // Logged redemptions count as income for the month, matching the Inflows row.
+  let redeemLogged = 0;
+  (state.transactions || []).forEach(tx => {
+    if (tx && tx.type === 'investment_redemption' && tx.date && tx.date.slice(0, 7) === ym)
+      redeemLogged += Number(tx.amount) || 0;
+  });
+  const countedIncome = ((p.totalIncome && p.totalIncome[i]) || 0) + redeemLogged;
+
+  // Remaining contributions are PER INSTRUMENT: on a group total an ad-hoc lump into one
+  // instrument would mask a scheduled SIP that has not gone out of another.
+  let remainingInv = 0;
+  (p.investments || []).forEach(inv => {
+    const sched = (p.contribPerMonth[inv.id + '_' + inv.name] || [])[i] || 0;
+    remainingInv += Math.max(0, sched - (invPaidById[inv.id] || 0));
+  });
+
+  const remainingRedeem = Math.max(0, ((p.redemptionInflow || [])[i] || 0) - redeemTaken);
+  const remainingIncome = Math.max(0, countedIncome - incomeIn);
+  const remainingSpend  = Math.max(0, countedExpense - paidInCash - cardCharged);
+
+  return liveSav + Math.max(0, liveSal)
+       + remainingIncome + remainingRedeem
+       - remainingSpend - liveCc - remainingInv;
+}
+
 function projectSavingsChain(p) {
   const isos = p.isos;
   const n = isos.length;
@@ -6759,8 +6855,28 @@ function projectSavingsChain(p) {
       // Past: true reverse-walked closing balance
       chain[i] = savingsAtEndOfMonth(ym);
       running = chain[i];
+    } else if (ym === nowYM) {
+      // Current month: delegate to the SHARED close so Dashboard and Net Worth report the
+      // same figure as the Projection sheet. These were separate implementations and had
+      // drifted about Rs 92,000 apart on identical data; because the difference arose
+      // entirely in this month and then rode forward, aligning this one month aligns the
+      // whole chain. Falls back to the old arithmetic if the shared function cannot run.
+      const shared = (typeof sharedCurrentMonthClose === 'function') ? sharedCurrentMonthClose(p) : null;
+      if (shared != null && isFinite(shared)) {
+        chain[i] = shared;
+      } else {
+        let prev;
+        if (running !== null) prev = running;
+        else {
+          const [cy, cm] = ym.split('-').map(Number);
+          let py = cy, pm = cm - 1; if (pm < 1) { pm = 12; py--; }
+          prev = savingsAtEndOfMonth(py + '-' + String(pm).padStart(2, '0'));
+        }
+        chain[i] = prev * (1 + cashRateMonthly) + residueForMonth(i);
+      }
+      running = chain[i];
     } else {
-      // Current or future: prior balance grows by one month's interest, plus residue
+      // Future: prior balance grows by one month's interest, plus residue
       let prev;
       if (running !== null) {
         prev = running;
@@ -7698,77 +7814,10 @@ function renderBudget() {
       // Salary is a transit account that zeroes at month end, so it pays the card down first
       // and savings funds only the shortfall. Because this derives from the live balance,
       // every further expense logged before month end lowers it automatically.
-      // v2026.05.07.06 — the current month's close is derived from the two LIVE balances
-      // shown at the top of the sheet, which is what a reader expects of a bottom line.
-      //
-      //   close = savings now + salary now
-      //           + income still expected this month
-      //           - spending still expected this month
-      //           - credit card outstanding
-      //           - investment contributions still due
-      //
-      // The salary account is included because it is a transit account: it zeroes at month
-      // end and its residue sweeps into savings. Earlier versions left it out to avoid
-      // double-counting salary, which was right for the chain-based formula they used
-      // (previous close + whole-month flows already counted the salary as income) but wrong
-      // here — starting from live balances, income ALREADY RECEIVED sits in that account, so
-      // only income still to arrive is added on top. Nothing is counted twice.
-      //
-      // Balance adjustments need no special term: they are already inside the live balances.
-      // That was the flaw in the previous version, where the reverse-walked prior close
-      // stripped an adjustment out and surplus never put it back, so a +Rs 11,000 credit
-      // changed nothing.
-      const _liveSav = savAcc ? (Number(savAcc.openingBalance) || 0) : 0;
-      const _liveSal = salAcc ? (Number(salAcc.openingBalance) || 0) : 0;
-      const _liveCc  = ccAcc  ? Math.abs(Number(ccAcc.openingBalance) || 0) : 0;
-
-      // What has already happened this month, from the journal.
-      let _cardCharged = 0, _incomeIn = 0, _paidInCash = 0, _redeemTaken = 0;
-      const _invPaidById = {};
-      (state.transactions || []).forEach(tx => {
-        if (!tx || !tx.date || tx.date.slice(0, 7) !== ym) return;
-        const amt = Number(tx.amount) || 0;
-        if (tx.type === 'expense') {
-          // Card spending has not left cash yet; it leaves when the card is settled, and is
-          // therefore covered by the outstanding balance below rather than counted here.
-          if (tx.accountId === 'cc') _cardCharged += amt; else _paidInCash += amt;
-        } else if (tx.type === 'income') {
-          _incomeIn += amt;
-        } else if (tx.type === 'investment_contrib') {
-          _invPaidById[tx.investmentId] = (_invPaidById[tx.investmentId] || 0) + amt;
-        } else if (tx.type === 'investment_redemption') {
-          _redeemTaken += amt;
-          // Logged redemptions are folded into totalIncome further up (the Inflows
-          // "Redemptions" row), so they must count as income ALREADY RECEIVED. Omitting them
-          // here left them inside "income still to come" while the cash was already sitting
-          // in the live balance, and a Rs 1,00,000 redemption raised the close by Rs 2,00,000.
-          _incomeIn += amt;
-        }
-      });
-
-      // Remaining contributions are worked out PER INSTRUMENT, never across the group. On a
-      // group total, an ad-hoc lump into one instrument would mask a scheduled SIP that has
-      // not gone out of another: Rs 2,00,000 into an FD against an unpaid Rs 33,500 SIP gives
-      // max(0, 33500 - 200000) = 0, and the close is overstated by the SIP. The ad-hoc amount
-      // needs no term of its own — it has already left the live balance.
-      let _remainingInv = 0;
-      (p.investments || []).forEach(inv => {
-        const sched = (p.contribPerMonth[inv.id + '_' + inv.name] || [])[sliceFrom + i] || 0;
-        _remainingInv += Math.max(0, sched - (_invPaidById[inv.id] || 0));
-      });
-
-      // Money due back OUT of investments this month (an instrument maturing or closing) is
-      // cash arriving, so it belongs in the close. Redemptions already taken are excluded —
-      // they are in the live balance — and they sit outside totalIncome, so counting them
-      // here cannot double up with the income term.
-      const _remainingRedeem = Math.max(0, ((p.redemptionInflow || [])[sliceFrom + i] || 0) - _redeemTaken);
-
-      const _remainingIncome = Math.max(0, (totalIncome[i] || 0) - _incomeIn);
-      const _remainingSpend  = Math.max(0, (totalExpense[i] || 0) - _paidInCash - _cardCharged);
-
-      _eomSavingsChain[i] = _liveSav + Math.max(0, _liveSal)
-                          + _remainingIncome + _remainingRedeem
-                          - _remainingSpend - _liveCc - _remainingInv;
+      // Current month: one shared implementation, also used by projectSavingsChain so the
+      // Dashboard and Net Worth pages cannot drift away from this sheet again.
+      const _shared = (typeof sharedCurrentMonthClose === 'function') ? sharedCurrentMonthClose(p) : null;
+      _eomSavingsChain[i] = (_shared != null && isFinite(_shared)) ? _shared : (_eomRunning || 0);
       _eomRunning = _eomSavingsChain[i];
     } else {
       const prev = _eomRunning !== null ? _eomRunning : (_eomSavingsChain[i - 1] || 0);
@@ -12438,16 +12487,12 @@ document.addEventListener('keydown', (e) => {
             });
           } catch (e) { /* fall back to the stored figure below */ }
 
-          // The engine does not model manually logged redemptions, so net them off here.
-          const _redeemed = {};
-          (state.transactions || []).forEach(tx => {
-            if (!tx || tx.type !== 'investment_redemption' || !tx.investmentId) return;
-            _redeemed[tx.investmentId] = (_redeemed[tx.investmentId] || 0) + (Number(tx.amount) || 0);
-          });
-
+          // Show exactly what the Projection page's Running Balances row shows for this month
+          // and nothing cleverer. An earlier attempt also subtracted every redemption ever
+          // logged, which drove instruments with redemption history to zero — the projected
+          // balance already reflects the position, so the subtraction was double-counting.
           const opts = (state.investments || []).map(inv => {
-            const projected = (_invNow[inv.id] != null) ? _invNow[inv.id] : (Number(inv.balance) || 0);
-            const bal = Math.max(0, projected - (_redeemed[inv.id] || 0));
+            const bal = (_invNow[inv.id] != null) ? _invNow[inv.id] : (Number(inv.balance) || 0);
             const balTxt = ' · about ' + fmtMoney(bal, true) + ' now';
             return '<option value="' + escapeHtml(inv.id) + '">' + escapeHtml(inv.name) + balTxt + '</option>';
           }).join('');
