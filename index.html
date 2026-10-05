@@ -2336,7 +2336,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.07.06';
+const APP_VERSION = '2026.05.07.08';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -7723,7 +7723,8 @@ function renderBudget() {
       const _liveCc  = ccAcc  ? Math.abs(Number(ccAcc.openingBalance) || 0) : 0;
 
       // What has already happened this month, from the journal.
-      let _cardCharged = 0, _incomeIn = 0, _paidInCash = 0, _invPaid = 0;
+      let _cardCharged = 0, _incomeIn = 0, _paidInCash = 0, _redeemTaken = 0;
+      const _invPaidById = {};
       (state.transactions || []).forEach(tx => {
         if (!tx || !tx.date || tx.date.slice(0, 7) !== ym) return;
         const amt = Number(tx.amount) || 0;
@@ -7734,21 +7735,40 @@ function renderBudget() {
         } else if (tx.type === 'income') {
           _incomeIn += amt;
         } else if (tx.type === 'investment_contrib') {
-          _invPaid += amt;
+          _invPaidById[tx.investmentId] = (_invPaidById[tx.investmentId] || 0) + amt;
+        } else if (tx.type === 'investment_redemption') {
+          _redeemTaken += amt;
+          // Logged redemptions are folded into totalIncome further up (the Inflows
+          // "Redemptions" row), so they must count as income ALREADY RECEIVED. Omitting them
+          // here left them inside "income still to come" while the cash was already sitting
+          // in the live balance, and a Rs 1,00,000 redemption raised the close by Rs 2,00,000.
+          _incomeIn += amt;
         }
       });
 
-      let _schedInv = 0;
+      // Remaining contributions are worked out PER INSTRUMENT, never across the group. On a
+      // group total, an ad-hoc lump into one instrument would mask a scheduled SIP that has
+      // not gone out of another: Rs 2,00,000 into an FD against an unpaid Rs 33,500 SIP gives
+      // max(0, 33500 - 200000) = 0, and the close is overstated by the SIP. The ad-hoc amount
+      // needs no term of its own — it has already left the live balance.
+      let _remainingInv = 0;
       (p.investments || []).forEach(inv => {
-        _schedInv += (p.contribPerMonth[inv.id + '_' + inv.name] || [])[sliceFrom + i] || 0;
+        const sched = (p.contribPerMonth[inv.id + '_' + inv.name] || [])[sliceFrom + i] || 0;
+        _remainingInv += Math.max(0, sched - (_invPaidById[inv.id] || 0));
       });
+
+      // Money due back OUT of investments this month (an instrument maturing or closing) is
+      // cash arriving, so it belongs in the close. Redemptions already taken are excluded —
+      // they are in the live balance — and they sit outside totalIncome, so counting them
+      // here cannot double up with the income term.
+      const _remainingRedeem = Math.max(0, ((p.redemptionInflow || [])[sliceFrom + i] || 0) - _redeemTaken);
 
       const _remainingIncome = Math.max(0, (totalIncome[i] || 0) - _incomeIn);
       const _remainingSpend  = Math.max(0, (totalExpense[i] || 0) - _paidInCash - _cardCharged);
-      const _remainingInv    = Math.max(0, _schedInv - _invPaid);
 
       _eomSavingsChain[i] = _liveSav + Math.max(0, _liveSal)
-                          + _remainingIncome - _remainingSpend - _liveCc - _remainingInv;
+                          + _remainingIncome + _remainingRedeem
+                          - _remainingSpend - _liveCc - _remainingInv;
       _eomRunning = _eomSavingsChain[i];
     } else {
       const prev = _eomRunning !== null ? _eomRunning : (_eomSavingsChain[i - 1] || 0);
@@ -12401,10 +12421,34 @@ document.addEventListener('keydown', (e) => {
         document.getElementById('txAccount').value = tx ? tx.accountId : (lastUsedAccount('investment_redemption') || (state.accounts.find(a=>a.id==='savings')?.id || (state.accounts[0]?.id)));
         const investSel = document.getElementById('txInvestment');
         if (investSel) {
-          // Show current balance per investment so user knows what's available
+          // Show the balance as it stands TODAY, not the figure typed in at setup. inv.balance
+          // is the opening value and ignores every contribution, growth and lifecycle event
+          // since — an FD entered at Rs 1,00,000 can be worth Rs 5,50,000 now, and offering
+          // the old number while asking how much to redeem is actively misleading.
+          const _invNow = {};
+          try {
+            const _pr = runProjection({ scenarios: [] });
+            const _d = new Date();
+            const _nowKey = _d.getFullYear() + '-' + String(_d.getMonth() + 1).padStart(2, '0');
+            let _ix = _pr.isos.indexOf(_nowKey);
+            if (_ix < 0) _ix = 0;
+            (_pr.investments || []).forEach(iv => {
+              const series = _pr.bal[iv.id + '_' + iv.name];
+              if (Array.isArray(series)) _invNow[iv.id] = series[_ix];
+            });
+          } catch (e) { /* fall back to the stored figure below */ }
+
+          // The engine does not model manually logged redemptions, so net them off here.
+          const _redeemed = {};
+          (state.transactions || []).forEach(tx => {
+            if (!tx || tx.type !== 'investment_redemption' || !tx.investmentId) return;
+            _redeemed[tx.investmentId] = (_redeemed[tx.investmentId] || 0) + (Number(tx.amount) || 0);
+          });
+
           const opts = (state.investments || []).map(inv => {
-            const bal = Number(inv.balance) || 0;
-            const balTxt = ' · balance ' + fmtMoney(bal, true);
+            const projected = (_invNow[inv.id] != null) ? _invNow[inv.id] : (Number(inv.balance) || 0);
+            const bal = Math.max(0, projected - (_redeemed[inv.id] || 0));
+            const balTxt = ' · about ' + fmtMoney(bal, true) + ' now';
             return '<option value="' + escapeHtml(inv.id) + '">' + escapeHtml(inv.name) + balTxt + '</option>';
           }).join('');
           investSel.innerHTML = opts || '<option value="">(no investments configured)</option>';
