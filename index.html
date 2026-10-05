@@ -2336,7 +2336,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.07.01';
+const APP_VERSION = '2026.05.07.02';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -5786,11 +5786,33 @@ function renderBudgetActuals() {
   }
 
   // ---- One-time expenses ----
-  // No monthly budget — the allotted amount is always 0, so any journal one-time expense this
-  // month reads as fully "over" (red tube). Only shown when there's a one-time spend this month.
-  if (oneTimeActual > 0) {
-    html += '<div class="budget-section-head">One-time expenses</div>';
-    html += renderBudgetRow('One-time expenses', '#c37b52', oneTimeActual, 0, false, 'onetime', true);
+  // Where the month has planned one-offs, each gets its own tube with its own allotted amount,
+  // exactly as EMIs do: spend claimed against a plan reads as actual-of-planned and only turns
+  // red once it exceeds that plan. Spending with nothing planned behind it keeps the original
+  // behaviour — an allotted amount of zero, so any rupee reads as fully over.
+  {
+    const { planned: _otPlanned, byPlan: _otByPlan, loose: _otLoose } = oneTimeActualsInMonth(month);
+    const _otLooseTotal = _otLoose.reduce((a, x) => a + x.amount, 0);
+    const _otPlannedTotal = _otPlanned.reduce((a, x) => a + x.amount, 0);
+
+    if (_otPlanned.length || oneTimeActual > 0) {
+      html += '<div class="budget-section-head">One-time expenses</div>';
+
+      if (_otPlanned.length) {
+        _otPlanned.forEach(pl => {
+          html += renderBudgetRow(pl.note, '#c37b52', _otByPlan[pl.id] || 0, pl.amount, false, 'onetime:' + pl.id);
+        });
+        if (_otLooseTotal > 0) {
+          html += renderBudgetRow('Unplanned one-time', '#a35c3c', _otLooseTotal, 0, false, 'onetime:unplanned', true);
+        }
+        // Total only earns its place when there is more than one line above it.
+        if (_otPlanned.length + (_otLooseTotal > 0 ? 1 : 0) > 1) {
+          html += renderBudgetRow('One-time · total', '#c37b52', oneTimeActual, _otPlannedTotal, true, 'onetime');
+        }
+      } else {
+        html += renderBudgetRow('One-time expenses', '#c37b52', oneTimeActual, 0, false, 'onetime', true);
+      }
+    }
   }
 
   // ---- Planned savings transfer ----
@@ -5893,6 +5915,14 @@ function renderBudgetRowDetails(filter, month) {
     }
     if (filter === 'onetime') {
       return tx.type === 'expense' && tx.category === 'oneTime';
+    }
+    if (filter.startsWith('onetime:')) {
+      if (tx.type !== 'expense' || tx.category !== 'oneTime') return false;
+      const want = filter.slice(8);
+      const validIds = new Set(plannedOneOffsInMonth(month).map(x => x.id));
+      // An id that no longer resolves counts as unplanned, matching how the sheet treats it.
+      const effective = (tx.linkedOneOffId && validIds.has(tx.linkedOneOffId)) ? tx.linkedOneOffId : 'unplanned';
+      return effective === want;
     }
     if (filter === 'all-emi') {
       return tx.type === 'expense' && tx.category === 'emi';
