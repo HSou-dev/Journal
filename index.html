@@ -2336,7 +2336,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.07.05';
+const APP_VERSION = '2026.05.07.06';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -7698,52 +7698,57 @@ function renderBudget() {
       // Salary is a transit account that zeroes at month end, so it pays the card down first
       // and savings funds only the shortfall. Because this derives from the live balance,
       // every further expense logged before month end lowers it automatically.
-      // v2026.05.07.04 — the current month now closes the same way every FUTURE month does:
-      //      previous close + this month's net flow to savings
-      // The live-anchored version (live balance - card shortfall) looked only at money that
-      // had already moved, so a month could report a large negative net-to-savings and still
-      // close flat. Spending the sheet says is coming has to land somewhere.
+      // v2026.05.07.06 — the current month's close is derived from the two LIVE balances
+      // shown at the top of the sheet, which is what a reader expects of a bottom line.
       //
-      // Note this is algebraically identical to "live balance + (target - what has already
-      // moved)", since live balance = previous close + what has already moved. Using the
-      // previous close is simply the cheaper of the two to compute here.
+      //   close = savings now + salary now
+      //           + income still expected this month
+      //           - spending still expected this month
+      //           - credit card outstanding
+      //           - investment contributions still due
       //
-      // The card term is retained and is NOT double-counting: the outstanding balance is
-      // spending from EARLIER months, which this month's surplus does not contain, so it is
-      // an extra outflow. The salary account is deliberately NOT added — its balance mixes
-      // carried-over cash with this month's salary, which surplus already counts, and adding
-      // it wholesale would double-count the salary.
+      // The salary account is included because it is a transit account: it zeroes at month
+      // end and its residue sweeps into savings. Earlier versions left it out to avoid
+      // double-counting salary, which was right for the chain-based formula they used
+      // (previous close + whole-month flows already counted the salary as income) but wrong
+      // here — starting from live balances, income ALREADY RECEIVED sits in that account, so
+      // only income still to arrive is added on top. Nothing is counted twice.
+      //
+      // Balance adjustments need no special term: they are already inside the live balances.
+      // That was the flaw in the previous version, where the reverse-walked prior close
+      // stripped an adjustment out and surplus never put it back, so a +Rs 11,000 credit
+      // changed nothing.
+      const _liveSav = savAcc ? (Number(savAcc.openingBalance) || 0) : 0;
       const _liveSal = salAcc ? (Number(salAcc.openingBalance) || 0) : 0;
       const _liveCc  = ccAcc  ? Math.abs(Number(ccAcc.openingBalance) || 0) : 0;
-      const _savingsToCc = Math.max(0, _liveCc - Math.max(0, _liveSal));
 
-      // Investment contributions for this month, on the same actual-or-scheduled basis the
-      // expense lines use. Computed here because contribRows is built further down the file.
-      let _invThisMonth = 0;
-      (p.investments || []).forEach(inv => {
-        const sched = (p.contribPerMonth[inv.id + '_' + inv.name] || [])[sliceFrom + i] || 0;
-        let act = 0;
-        (state.transactions || []).forEach(tx => {
-          if (tx.type !== 'investment_contrib' || tx.investmentId !== inv.id) return;
-          if (!tx.date || tx.date.slice(0, 7) !== ym) return;
-          act += Number(tx.amount) || 0;
-        });
-        _invThisMonth += act + Math.max(0, sched - act);
+      // What has already happened this month, from the journal.
+      let _cardCharged = 0, _incomeIn = 0, _paidInCash = 0, _invPaid = 0;
+      (state.transactions || []).forEach(tx => {
+        if (!tx || !tx.date || tx.date.slice(0, 7) !== ym) return;
+        const amt = Number(tx.amount) || 0;
+        if (tx.type === 'expense') {
+          // Card spending has not left cash yet; it leaves when the card is settled, and is
+          // therefore covered by the outstanding balance below rather than counted here.
+          if (tx.accountId === 'cc') _cardCharged += amt; else _paidInCash += amt;
+        } else if (tx.type === 'income') {
+          _incomeIn += amt;
+        } else if (tx.type === 'investment_contrib') {
+          _invPaid += amt;
+        }
       });
 
-      const _netToSavings = (surplus[i] || 0) - _invThisMonth;
+      let _schedInv = 0;
+      (p.investments || []).forEach(inv => {
+        _schedInv += (p.contribPerMonth[inv.id + '_' + inv.name] || [])[sliceFrom + i] || 0;
+      });
 
-      let _prevClose;
-      if (_eomRunning !== null) {
-        _prevClose = _eomRunning;
-      } else {
-        // Current month is first in the window: reverse-walk the preceding calendar month.
-        const [cy, cm] = ym.split('-').map(Number);
-        let py = cy, pm = cm - 1; if (pm < 1) { pm = 12; py--; }
-        _prevClose = _savingsAtEndOfMonth(py + '-' + String(pm).padStart(2, '0'));
-      }
+      const _remainingIncome = Math.max(0, (totalIncome[i] || 0) - _incomeIn);
+      const _remainingSpend  = Math.max(0, (totalExpense[i] || 0) - _paidInCash - _cardCharged);
+      const _remainingInv    = Math.max(0, _schedInv - _invPaid);
 
-      _eomSavingsChain[i] = _prevClose + _netToSavings - _savingsToCc;
+      _eomSavingsChain[i] = _liveSav + Math.max(0, _liveSal)
+                          + _remainingIncome - _remainingSpend - _liveCc - _remainingInv;
       _eomRunning = _eomSavingsChain[i];
     } else {
       const prev = _eomRunning !== null ? _eomRunning : (_eomSavingsChain[i - 1] || 0);
