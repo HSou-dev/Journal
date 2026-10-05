@@ -2243,6 +2243,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       <label class="tx-field" id="txToField" style="display:none;"><span>To</span><select id="txToAccount"></select></label>
       <label class="tx-field" id="txPersonField" style="display:none;"><span>Whose salary?</span><select id="txPerson"><option value="p1">Person 1</option><option value="p2">Person 2</option></select></label>
       <div class="tx-field" id="txCategoryField"><span class="tx-field-label">Category</span><div class="tx-cat-chips" id="txCatChips"></div></div>
+      <div class="tx-field" id="txOneOffLinkField" style="display:none;"><span class="tx-field-label">Counts towards</span><select id="txOneOffLink" style="width:100%;"></select><div id="txOneOffLinkHint" style="font-size:11px;color:var(--ink-muted);margin-top:5px;line-height:1.5;"></div></div>
       <label class="tx-field" id="txInvestField" style="display:none;"><span>Destination investment</span><select id="txInvestment"></select></label>
       <div class="tx-field" id="txAdjDirectionField" style="display:none;"><span class="tx-field-label">Direction</span><div class="tx-cat-chips" id="txAdjDirChips"><div class="tx-cat-chip selected" data-dir="add">+ Add to balance</div><div class="tx-cat-chip" data-dir="subtract">− Subtract from balance</div></div></div>
       <label class="tx-field" id="txAdjHiddenField" style="display:none;align-items:flex-start;flex-direction:row;gap:10px;"><input type="checkbox" id="txAdjHidden" style="margin-top:3px;flex:0 0 auto;width:auto;"><span style="flex:1;font-size:12.5px;line-height:1.4;">Count this as a hidden expense in <em>this month's Misc</em>. Tick this when the adjustment is because you forgot to log spending. Leave it off for pure balance corrections.</span></label>
@@ -2335,7 +2336,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.06.04';
+const APP_VERSION = '2026.05.07.01';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -2640,6 +2641,19 @@ function migrateState(s) {
     if (!Array.isArray(s.deletedCategories)) s.deletedCategories = [];
   }
 
+  // Schema v17: stable ids on one-off income/expense entries. Without an id there is no way
+  // to say "this journal payment counts towards that planned item", so a planned Diwali trip
+  // and the actual spending against it could only ever be added together, never reconciled.
+  if ((s.schemaVersion || 0) < 17) {
+    const stampIds = (arr, prefix) => {
+      (arr || []).forEach((o, i) => {
+        if (o && !o.id) o.id = prefix + Date.now().toString(36) + i.toString(36) + Math.random().toString(36).slice(2, 6);
+      });
+    };
+    stampIds(s.expenseOneOffs, 'xo_');
+    stampIds(s.incomeOneOffs, 'io_');
+  }
+
   // Schema v16: decisions. A DECISION is a question being asked ("should I buy a car,
   // and when?"), as distinct from a SCENARIO, which is an assumed change to the world.
   // Decisions are evaluated against the enabled scenarios, which act as the backdrop.
@@ -2647,7 +2661,7 @@ function migrateState(s) {
     if (!Array.isArray(s.decisions)) s.decisions = [];
   }
 
-  s.schemaVersion = 16;
+  s.schemaVersion = 17;
   return s;
 }
 
@@ -3724,6 +3738,9 @@ function addOneOffRow(containerId, data={}) {
   const isNew = (data && Object.keys(data).length === 0);
   const repeat = isNew ? true : !!data.repeat;
   row.innerHTML = `<div class="field"><label>Month</label><input type="month" data-field="month" value="${data.month||''}" /></div><div class="field"><label>Amount</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="amount" min="0" step="any" value="${data.amount||''}" /></div></div><div class="field"><label>Note <span class="opt">optional</span></label><input type="text" data-field="note" placeholder="e.g. annual bonus" value="${escapeHtml(data.note||'')}" /></div><button class="del-btn" title="Remove">×</button><div class="field" style="grid-column:1 / -1;"><div class="toggle ${repeat?'on':''}" data-field="repeat"><div class="toggle-info"><div class="name">Repeat annually</div><div class="desc">Same month each year, grown at the salary/expense growth rate.</div></div><div class="switch"></div></div></div>`;
+  // The id must survive the editor, which rebuilds the whole array from the DOM on save.
+  // Lose it and every journal link pointing at this item breaks silently.
+  if (data.id) row.setAttribute('data-oneoff-id', data.id);
   row.querySelector('.del-btn').addEventListener('click', () => row.remove());
   const tog = row.querySelector('.toggle[data-field="repeat"]');
   if (tog) tog.querySelector('.switch').addEventListener('click', () => tog.classList.toggle('on'));
@@ -3826,6 +3843,94 @@ function addAccountRow(data={}) {
   document.getElementById('accountList').appendChild(row);
 }
 
+
+/* Which planned one-off expenses fall in a given month, with the inflated amount that
+   applies to THAT occurrence. A repeating item recurs in the same calendar month each year,
+   grown by the expense growth rate, so Diwali 2027 is a separate occurrence from Diwali 2026
+   and the two must never share a budget. Mirrors expandSingleOneOff's arithmetic exactly;
+   if that ever changes, this must change with it. */
+
+/* The "counts towards" picker. Shown only for one-time expenses, and only listing plans
+   that fall in the month of the date chosen — linking a November payment to the October
+   Diwali budget would be meaningless. Each option reports what is already claimed against
+   it, so partial spending is visible at the point of logging rather than only on the sheet. */
+function _refreshOneOffLinkPicker(preselectId) {
+  const field = document.getElementById('txOneOffLinkField');
+  const sel = document.getElementById('txOneOffLink');
+  const hint = document.getElementById('txOneOffLinkHint');
+  if (!field || !sel) return;
+
+  const chip = document.querySelector('#txCatChips .tx-cat-chip.selected');
+  const isOneTime = chip && chip.dataset.cat === 'oneTime';
+  const dateEl = document.getElementById('txDate');
+  const ym = (dateEl && dateEl.value) ? dateEl.value.slice(0, 7) : '';
+
+  if (!isOneTime || !ym) { field.style.display = 'none'; return; }
+
+  const { planned, byPlan } = oneTimeActualsInMonth(ym);
+  if (!planned.length) {
+    field.style.display = 'block';
+    sel.innerHTML = '<option value="">Nothing planned this month</option>';
+    sel.disabled = true;
+    hint.textContent = 'No planned one-off falls in ' + ym + ', so this will show as unplanned spending.';
+    return;
+  }
+
+  sel.disabled = false;
+  const keep = preselectId != null ? preselectId : sel.value;
+  sel.innerHTML = '<option value="">Not linked — unplanned spending</option>' +
+    planned.map(pl => {
+      const used = byPlan[pl.id] || 0;
+      const left = pl.amount - used;
+      return '<option value="' + pl.id + '">' + escapeHtml(pl.note) + ' — ' +
+        fmtMoney(used) + ' of ' + fmtMoney(pl.amount) +
+        (left > 0 ? ' · ' + fmtMoney(left) + ' left' : ' · fully used') + '</option>';
+    }).join('');
+  if (keep) sel.value = keep;
+  field.style.display = 'block';
+
+  const chosen = planned.find(x => x.id === sel.value);
+  hint.textContent = chosen
+    ? 'This payment will count against "' + chosen.note + '" instead of adding on top of it.'
+    : 'Leave unlinked if this is not part of anything you planned.';
+}
+
+function plannedOneOffsInMonth(ym) {
+  if (!ym) return [];
+  const g = (typeof state.expenseGrowthRate === 'number') ? state.expenseGrowthRate : 0.06;
+  const [ty, tm] = ym.split('-').map(Number);
+  const out = [];
+  (state.expenseOneOffs || []).forEach(o => {
+    if (!o || !o.month || !o.amount) return;
+    const [oy, om] = o.month.split('-').map(Number);
+    if (om !== tm) return;
+    if (ty === oy) out.push({ id: o.id, note: o.note || 'One-off expense', amount: Number(o.amount) || 0 });
+    else if (o.repeat && ty > oy) out.push({ id: o.id, note: o.note || 'One-off expense', amount: (Number(o.amount) || 0) * Math.pow(1 + g, ty - oy) });
+  });
+  return out;
+}
+
+/* Journal one-time expenses for a month, split into those claimed against a planned item
+   and those that were not. An id that no longer resolves (the plan was deleted) falls back
+   to unlinked rather than vanishing, so money logged is never lost from the sheet. */
+function oneTimeActualsInMonth(ym) {
+  const planned = plannedOneOffsInMonth(ym);
+  const validIds = new Set(planned.map(x => x.id));
+  const byPlan = {}, loose = [];
+  (state.transactions || []).forEach(tx => {
+    if (!tx || tx.type !== 'expense' || tx.category !== 'oneTime') return;
+    if (!tx.date || tx.date.slice(0, 7) !== ym) return;
+    const amt = Number(tx.amount) || 0;
+    const note = (tx.note || '').trim() || 'One-time expense';
+    if (tx.linkedOneOffId && validIds.has(tx.linkedOneOffId)) {
+      byPlan[tx.linkedOneOffId] = (byPlan[tx.linkedOneOffId] || 0) + amt;
+    } else {
+      loose.push({ note, amount: amt });
+    }
+  });
+  return { planned, byPlan, loose };
+}
+
 function readOneOffs(id) {
   const result = [];
   document.querySelectorAll('#' + id + ' .rep-row').forEach(row => {
@@ -3834,7 +3939,9 @@ function readOneOffs(id) {
     const note = (row.querySelector('[data-field="note"]')||{}).value || '';
     const repeatTog = row.querySelector('.toggle[data-field="repeat"]');
     const repeat = repeatTog ? repeatTog.classList.contains('on') : false;
-    if (amount && month) result.push({ month, amount, note, repeat });
+    const existingId = row.getAttribute('data-oneoff-id');
+    const oid = existingId || ((id === 'incomeOneOffs' ? 'io_' : 'xo_') + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+    if (amount && month) result.push({ id: oid, month, amount, note, repeat });
   });
   return result;
 }
@@ -6817,13 +6924,35 @@ window._openOneTimePopover = function(anchor, cid) {
   if (already && already.getAttribute('data-cid') === cid) return; // second tap on same cell closes it
   const total = data.items.reduce((a, it) => a + (it.amount || 0), 0);
   const rows = data.items
-    .slice().sort((a, b) => (b.amount || 0) - (a.amount || 0))
-    .map(it => `<div class="ot-pop-row"><span class="ot-pop-note">${escapeHtml(it.note)}</span><span class="ot-pop-amt">${fmtMoney(it.amount)}</span></div>`).join('');
+    .slice().sort((a, b) => ((b.planned || b.amount || 0) - (a.planned || a.amount || 0)))
+    .map(it => {
+      // 'planned'   — a future month: only the plan exists yet.
+      // 'tracked'   — spending claimed against a plan: show it as actual of planned, red when over.
+      // 'unplanned' — spending with nothing budgeted behind it.
+      let amtHtml, tag = '';
+      if (it.mode === 'planned') {
+        amtHtml = fmtMoney(it.amount);
+        tag = '<span style="font-size:10px;color:var(--ink-muted);"> planned</span>';
+      } else if (it.mode === 'tracked') {
+        const over = it.amount > it.planned;
+        amtHtml = '<span style="' + (over ? 'color:var(--red);' : '') + '">' + fmtMoney(it.amount) +
+                  '</span><span style="font-size:10px;color:var(--ink-muted);"> of ' + fmtMoney(it.planned) + '</span>';
+        if (over) tag = '<span style="font-size:10px;color:var(--red);"> over</span>';
+      } else {
+        amtHtml = fmtMoney(it.amount);
+        tag = '<span style="font-size:10px;color:var(--ink-muted);"> unplanned</span>';
+      }
+      return `<div class="ot-pop-row"><span class="ot-pop-note">${escapeHtml(it.note)}${tag}</span><span class="ot-pop-amt">${amtHtml}</span></div>`;
+    }).join('');
+  const plannedTot = data.planned || 0;
+  const totalLine = (plannedTot > 0 && total !== plannedTot)
+    ? `<div class="ot-pop-row ot-pop-total"><span>Total</span><span style="${total > plannedTot ? 'color:var(--red);' : ''}">${fmtMoney(total)} <span style="font-size:10px;color:var(--ink-muted);">of ${fmtMoney(plannedTot)}</span></span></div>`
+    : `<div class="ot-pop-row ot-pop-total"><span>Total</span><span>${fmtMoney(total)}</span></div>`;
   const pop = document.createElement('div');
   pop.className = 'ot-popover';
   pop.id = '_otPopover';
   pop.setAttribute('data-cid', cid);
-  pop.innerHTML = `<div class="ot-pop-head"><span>One-time · ${escapeHtml(data.month)}</span><button type="button" class="ot-pop-close" onclick="_closeOneTimePopover()" aria-label="Close">&times;</button></div>${rows}<div class="ot-pop-row ot-pop-total"><span>Total</span><span>${fmtMoney(total)}</span></div>`;
+  pop.innerHTML = `<div class="ot-pop-head"><span>One-time · ${escapeHtml(data.month)}</span><button type="button" class="ot-pop-close" onclick="_closeOneTimePopover()" aria-label="Close">&times;</button></div>${rows}${totalLine}`;
   document.body.appendChild(pop);
   // Position: anchored under the cell on desktop; clamped to the viewport (mobile-safe).
   const r = anchor.getBoundingClientRect();
@@ -7337,7 +7466,11 @@ function renderBudget() {
     // for this month. This flows into the sheet's derived surplus/residue/cash automatically;
     // engine net-worth and projectSavingsChain math (which don't see journal one-times, so no
     // double-count) are untouched.
-    _overlayTotalExpense[i] += (p.oneOffExpSeries[sliceFrom + i] || 0) + (oneTimeActualTotal[ym] || 0);
+    // Past/current months take ACTUALS ONLY. Adding the engine's planned one-off series here
+    // as well is what double-counted a repeating item in its own month — the plan and the
+    // payment against it were both charged. Future months are skipped by the _isFuture
+    // continue above and keep the engine total, which already includes the plan.
+    _overlayTotalExpense[i] += (oneTimeActualTotal[ym] || 0);
   }
   totalExpense = _overlayTotalExpense;
   emiMonthly = _overlayEmiTotal;
@@ -7698,29 +7831,44 @@ function renderBudget() {
   // months with 2+ separate one-offs are expandable to reveal the individual line items.
   const oneTimeCombined = new Array(n).fill(0);
   const oneTimeDetail = Array.from({ length: n }, () => []);
-  (state.expenseOneOffs || []).forEach(o => {
-    const fullArr = expandSingleOneOff(o, expGrowthRate);
-    const slice = fullArr.slice(sliceFrom, sliceTo);
-    slice.forEach((v, i) => {
-      if (v > 0) {
-        oneTimeCombined[i] += v;
-        oneTimeDetail[i].push({ note: o.note || 'One-off expense', amount: v });
-      }
-    });
-  });
-  // Merge journal one-time expenses (past/current) into the same row, so all sources — planned
-  // (Edit-inputs, future) and journaled (past/current) — appear as ONE row. No overlap: Edit-inputs
-  // is future-only and Journal is past/current-only, so a month draws from at most one source
-  // (except legacy planned one-offs left in place, which simply add alongside).
+  // One-time expenses now follow the same actual-vs-planned convention as every other row:
+  //   past    -> what was actually spent
+  //   current -> actual so far, displayed as "actual of planned"
+  //   future  -> the plan
+  // Previously planned amounts were added in EVERY month and journal actuals were added on
+  // top, so a repeating item such as an annual trip was counted twice in its own month. A
+  // payment linked to a plan now CONSUMES that plan instead of adding to it.
+  const oneTimePlannedTot = new Array(n).fill(0);
+  const oneTimeDisplay = new Array(n).fill('');
   for (let i = 0; i < n; i++) {
-    const acts = oneTimeActualByMonth[isos[i]] || [];
-    acts.forEach(a => {
-      oneTimeCombined[i] += a.amount;
-      oneTimeDetail[i].push({ note: a.note, amount: a.amount });
-    });
+    const ym = isos[i];
+    const { planned, byPlan, loose } = oneTimeActualsInMonth(ym);
+    const plannedTot = planned.reduce((a, x) => a + x.amount, 0);
+    const linkedTot  = planned.reduce((a, x) => a + (byPlan[x.id] || 0), 0);
+    const looseTot   = loose.reduce((a, x) => a + x.amount, 0);
+    const actualTot  = linkedTot + looseTot;
+    oneTimePlannedTot[i] = plannedTot;
+
+    if (_isFuture(i)) {
+      oneTimeCombined[i] = plannedTot;
+      planned.forEach(pl => oneTimeDetail[i].push({ note: pl.note, amount: pl.amount, planned: pl.amount, mode: 'planned' }));
+    } else {
+      oneTimeCombined[i] = actualTot;
+      planned.forEach(pl => {
+        const got = byPlan[pl.id] || 0;
+        if (got > 0 || _isCurrent(i)) {
+          oneTimeDetail[i].push({ note: pl.note, amount: got, planned: pl.amount, mode: 'tracked' });
+        }
+      });
+      loose.forEach(a => oneTimeDetail[i].push({ note: a.note, amount: a.amount, planned: 0, mode: 'unplanned' }));
+    }
+    oneTimeDisplay[i] = _isCurrent(i) && plannedTot > 0
+      ? fmtDual(oneTimeCombined[i], plannedTot)
+      : fmtMoney(oneTimeCombined[i]);
   }
-  if (oneTimeCombined.some(v => v > 0)) {
-    expenseRows.push({ oneTime: true, label: 'One-time expenses', values: oneTimeCombined, detail: oneTimeDetail });
+  if (oneTimeCombined.some(v => v > 0) || oneTimePlannedTot.some(v => v > 0)) {
+    expenseRows.push({ oneTime: true, label: 'One-time expenses', values: oneTimeCombined,
+                       detail: oneTimeDetail, display: oneTimeDisplay, plannedTot: oneTimePlannedTot });
   }
 
   document.getElementById('budgetOutflows').innerHTML =
@@ -7732,12 +7880,13 @@ function renderBudget() {
         cellHtml = r.values.map((v, i) => {
           const items = r.detail[i] || [];
           const base = `num ${neg(v)}${_isCurrent(i) ? ' current-month' : ''}`;
+          const shown = (r.display && r.display[i]) ? r.display[i] : fmtMoney(v);
           if (items.length >= 1) {
             const cid = 'ot' + i;
-            _otReg[cid] = { month: labels[i], items };
-            return `<td class="${base} ot-cell" data-col="${i}"><span class="ot-total" onclick="_openOneTimePopover(this,'${cid}')">${fmtMoney(v)} <span class="ot-caret">&#9656;</span></span></td>`;
+            _otReg[cid] = { month: labels[i], items, planned: (r.plannedTot || [])[i] || 0, actual: v };
+            return `<td class="${base} ot-cell" data-col="${i}"><span class="ot-total" onclick="_openOneTimePopover(this,'${cid}')">${shown} <span class="ot-caret">&#9656;</span></span></td>`;
           }
-          return `<td class="${base}" data-col="${i}">${fmtMoney(v)}</td>`;
+          return `<td class="${base}" data-col="${i}">${shown}</td>`;
         }).join('');
       } else {
         cellHtml = r.overlay ? cellsOverlay(r.overlay) : cells(r.values);
@@ -12028,6 +12177,9 @@ document.addEventListener('keydown', (e) => {
       } else {
         type = typeOrId;
       }
+      // Carry an existing link into the picker, which is rebuilt asynchronously when the
+      // category chips render. Cleared for new entries so a stale id can't leak across.
+      window._txPendingLinkId = (isEdit && tx && tx.linkedOneOffId) ? tx.linkedOneOffId : null;
       this.populate(type, tx);
       // Optional prefill (e.g. from the Instruments page Redeem action): preselect the
       // investment, default the amount (editable), and set the date.
@@ -12048,6 +12200,16 @@ document.addEventListener('keydown', (e) => {
           const aEl = document.getElementById('txAccount');
           if (aEl) aEl.value = prefill.accountId;
         }
+      }
+      const _dEl = document.getElementById('txDate');
+      if (_dEl && !_dEl.__oneOffHooked) {
+        _dEl.addEventListener('change', () => _refreshOneOffLinkPicker());
+        _dEl.__oneOffHooked = true;
+      }
+      const _lSel = document.getElementById('txOneOffLink');
+      if (_lSel && !_lSel.__hooked) {
+        _lSel.addEventListener('change', () => _refreshOneOffLinkPicker(_lSel.value));
+        _lSel.__hooked = true;
       }
       this.overlay().classList.add('show');
       document.body.style.overflow = 'hidden';
@@ -12172,10 +12334,12 @@ document.addEventListener('keydown', (e) => {
             + '<div class="tx-cat-chip' + (chosenCat === 'oneTime' ? ' selected' : '') + '" data-cat="oneTime" title="A single non-recurring expense — appears in the One-time expenses row on the projection sheet">One-time expense</div>';
         }
         document.getElementById('txCatChips').innerHTML = chipHtml;
+        setTimeout(() => _refreshOneOffLinkPicker(window._txPendingLinkId), 0);
         document.querySelectorAll('#txCatChips .tx-cat-chip').forEach(chip => {
           chip.addEventListener('click', () => {
             document.querySelectorAll('#txCatChips .tx-cat-chip').forEach(c => c.classList.remove('selected'));
             chip.classList.add('selected');
+            _refreshOneOffLinkPicker();
             // If user picks an EMI chip, auto-fill the amount with the scheduled EMI value
             // (only when amount field is empty or matches a different EMI's amount).
             if (chip.dataset.cat === 'emi' && chip.dataset.emiId) {
@@ -12264,6 +12428,11 @@ document.addEventListener('keydown', (e) => {
         // EMI selection: store the specific EMI id so we can route it in budget actuals.
         if (category === 'emi' && catChip && catChip.dataset.emiId) {
           tx.emiId = catChip.dataset.emiId;
+        }
+        if (category === 'oneTime') {
+          const linkSel = document.getElementById('txOneOffLink');
+          const linkVal = (linkSel && !linkSel.disabled) ? linkSel.value : '';
+          if (linkVal) tx.linkedOneOffId = linkVal; else tx.linkedOneOffId = null;
         }
         // For salary income in partner mode, capture which person the salary belongs to.
         if (type === 'income' && category === 'salary' && state.mode === 'partner') {
