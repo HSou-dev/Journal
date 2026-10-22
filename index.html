@@ -2336,7 +2336,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.09.01';
+const APP_VERSION = '2026.05.09.02';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -6099,12 +6099,8 @@ function renderDashboard() {
   // NOT the raw p.cashSeries baked into p.netWorth. Recompute the same way here so
   // the Dashboard and Net Worth page never disagree.
   const _dashCashChain = (typeof projectSavingsChain === 'function') ? projectSavingsChain(p) : null;
-  function _dashNetWorthAt(i) {
-    const inv = (p.investments || []).reduce((a, v) => a + ((p.bal[v.id + '_' + v.name] || [])[i] || 0), 0);
-    const liab = (p.liabSeries || [])[i] || 0;
-    const cash = _dashCashChain ? (_dashCashChain[i] || 0) : ((p.cashSeries || [])[i] || 0);
-    return inv + cash + liab;
-  }
+  const _dashNwSeries = sharedNetWorthSeries(p);
+  function _dashNetWorthAt(i) { return _dashNwSeries[i] || 0; }
   const nwToday = _dashNetWorthAt(todayIdx);
   // Full chain-adjusted net worth series, so the trajectory chart, annual review,
   // and corpus projection all use the SAME definition as the Net Worth page.
@@ -6831,6 +6827,30 @@ function sharedCurrentMonthClose(p) {
   return liveSav + Math.max(0, liveSal)
        + remainingIncome + remainingRedeem
        - remainingSpend - liveCc - remainingInv;
+}
+
+
+/* ============================================================================
+   SHARED: the net worth series, for every page that rebuilds it from parts.
+   ----------------------------------------------------------------------------
+   The Dashboard and the Net Worth page both reconstruct net worth rather than
+   using p.netWorth, because they need the corrected savings chain rather than the
+   engine's raw cashSeries. Each did so with its own inline expression, and both
+   omitted property bought inside a scenario — so enabling a Rs 1 crore land
+   purchase LOWERED reported net worth, the asset having been computed by the
+   engine and then discarded on the way to the screen.
+   One function, so a sixth variant cannot drift away again.
+   ========================================================================== */
+function sharedNetWorthSeries(p) {
+  const chain = (typeof projectSavingsChain === 'function') ? projectSavingsChain(p) : null;
+  return p.isos.map((ym, i) => {
+    const inv = (p.investments || []).reduce((a, v) => a + ((p.bal[v.id + '_' + v.name] || [])[i] || 0), 0);
+    const cash = chain ? (chain[i] || 0) : ((p.cashSeries || [])[i] || 0);
+    const liab = (p.liabSeries || [])[i] || 0;
+    const scAsset = (p.scAssetSeries || [])[i] || 0;   // property owned via a scenario
+    const scLiab  = (p.scLiabSeries  || [])[i] || 0;   // loan still owed on it (negative)
+    return inv + cash + liab + scAsset + scLiab;
+  });
 }
 
 function projectSavingsChain(p) {
@@ -8742,12 +8762,9 @@ function renderNetWorth() {
   // source of truth: it reverse-walks past months to true closing balances and projects
   // forward with monthly cash interest + residue.
   const adjustedCashSeries = projectSavingsChain(p);
-  // Net worth = investments (engine bal) + savings chain + liabilities, per month.
-  const adjustedNetWorth = p.isos.map((ym, i) => {
-    const inv = (p.investments || []).reduce((a, v) => a + ((p.bal[v.id + '_' + v.name] || [])[i] || 0), 0);
-    const liab = p.liabSeries[i] || 0;
-    return inv + adjustedCashSeries[i] + liab;
-  });
+  // Investments + savings chain + liabilities + any property bought in a scenario,
+  // via the shared helper so this page cannot drift from the Dashboard.
+  const adjustedNetWorth = sharedNetWorthSeries(p);
 
   const nwAtDate = adjustedNetWorth[idx] || 0;
   const cashAtDate = adjustedCashSeries[idx] || 0;
