@@ -2336,7 +2336,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.08.02';
+const APP_VERSION = '2026.05.08.03';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -9717,6 +9717,18 @@ function _dcLiquidSeries(proj) {
   for (let i = 0; i < n; i++) {
     out[i] = (chain && isFinite(chain[i])) ? chain[i] : (proj.cashSeries[i] || 0);
   }
+  const inv = _dcLiquidInvSeries(proj);
+  for (let i = 0; i < n; i++) out[i] += inv[i];
+  return out;
+}
+
+/* The liquid-investment component on its own. Needed so the UI can split "liquid money"
+   into cash and investments without deriving one by subtracting the other: that derivation
+   silently broke when the cash side moved to the shared chain, and reported the difference
+   between two unrelated series as a negative investment balance. */
+function _dcLiquidInvSeries(proj) {
+  const n = proj.isos.length;
+  const out = new Array(n).fill(0);
   (proj.investments || []).forEach(inv => {
     if (!inv || !inv.liquid) return;
     const series = proj.bal[inv.id + '_' + inv.name];
@@ -9780,6 +9792,7 @@ function evaluateDecisionAt(dec, appetiteKey, monthIso) {
   // once-off lakh-scale outlay recurred every month.
   const oneOffs = _dcOneOffSeries(withD);
   const liquid  = _dcLiquidSeries(withD);
+  const liqInv  = _dcLiquidInvSeries(withD);
 
   const cats = (typeof getExpenseCats === 'function') ? getExpenseCats() : [];
 
@@ -9813,8 +9826,11 @@ function evaluateDecisionAt(dec, appetiteKey, monthIso) {
           income, surplus, preEmi, cash, floor, outflow, lump,
           p1: withD.p1Series[i] || 0, p2: withD.p2Series[i] || 0,
           household, baseEmis, otherScen,
-          cashOnly: withD.cashSeries[i] || 0,
-          liquidInv: (liquid[i] || 0) - (withD.cashSeries[i] || 0),
+          // Split taken from the two components directly. Deriving cash as
+          // (liquid - cashSeries) mixed the shared chain with the raw engine series and
+          // produced a negative investment figure equal to the gap between them.
+          cashOnly: (liquid[i] || 0) - (liqInv[i] || 0),
+          liquidInv: liqInv[i] || 0,
           scenAt: _dcScenAt(withD, i, '__dc__')
         };
       }
