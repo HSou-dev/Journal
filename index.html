@@ -2336,7 +2336,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.09.03';
+const APP_VERSION = '2026.05.09.04';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3225,6 +3225,10 @@ function _calcEvaluate(expr) {
 function _calcPromote(el) {
   if (!el || el.dataset.calcReady === '1') return;
   if (el.tagName !== 'INPUT') return;
+  // Opt-out for small pre-filled numbers such as interest rates. Promotion rewrites the
+  // field to type=text so expressions can be typed, which also removes the up/down arrows
+  // and makes any downstream `input.type === 'number'` check fail.
+  if (el.dataset.plainNumber === '1') return;
   const t = (el.getAttribute('type') || '').toLowerCase();
   if (t !== 'number' && t !== 'text') return;
   // Switch to text + decimal keyboard on mobile
@@ -3454,7 +3458,7 @@ window._getNumpadPref = () => {
     // money fields starting from zero but mangles a small pre-filled rate: tapping 8 on a
     // field reading "6.0" gives "6.08", not 8. It also sets readOnly, which disables the
     // native up/down arrows. Rate fields opt out and keep the normal control.
-    if (el.dataset.noNumpad === '1') return;
+    if (el.dataset.plainNumber === '1') return;
     // Don't intercept readonly inputs that aren't ours (e.g. disabled fields)
     if (el.readOnly && el.dataset.numpadActive !== '1') return;
     el.dataset.numpadActive = '1';
@@ -9073,7 +9077,7 @@ function renderScenarioFields(sc) {
       </div>
       <div class="grid-2" style="gap:10px;margin-top:4px;">
         <div class="field"><label>Loan tenure (years)</label><input type="number" data-sc-param="loanYears" min="0" step="1" value="${p.loanYears||0}" data-emi-input /></div>
-        <div class="field"><label>Loan rate (% p.a.)</label><input type="number" data-sc-param="loanRate" min="0" max="50" step="0.05" value="${((p.loanRate||0)*100).toFixed(2)}" data-emi-input data-emi-rate data-no-numpad="1" /></div>
+        <div class="field"><label>Loan rate (% p.a.)</label><input type="number" data-sc-param="loanRate" min="0" max="50" step="0.05" value="${((p.loanRate||0)*100).toFixed(2)}" data-emi-input data-emi-rate data-plain-number="1" /></div>
       </div>
       ${(function(){
         const assetDefault = { house:true, land:true, car:false, other:false }[kindSel] || false;
@@ -9088,7 +9092,7 @@ function renderScenarioFields(sc) {
           </div>
           <div class="field" style="margin-top:10px;${isAsset?'':'display:none;'}" id="scAssetGrowthWrap">
             <label>Value grows by (% a year)</label>
-            <div class="inline-prefix" data-prefix="%"><input type="number" data-sc-param="assetGrowthPct" min="-20" max="30" step="0.5" value="${growthPct}" data-no-numpad="1" /></div>
+            <div class="inline-prefix" data-prefix="%"><input type="number" data-sc-param="assetGrowthPct" min="-20" max="30" step="0.5" value="${growthPct}" data-plain-number="1" /></div>
             <div style="font-size:11.5px;color:var(--ink-muted);margin-top:5px;line-height:1.55;">Applied monthly from the purchase month. This is your assumption, not a forecast — and it ignores stamp duty and registration, roughly 6–7% in Karnataka, which you never get back.</div>
           </div>
         </div>`;
@@ -9455,7 +9459,16 @@ function readScenarioEditFields(sc) {
   sc.params = sc.params || {};
   wrap.querySelectorAll('[data-sc-param]').forEach(input => {
     const key = input.dataset.scParam;
-    if (input.type === 'number') {
+    // Do NOT test input.type here. The calculator promotes numeric fields to type=text on
+    // focus so expressions can be typed, so by the time this runs the type has changed and
+    // a plain type check silently skips every conversion below — which is how an edited
+    // loan rate of 8.5 was being stored as 8.5 rather than 0.085, and why edits to the
+    // growth rate appeared to do nothing at all.
+    const promoted = input.dataset.calcReady === '1';
+    const inputMode = (input.getAttribute('inputmode') || '').toLowerCase();
+    const isNumericField = input.type === 'number' || promoted ||
+                           inputMode === 'decimal' || inputMode === 'numeric';
+    if (isNumericField) {
       let v = Number(input.value) || 0;
       // Rates are entered as percentages and stored as decimals. Clamp to the field's own
       // declared range before converting: HTML min/max are not enforced for values set
