@@ -2336,7 +2336,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.08.03';
+const APP_VERSION = '2026.05.09.01';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3478,6 +3478,10 @@ function computeEMI(principal, annualRate, years) {
 function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseGrowth, baseIncomeSeries, baseExpenseSeries) {
   const incomeDelta = new Array(n).fill(0);
   const expenseDelta = new Array(n).fill(0);
+  // Scenario-owned assets (a property bought) and the debt still owed against them.
+  // liabDelta is negative, matching liabSeries, which net worth ADDS.
+  const assetDelta = new Array(n).fill(0);
+  const liabDelta = new Array(n).fill(0);
   const incomeMul = new Array(n).fill(1);
   const expenseMul = new Array(n).fill(1);
   const contribMul = new Array(n).fill(1);
@@ -3527,6 +3531,44 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
             expenseDelta[i] += emi;
           }
           scRows.push({ label: 'EMI', kind: 'expense', values: emiRow });
+        }
+
+        // ---- What you now OWN, and what you still OWE (v2026.05.09.01) ----
+        // Previously a purchase was only ever an outflow: a Rs 1cr plot bought with a 20-year
+        // loan left net worth Rs 2.8cr lower at the end and credited nothing, as though the
+        // land did not exist. Two series fix that, and BOTH are required. Adding the asset
+        // without the debt would swing net worth up by the whole borrowed amount on day one,
+        // a larger error than the original and in the flattering direction. With both, a
+        // leveraged purchase correctly moves net worth by roughly nothing at the moment of
+        // purchase: asset up, debt up, cash down.
+        const assetKinds = { house: true, land: true, car: false, other: false };
+        const treatAsAsset = (p.isAsset != null) ? !!p.isAsset : !!assetKinds[p.purchaseKind];
+        if (treatAsAsset && cost > 0) {
+          const growth = (p.assetGrowth != null) ? Number(p.assetGrowth) : 0.06;
+          const mg = Math.pow(1 + growth, 1 / 12);
+          const assetRow = new Array(n).fill(0);
+          for (let i = idx; i < n; i++) {
+            assetRow[i] = cost * Math.pow(mg, i - idx);
+            assetDelta[i] += assetRow[i];
+          }
+          scRows.push({ label: 'Value owned', kind: 'asset', values: assetRow });
+
+          // Outstanding loan, amortised month by month. Stored negative to match the sign
+          // convention of liabSeries, which net worth adds rather than subtracts.
+          if (loanAmt > 0 && loanYears > 0) {
+            const emi = computeEMI(loanAmt, loanRate, loanYears);
+            const r = loanRate / 12;
+            const endIdx = Math.min(n - 1, idx + loanYears * 12 - 1);
+            const debtRow = new Array(n).fill(0);
+            let bal = loanAmt;
+            for (let i = idx; i <= endIdx; i++) {
+              const interest = bal * r;
+              bal = Math.max(0, bal + interest - emi);
+              debtRow[i] = -bal;
+              liabDelta[i] += -bal;
+            }
+            scRows.push({ label: 'Loan outstanding', kind: 'liability', values: debtRow });
+          }
         }
       }
     } else if (sc.type === 'sabbatical') {
@@ -3726,7 +3768,7 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
     }
   });
 
-  return { incomeDelta, expenseDelta, incomeMul, expenseMul, contribMul, breakdowns };
+  return { incomeDelta, expenseDelta, assetDelta, liabDelta, incomeMul, expenseMul, contribMul, breakdowns };
 }
 
 function addOneOffRow(containerId, data={}) {
@@ -5206,16 +5248,22 @@ function runProjection(overrides={}) {
     accounts.forEach(a => { if (a.type === 'liability') liabSeries[i] += accountBal[a.id][i]; });
   }
 
+  // Property bought inside a scenario, and the loan still outstanding against it. Both are
+  // kept on the result so the post-processing passes below, which rebuild net worth from
+  // scratch, can add them back rather than silently dropping them.
+  const scAssetSeries = (scEffects.assetDelta || new Array(n).fill(0)).slice();
+  const scLiabSeries  = (scEffects.liabDelta  || new Array(n).fill(0)).slice();
+
   const netWorth = new Array(n).fill(0);
   for (let i = 0; i < n; i++) {
     investments.forEach(inv => { netWorth[i] += bal[inv.id + '_' + inv.name][i]; });
-    netWorth[i] += cashSeries[i] + liabSeries[i];
+    netWorth[i] += cashSeries[i] + liabSeries[i] + scAssetSeries[i] + scLiabSeries[i];
   }
 
   const cumSurplus = []; let cs = 0;
   for (const s of surplus) { cs += s; cumSurplus.push(cs); }
 
-  return { months, labels:months.map(m=>m.label), isos:months.map(m=>m.iso), totalIncome, totalExpense, surplus, cumSurplus, emiMonthly, investments, bal, netWorth, contribSeries, contribPerMonth, accounts, accountBal, cashSeries, liabSeries, cashRate, salaryMul, expGrowthMul, p1Series, p2Series, oneOffIncSeries, expCategorySeries, oneOffExpSeries, cashContribSeries, growContrib, redemptionInflow, invTimeline, scenarioBreakdowns: scEffects.breakdowns };
+  return { months, labels:months.map(m=>m.label), isos:months.map(m=>m.iso), totalIncome, totalExpense, surplus, cumSurplus, emiMonthly, investments, bal, netWorth, contribSeries, contribPerMonth, accounts, accountBal, cashSeries, liabSeries, cashRate, salaryMul, expGrowthMul, p1Series, p2Series, oneOffIncSeries, expCategorySeries, oneOffExpSeries, cashContribSeries, growContrib, redemptionInflow, invTimeline, scAssetSeries, scLiabSeries, scenarioBreakdowns: scEffects.breakdowns };
 }
 
 // ---- PATCH: Fix runProjection for correct increment logic, cash balance, and opening balances ----
@@ -5369,7 +5417,8 @@ function runProjection(overrides={}) {
     for (let i = 0; i < n; i++) {
       result.netWorth[i] = 0;
       (result.investments || []).forEach(inv => { result.netWorth[i] += (result.bal[inv.id+'_'+inv.name] || [])[i] || 0; });
-      result.netWorth[i] += fixedCash[i] + liabSeries[i];
+      result.netWorth[i] += fixedCash[i] + liabSeries[i]
+                          + ((result.scAssetSeries || [])[i] || 0) + ((result.scLiabSeries || [])[i] || 0);
     }
 
     // ---- FIX 6: Actuals overlay ----
@@ -5514,7 +5563,8 @@ function runProjection(overrides={}) {
     for (let i = 0; i < n; i++) {
       result.netWorth[i] = 0;
       (result.investments || []).forEach(inv => { result.netWorth[i] += (result.bal[inv.id+'_'+inv.name] || [])[i] || 0; });
-      result.netWorth[i] += fixedCash2[i] + (result.liabSeries[i] || 0);
+      result.netWorth[i] += fixedCash2[i] + (result.liabSeries[i] || 0)
+                          + ((result.scAssetSeries || [])[i] || 0) + ((result.scLiabSeries || [])[i] || 0);
     }
     result.currentMonthIdx = result.isos.indexOf(nowYM);
   }
@@ -9003,6 +9053,24 @@ function renderScenarioFields(sc) {
         <div class="field"><label>Loan tenure (years)</label><input type="number" data-sc-param="loanYears" min="0" step="1" value="${p.loanYears||0}" data-emi-input /></div>
         <div class="field"><label>Loan rate (% p.a.)</label><input type="number" data-sc-param="loanRate" min="0" max="50" step="0.05" value="${((p.loanRate||0)*100).toFixed(2)}" data-emi-input data-emi-rate /></div>
       </div>
+      ${(function(){
+        const assetDefault = { house:true, land:true, car:false, other:false }[kindSel] || false;
+        const isAsset = (p.isAsset != null) ? !!p.isAsset : assetDefault;
+        const growthPct = ((p.assetGrowth != null ? Number(p.assetGrowth) : 0.06) * 100).toFixed(1);
+        return `<div style="margin-top:14px;">
+          <div class="toggle ${isAsset?'on':''}" data-sc-toggle="isAsset">
+            <div class="toggle-info">
+              <div class="name">You still own it afterwards</div>
+              <div class="desc">Counts the purchase as something you own, so it adds to net worth, with the loan still owed shown against it. Leave off for anything you consume rather than keep.</div>
+            </div><div class="switch"></div>
+          </div>
+          <div class="field" style="margin-top:10px;${isAsset?'':'display:none;'}" id="scAssetGrowthWrap">
+            <label>Value grows by (% a year)</label>
+            <div class="inline-prefix" data-prefix="%"><input type="number" data-sc-param="assetGrowthPct" min="-20" max="30" step="0.5" value="${growthPct}" /></div>
+            <div style="font-size:11.5px;color:var(--ink-muted);margin-top:5px;line-height:1.55;">Applied monthly from the purchase month. This is your assumption, not a forecast — and it ignores stamp duty and registration, roughly 6–7% in Karnataka, which you never get back.</div>
+          </div>
+        </div>`;
+      })()}
       <div id="scEmiPreview" style="margin-top:14px;padding:14px 16px;background:var(--accent-soft);border:1px solid var(--line);border-radius:10px;font-size:13px;"></div>
       <div style="margin-top:10px;font-size:12px;color:var(--ink-muted);font-style:italic;font-family:'Fraunces',serif;">Down payment lands as a one-off expense in the purchase month. The EMI runs for the full tenure starting that month, then stops automatically.</div>`;
   }
@@ -9212,7 +9280,14 @@ function saveTimelineEditor() {
 function bindScenarioFieldHandlers(sc) {
   // Toggle handlers for sabbatical etc.
   document.querySelectorAll('#scEditFields .toggle[data-sc-toggle]').forEach(tog => {
-    tog.querySelector('.switch').addEventListener('click', () => tog.classList.toggle('on'));
+    tog.querySelector('.switch').addEventListener('click', () => {
+      tog.classList.toggle('on');
+      // The growth rate only means anything when the purchase is kept, so it follows the toggle.
+      if (tog.dataset.scToggle === 'isAsset') {
+        const w = document.getElementById('scAssetGrowthWrap');
+        if (w) w.style.display = tog.classList.contains('on') ? '' : 'none';
+      }
+    });
   });
   // Frequency dropdown: live-toggle End month field visibility without re-rendering.
   // When freq=once, end month is meaningless; we hide it for cleaner UX.
@@ -9362,6 +9437,9 @@ function readScenarioEditFields(sc) {
       let v = Number(input.value) || 0;
       // loanRate input is shown as percent (e.g. "8.50") but stored as decimal (0.085).
       if (key === 'loanRate') v = v / 100;
+      // Same for the asset growth rate, which is entered as a percent but stored decimal
+      // under a different key so the raw percent never leaks into saved state.
+      if (key === 'assetGrowthPct') { sc.params.assetGrowth = v / 100; return; }
       sc.params[key] = v;
     } else {
       sc.params[key] = input.value;
