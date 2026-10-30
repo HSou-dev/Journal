@@ -2336,7 +2336,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.10.01';
+const APP_VERSION = '2026.05.10.03';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -6839,9 +6839,17 @@ function sharedCurrentMonthClose(p) {
     overspend += Math.max(0, (actualByEmi[e.id] || 0) - (Number(e.amount) || 0));
   });
   if (typeof oneTimeActualsInMonth === 'function') {
+    // One-time expenses are ONE POT, compared in total rather than item by item. A one-time
+    // budget is a capacity: spending on something that was not individually planned still
+    // consumes that capacity and does not enlarge it. Treating each plan separately and
+    // adding unplanned spending on top inflated the month's expected outflow — a Rs 1.14L
+    // budget with Rs 73K spent, part of it untagged, was reporting more than Rs 1.14L of
+    // expected spend. The month only gets worse once the TOTAL exceeds the plan.
     const ot = oneTimeActualsInMonth(ym);
-    ot.planned.forEach(pl => { overspend += Math.max(0, (ot.byPlan[pl.id] || 0) - pl.amount); });
-    ot.loose.forEach(x => { overspend += x.amount; });   // no budget behind it at all
+    const otPlan = ot.planned.reduce((a, x) => a + x.amount, 0);
+    const otActual = ot.planned.reduce((a, x) => a + (ot.byPlan[x.id] || 0), 0)
+                   + ot.loose.reduce((a, x) => a + x.amount, 0);
+    overspend += Math.max(0, otActual - otPlan);
   }
 
   const plannedExpense = (p.totalExpense && p.totalExpense[i]) || 0;
@@ -6867,9 +6875,15 @@ function sharedCurrentMonthClose(p) {
   const remainingIncome = Math.max(0, countedIncome - incomeIn);
   const remainingSpend  = Math.max(0, countedExpense - paidInCash - cardCharged);
 
+  // The credit card is NOT subtracted here. It is a LIABILITY, not a pending cash outflow:
+  // the balance already appears in its own live row and in liabSeries, which net worth adds.
+  // Subtracting it from cash as well double-counted it — a Rs 10,000 charge reduced cash by
+  // Rs 10,000 and net worth by Rs 20,000. Card-charged expenses are still excluded from
+  // remainingSpend above, so they are not counted there either; they reduce the balance only
+  // when the bill is actually paid, which arrives as a transfer out of cash.
   return liveSav + Math.max(0, liveSal)
        + remainingIncome + remainingRedeem
-       - remainingSpend - liveCc - remainingInv;
+       - remainingSpend - remainingInv;
 }
 
 
@@ -7740,14 +7754,13 @@ function renderBudget() {
       // inside another plan's unspent headroom: an Rs 8,537 unplanned night out would simply
       // disappear into an Rs 1,00,000 trip that had barely started, and the month would look
       // no worse for it. Unplanned spending therefore ADDS on top; it has no budget to consume.
+      // One pot, compared in total — see the note in sharedCurrentMonthClose. Unplanned
+      // one-time spending consumes the one-time budget rather than adding on top of it.
       const _ot = oneTimeActualsInMonth(ym);
-      let _otCounted = 0;
-      _ot.planned.forEach(pl => {
-        const got = _ot.byPlan[pl.id] || 0;
-        _otCounted += got + Math.max(0, pl.amount - got);
-      });
-      _ot.loose.forEach(x => { _otCounted += x.amount; });
-      _overlayTotalExpense[i] += _otCounted;
+      const _otPlan = _ot.planned.reduce((a, x) => a + x.amount, 0);
+      const _otActual = _ot.planned.reduce((a, x) => a + (_ot.byPlan[x.id] || 0), 0)
+                      + _ot.loose.reduce((a, x) => a + x.amount, 0);
+      _overlayTotalExpense[i] += Math.max(_otActual, _otPlan);
     } else {
       _overlayTotalExpense[i] += _otActual;
     }
@@ -8051,6 +8064,11 @@ function renderBudget() {
   // End-of-life via the shared _emiActiveWindow so a close date overrides the term consistently
   // with the engine and every other page.
   const _emiWinMonths = isos.map(iso => ({ iso }));
+  // An instrument with nothing in any visible month is hidden. The test is "zero across the
+  // window", not "is it closed": it needs no lifecycle flag to stay in sync, and it keeps a
+  // loan visible in the months it was actually paid. Viewing Aug-Dec still shows a loan
+  // closed in October; moving the window to November drops it.
+  let _hiddenEmis = 0;
   (state.emis || []).forEach(e => {
     const row = new Array(n).fill(0);
     const win = _emiActiveWindow(e, _emiWinMonths);
@@ -8058,8 +8076,13 @@ function renderBudget() {
       for (let i = win.startIdx; i <= win.endIdx; i++) row[i] = e.amount;
     }
     const ov = overlayEmiRow(e.id, row);
+    const nums = (ov && ov.numeric) ? ov.numeric : row;
+    if (!_showInactiveInstruments && nums.every(v => !v)) { _hiddenEmis++; return; }
     expenseRows.push({ label: e.name + ' (EMI)', overlay: ov });
   });
+  if (_hiddenEmis > 0) {
+    expenseRows.push({ label: '__inactiveNote__', inactiveCount: _hiddenEmis, kind: 'emi' });
+  }
   // Expense categories — grown per month per engine, overlaid with journal actuals
   getExpenseCats().forEach(c => {
     if (!(state[c.key] > 0)) return;
@@ -8131,10 +8154,12 @@ function renderBudget() {
     // consume. The displayed denominator must be this figure and not the bare plan total,
     // otherwise the cell compares an actual that includes unplanned spending against a plan
     // that excludes it — and the row visibly fails to tie to the total beneath it.
-    const countedTot = planned.reduce((a, pl) => {
-      const got = byPlan[pl.id] || 0;
-      return a + got + Math.max(0, pl.amount - got);
-    }, 0) + looseTot;
+    // Display against the PLAN, not against max(actual, plan). Now that one-time is a single
+    // pot, the numerator is all one-time spending and the denominator is the pot, so the two
+    // share a basis and the cell reconciles. Using max() instead would render an overspend as
+    // "1.30 L of 1.30 L" and hide it; against the plan it reads "1.30 L of 1.14 L" and is
+    // flagged over.
+    const countedTot = plannedTot;
     oneTimePlannedTot[i] = _isCurrent(i) ? countedTot : plannedTot;
 
     if (_isFuture(i)) {
@@ -8162,6 +8187,10 @@ function renderBudget() {
   document.getElementById('budgetOutflows').innerHTML =
     `<tr class="section-head"><th colspan="${colspan}">Outflows</th></tr>` +
     expenseRows.map(r => {
+      // Footnote row for instruments hidden because they are inactive across this window.
+      if (r.label === '__inactiveNote__') {
+        return `<tr><th colspan="${colspan}" style="font-weight:400;"><button type="button" data-show-inactive="1" style="background:none;border:none;color:var(--ink-muted);font-size:11.5px;font-style:italic;cursor:pointer;padding:4px 0;text-decoration:underline;">${r.inactiveCount} closed or not-yet-started EMI${r.inactiveCount>1?'s':''} hidden — show</button></th></tr>`;
+      }
       let cellHtml;
       if (r.oneTime) {
         const _otReg = (window._otRegistry = {});
@@ -8348,12 +8377,22 @@ function renderBudget() {
 
   // ---- Running Balances (investments only) ----
 
-  const investmentRows = p.investments.map(inv => {
+  let _hiddenInvs = 0;
+  let investmentRows = p.investments.map(inv => {
     const k = inv.id + '_' + inv.name;
     const fullVals = p.bal[k] || [];
     const vals = _overlayBalanceArray(fullVals.slice(sliceFrom, sliceTo), (ym) => _investmentAtEndOfMonth(inv, ym));
+    // Fully redeemed or not yet started: nothing to show in this window. The test uses the
+    // ENGINE slice rather than the overlaid array, because the engine honours close events
+    // directly while the overlay substitutes reverse-walked figures for past months and can
+    // still report a pre-closure balance.
+    const engineSlice = fullVals.slice(sliceFrom, sliceTo);
+    if (!_showInactiveInstruments && engineSlice.every(v => !v)) { _hiddenInvs++; return ''; }
     return `<tr><th><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${inv.color};margin-right:8px;"></span>${escapeHtml(inv.name)}</th>${cells(vals)}</tr>`;
   }).join('');
+  if (_hiddenInvs > 0) {
+    investmentRows += `<tr><th colspan="${colspan}" style="font-weight:400;"><button type="button" data-show-inactive="1" style="background:none;border:none;color:var(--ink-muted);font-size:11.5px;font-style:italic;cursor:pointer;padding:4px 0;text-decoration:underline;">${_hiddenInvs} closed or not-yet-started instrument${_hiddenInvs>1?'s':''} hidden — show</button></th></tr>`;
+  }
   const cashValsRaw = (p.cashSeries || []).slice(sliceFrom, sliceTo);
   // ---- Current/future cash double-count fix ----
   // applyTransactionDelta has already mutated savings.openingBalance for every logged tx.
@@ -8430,12 +8469,10 @@ function renderBudget() {
     });
     return total;
   })();
-  const _futureNote = _futureTagged > 0
-    ? `<div style="font-size:11px;color:var(--ink-muted);font-style:normal;margin-top:4px;line-height:1.5;">${fmtMoney(_futureTagged)} of income is dated to a later month. It shows in the live balances above, but is held out of this month's close and counted in the month it belongs to.</div>`
-    : '';
+  const _futureNote = '';
 
   document.getElementById('budgetCashBalance').innerHTML =
-    `<tr class="section-head"><th colspan="${colspan}">Cash at end of month <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— savings + salary account, after the card is settled</span>${_futureNote}</th></tr>` +
+    `<tr class="section-head"><th colspan="${colspan}">Cash at end of month <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— savings + salary account</span>${_futureNote}</th></tr>` +
     `<tr class="subtotal"><th><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:8px;"></span>Cash (end of month)</th>${cells(cashBalanceVals)}</tr>`;
 
   // Clear the now-unused transfers section (legacy from prior design).
@@ -8456,6 +8493,17 @@ function renderBudget() {
 
 // On mobile, after rendering, horizontally scroll the projection table so the current
 // month sits just after the sticky label column. Native scroll handles the rest.
+// When true, instruments that are inactive across the visible window are shown anyway.
+// Session-only on purpose: the default on every visit is the uncluttered view, and nothing
+// is permanently hidden — the footnote always says how many and offers to reveal them.
+let _showInactiveInstruments = false;
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest && e.target.closest('[data-show-inactive]');
+  if (!btn) return;
+  _showInactiveInstruments = !_showInactiveInstruments;
+  if (typeof renderBudget === 'function') renderBudget();
+});
+
 function _scrollProjToCurrentMonth(currentIdx) {
   if (window.innerWidth > 768) return;       // desktop: no auto-scroll
   if (currentIdx < 0) return;
