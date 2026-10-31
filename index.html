@@ -310,6 +310,8 @@ input::placeholder { color: var(--ink-muted); }
 .rep-row.emi { grid-template-columns: 1.6fr 1fr 1fr 1fr 1fr 1fr auto auto; }
 .rep-row.inv { grid-template-columns: 2fr 1fr 1fr 1fr auto auto; }
 .rep-row.acc { grid-template-columns: 2fr 1.4fr 1.4fr auto; }
+.rep-row.is-closed { opacity: 0.62; border-style: dashed; }
+.rep-row.is-closed:focus-within { opacity: 1; }
 .rep-row .field label { font-size: 10.5px; }
 .rep-row input, .rep-row select { padding: 12px 13px; font-size: 15px; min-height: 44px; border-radius: var(--radius-sm); }
 .rep-row .inline-prefix::before { top: 50%; font-size: 12px; }
@@ -2347,7 +2349,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.11.02';
+const APP_VERSION = '2026.05.11.03';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3834,6 +3836,7 @@ function addEmiRow(data={}) {
     refreshBadge();
     tbtn.addEventListener('click', () => openTimelineEditor('emi', row, refreshBadge));
   }
+  if (typeof _refreshInstrumentRowClosed === 'function') _refreshInstrumentRowClosed(row, 'emi');
   row.querySelector('.del-btn').addEventListener('click', () => row.remove());
   document.getElementById('emiList').appendChild(row);
 }
@@ -3874,6 +3877,7 @@ function addInvestmentRow(data={}) {
   const refreshBadge = () => { tlBtn.classList.toggle('has-events', (row._events||[]).length > 0); };
   refreshBadge();
   tlBtn.addEventListener('click', () => openTimelineEditor('investment', row, refreshBadge));
+  setTimeout(() => { if (typeof _refreshInstrumentRowClosed === 'function') _refreshInstrumentRowClosed(row, 'investment'); }, 0);
   const del = document.createElement('button');
   del.className = 'del-btn'; del.innerHTML = '×'; del.title = 'Remove';
   del.addEventListener('click', () => row.remove());
@@ -9468,13 +9472,84 @@ function saveTimelineEditor() {
     }
     return;
   }
-  // Edit-my-inputs page: write onto the DOM row; readEMIs/readInvestments pick it up on Save.
+  // Edit-my-inputs page. This previously wrote the events onto the DOM row and stopped,
+  // relying on the user to trigger a step save afterwards. Nothing was persisted, nothing
+  // re-rendered, and no redemption was raised, so closing an instrument here appeared to do
+  // nothing at all. It now persists immediately and behaves exactly like the Instruments
+  // page, which is the only way "closed" can mean the same thing wherever it was done.
   if (ctx.row) {
     ctx.row._events = sorted;
     if (ctx.refreshBadge) ctx.refreshBadge();
+
+    const isInv = ctx.kind === 'investment';
+    const id = isInv ? ctx.row.getAttribute('data-inv-id') : ctx.row.getAttribute('data-emi-id');
+    const target = isInv
+      ? (state.investments || []).find(x => x.id === id)
+      : (state.emis || []).find(x => x.id === id);
+
+    if (target) {
+      target.events = sorted.slice();
+      scheduleSave();
+    }
+    if (typeof _refreshInstrumentRowClosed === 'function') {
+      _refreshInstrumentRowClosed(ctx.row, ctx.kind);
+    }
+
+    const nowYM2 = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); })();
+    const closeEv2 = sorted.find(e => e.type === 'close');
+    closeScModal('timelineModal');
+    _timelineCtx = null;
+    // Same rule as the Instruments page: a close dated at or before this month is a real
+    // event, so the matching full redemption is offered as a Journal entry. A future close
+    // stays projection-only.
+    if (isInv && target && closeEv2 && closeEv2.month <= nowYM2 && window.openTxModal) {
+      setTimeout(() => {
+        window.openTxModal('investment_redemption', {
+          investmentId: target.id,
+          amount: Number(target.balance) || 0,
+          date: _todayISODate(),
+          accountId: (state.accounts.find(a => a.id === 'savings') || {}).id || undefined
+        });
+      }, 120);
+    }
+    return;
   }
   closeScModal('timelineModal');
   _timelineCtx = null;
+}
+
+/* Shows a closed instrument as closed on the Edit-inputs row, and offers the way back.
+   Closing is easy to do by accident and was previously invisible on this page — the only
+   hint was a tinted badge on the timeline button. */
+function _refreshInstrumentRowClosed(row, kind) {
+  if (!row) return;
+  const ev = (row._events || []).find(e => e.type === 'close');
+  let chip = row.querySelector('.inst-closed-chip');
+  if (!ev) {
+    if (chip) chip.remove();
+    row.classList.remove('is-closed');
+    return;
+  }
+  row.classList.add('is-closed');
+  if (!chip) {
+    chip = document.createElement('div');
+    chip.className = 'inst-closed-chip';
+    chip.style.cssText = 'grid-column:1 / -1;display:flex;align-items:center;gap:10px;margin-top:6px;';
+    row.appendChild(chip);
+  }
+  chip.innerHTML = `<span style="font-size:12px;padding:4px 11px;border-radius:20px;background:var(--accent-soft);border:1px solid var(--line);color:var(--ink-muted);">Closed from ${escapeHtml(ev.month)} — no longer counted after this</span><button type="button" class="btn ghost inst-reopen" style="font-size:11.5px;padding:6px 12px;min-height:0;">Reopen</button>`;
+  chip.querySelector('.inst-reopen').addEventListener('click', () => {
+    row._events = (row._events || []).filter(e => e.type !== 'close');
+    const isInv = kind === 'investment';
+    const id = isInv ? row.getAttribute('data-inv-id') : row.getAttribute('data-emi-id');
+    const target = isInv
+      ? (state.investments || []).find(x => x.id === id)
+      : (state.emis || []).find(x => x.id === id);
+    if (target) { target.events = row._events.slice(); scheduleSave(); }
+    const btn = row.querySelector('.sc-timeline-btn');
+    if (btn) btn.classList.toggle('has-events', (row._events || []).length > 0);
+    _refreshInstrumentRowClosed(row, kind);
+  });
 }
 
 function bindScenarioFieldHandlers(sc) {
