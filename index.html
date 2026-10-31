@@ -255,15 +255,19 @@ input[type="text"], input[type="number"], input[type="date"], input[type="month"
   background: var(--bg-elevated);
   border: 1px solid var(--line);
   color: var(--ink);
-  padding: 12px 14px;
+  /* Roomier than before: fields were tight enough that a long figure crowded its own box
+     and was awkward to read back while typing. 16px also stops iOS zooming on focus. */
+  padding: 14px 16px;
   border-radius: var(--radius-md);
   font-family: 'DM Sans', sans-serif;
-  font-size: 14px;
+  font-size: 16px;
+  line-height: 1.4;
+  min-height: 48px;
   outline: none;
   transition: border-color var(--motion-quick), background-color var(--motion-quick), box-shadow var(--motion-quick);
   width: 100%;
 }
-input[type="number"], input[type="date"], input[type="month"] { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+input[type="number"], input[type="date"], input[type="month"] { font-family: 'JetBrains Mono', monospace; font-size: 15px; letter-spacing: 0.01em; }
 [data-theme="dark"] input[type="date"], [data-theme="dark"] input[type="month"] { color-scheme: dark; }
 [data-theme="light"] input[type="date"], [data-theme="light"] input[type="month"] { color-scheme: light; }
 input:focus, select:focus, textarea:focus {
@@ -2336,7 +2340,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.10.04';
+const APP_VERSION = '2026.05.11.01';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3838,7 +3842,7 @@ function addInvestmentRow(data={}) {
   const rate = data.rate !== undefined ? (data.rate * 100).toFixed(2) : (INSTRUMENT_TEMPLATES.find(t=>t.id===invId)?.defaultRate * 100).toFixed(2);
   const liquid = data.liquid !== undefined ? data.liquid : (INSTRUMENT_TEMPLATES.find(t=>t.id===invId)?.defaultLiquid ?? false);
   const cm = data.compoundsMonthly === true; // default annual
-  row.innerHTML = `<div class="field"><label>Instrument</label><select data-field="type">${opts}</select></div><div class="field"><label>Label</label><input type="text" data-field="name" placeholder="e.g. HDFC Savings" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Current balance</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="balance" min="0" step="any" value="${data.balance||0}" /></div></div><div class="field"><label>Monthly contribution</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="monthly" min="0" step="any" value="${data.monthlyContribution||0}" /></div></div><div class="field" style="grid-column:1 / -1;"><div class="toggle ${liquid?'on':''}" data-field="liquid"><div class="toggle-info"><div class="name">Treat as liquid</div><div class="desc">Can be converted to cash quickly, without material loss.</div></div><div class="switch"></div></div></div><div class="field" style="grid-column:1 / -1;"><div class="toggle ${cm?'on':''}" data-field="compoundsMonthly"><div class="toggle-info"><div class="name">Compounds monthly</div><div class="desc">Off (default) = interest credited once a year on the May anniversary, like FD/PPF. On = compounds every month, more realistic for equities (MFs, stocks, etc.).</div></div><div class="switch"></div></div></div><input type="hidden" data-field="rate" value="${rate||0}" />`;
+  row.innerHTML = `<div class="field"><label>Instrument</label><select data-field="type">${opts}</select></div><div class="field"><label>Label</label><input type="text" data-field="name" placeholder="e.g. HDFC Savings" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Current balance</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="balance" min="0" step="any" value="${data.balance||0}" /></div></div><div class="field"><label>Monthly contribution</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="monthly" min="0" step="any" value="${data.monthlyContribution||0}" /></div></div><div class="field" style="grid-column:1 / -1;"><div class="toggle ${liquid?'on':''}" data-field="liquid"><div class="toggle-info"><div class="name">Treat as liquid</div><div class="desc">Can be converted to cash quickly, without material loss.</div></div><div class="switch"></div></div></div><div class="field" style="grid-column:1 / -1;"><div class="toggle ${cm?'on':''}" data-field="compoundsMonthly"><div class="toggle-info"><div class="name">Compounds monthly</div><div class="desc">Off (default) = interest credited once a year on the May anniversary, like FD/PPF. On = compounds every month, more realistic for equities (MFs, stocks, etc.).</div></div><div class="switch"></div></div></div><input type="hidden" data-field="rate" value="${rate||0}" /><button class="sc-timeline-btn" type="button" title="Manage timeline (change amount / close and redeem)" data-timeline-kind="investment">⋯</button><button class="del-btn" title="Remove">×</button>`;
   row.style.gridTemplateColumns = '2fr 2fr 1.5fr 1.5fr auto';
   const select = row.querySelector('select[data-field="type"]');
   const nameInput = row.querySelector('input[data-field="name"]');
@@ -3851,6 +3855,19 @@ function addInvestmentRow(data={}) {
     row.querySelector('input[data-field="rate"]').value = (tmpl.defaultRate * 100).toFixed(2);
   });
   liquidToggle.querySelector('.switch').addEventListener('click', () => liquidToggle.classList.toggle('on'));
+  // Timeline access, matching the EMI rows. Closing an instrument and redeeming it was only
+  // reachable from the Instruments page; the editor itself already supported investments, it
+  // was simply never wired up here. With this, closing can be done from Edit inputs and the
+  // Instruments page becomes optional rather than required.
+  row._events = Array.isArray(data.events) ? data.events.slice() : [];
+  const invTbtn = row.querySelector('.sc-timeline-btn');
+  if (invTbtn) {
+    const refreshInvBadge = () => { invTbtn.classList.toggle('has-events', (row._events || []).length > 0); };
+    refreshInvBadge();
+    invTbtn.addEventListener('click', () => openTimelineEditor('investment', row, refreshInvBadge));
+  }
+  const invDel = row.querySelector('.del-btn');
+  if (invDel) invDel.addEventListener('click', () => row.remove());
   const cmToggle = row.querySelector('.toggle[data-field="compoundsMonthly"]');
   if (cmToggle) cmToggle.querySelector('.switch').addEventListener('click', () => cmToggle.classList.toggle('on'));
   if (!nameInput.value.trim()) nameInput.value = INSTRUMENT_TEMPLATES.find(t=>t.id===invId)?.name || '';
@@ -7972,9 +7989,14 @@ function renderBudget() {
       //   CC      → 0 (assume previous month's CC bill was paid in full)
       // This matches the user's mental model: at the start of each new month, salary float
       // is zero and CC is paid off. Reality may differ but it gives a clean projection.
+      // Savings keeps a projected figure, because the chain genuinely computes one.
+      // Salary and the card do NOT. Printing Rs 0 there asserted that the salary account
+      // will be empty and the card settled — assumptions, not balances — in a section
+      // labelled live. A live balance is a present-tense fact, so for a future month there
+      // is nothing to report and the cell is left blank rather than stating a figure.
       accSavingsRow[i] = i > 0 ? _eomSavingsChain[i - 1] : 0;
-      accSalaryRow[i]  = 0;
-      accCcRow[i]      = 0;
+      accSalaryRow[i]  = null;
+      accCcRow[i]      = null;
     }
   }
   // ---- Per-account adjustment sub-rows (expandable) ----
@@ -8013,7 +8035,15 @@ function renderBudget() {
       ? `<button type="button" class="acct-expand" data-acct="${accId}" style="background:none;border:none;color:var(--ink-muted);cursor:pointer;padding:0 6px 0 0;font-size:10px;line-height:1;">▸</button>`
       : '<span style="display:inline-block;width:18px;"></span>';
     const dot = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color};margin-right:8px;"></span>`;
-    const mainRow = `<tr class="acct-main" data-acct="${accId}"><th>${caret}${dot}${escapeHtml(label)}</th>${cells(balanceRow)}</tr>`;
+    const balCells = balanceRow.map((v, i) =>
+      (v === null || v === undefined)
+        ? `<td class="num" data-col="${i}" style="color:var(--ink-muted);">—</td>`
+        : null);
+    const mainCells = balCells.every(c => c === null)
+      ? cells(balanceRow)
+      : balanceRow.map((v, i) => balCells[i] !== null ? balCells[i]
+          : `<td class="num ${neg(v)}${_isCurrent(i) ? ' current-month' : ''}" data-col="${i}">${fmtMoney(v)}</td>`).join('');
+    const mainRow = `<tr class="acct-main" data-acct="${accId}"><th>${caret}${dot}${escapeHtml(label)}</th>${mainCells}</tr>`;
     if (!hasAdj) return mainRow;
     // Adjustment sub-row: shown when caret is expanded. We format each cell with the net adjustment
     // value (positive shown with +, negative with parens). Empty months show "—".
