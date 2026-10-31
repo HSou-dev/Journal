@@ -308,10 +308,10 @@ input::placeholder { color: var(--ink-muted); }
 }
 .rep-row:hover { border-color: var(--accent-glow); box-shadow: var(--shadow-sm); }
 .rep-row.emi { grid-template-columns: 1.6fr 1fr 1fr 1fr 1fr 1fr auto auto; }
-.rep-row.inv { grid-template-columns: 2fr 1fr 1fr 1fr auto; }
+.rep-row.inv { grid-template-columns: 2fr 1fr 1fr 1fr auto auto; }
 .rep-row.acc { grid-template-columns: 2fr 1.4fr 1.4fr auto; }
-.rep-row .field label { font-size: 9.5px; }
-.rep-row input, .rep-row select { padding: 9px 11px; font-size: 12.5px; border-radius: var(--radius-sm); }
+.rep-row .field label { font-size: 10.5px; }
+.rep-row input, .rep-row select { padding: 12px 13px; font-size: 15px; min-height: 44px; border-radius: var(--radius-sm); }
 .rep-row .inline-prefix::before { top: 50%; font-size: 12px; }
 .del-btn {
   background: transparent;
@@ -326,13 +326,19 @@ input::placeholder { color: var(--ink-muted); }
 }
 .del-btn:hover { background: rgba(224,96,96,0.10); border-color: var(--red); color: var(--red); }
 .sc-timeline-btn {
+  /* Was a bare 34px circle containing an ellipsis, with the purpose hidden in a tooltip.
+     Nobody finds "close this instrument" behind an unlabelled glyph, so it now carries a
+     word. */
   background: transparent;
   border: 1px solid var(--line);
   color: var(--ink-muted);
-  width: 34px; height: 34px;
-  border-radius: 50%;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 22px;
   cursor: pointer;
-  font-size: 18px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12.5px;
+  white-space: nowrap;
   line-height: 1;
   transition: background-color var(--motion-quick), border-color var(--motion-quick), color var(--motion-quick);
 }
@@ -1916,6 +1922,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
         <div class="stat"><div class="stat-label">Savings Rate</div><div class="stat-val" id="bSavingsRate">—</div></div>
         <div class="stat"><div class="stat-label">Months</div><div class="stat-val" id="bMonths">—</div></div>
       </div>
+      <div id="projLiveBalances" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;"></div>
       <div class="proj-table-wrap">
         <table class="proj-table budget-grid" id="budgetGrid">
           <thead><tr id="budgetHeaderRow"><th class="row-label">Item</th></tr></thead>
@@ -2340,7 +2347,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.11.01';
+const APP_VERSION = '2026.05.11.02';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3819,7 +3826,7 @@ function addEmiRow(data={}) {
   const row = document.createElement('div');
   row.className = 'rep-row emi';
   if (data.id) row.setAttribute('data-emi-id', data.id);
-  row.innerHTML = `<div class="field"><label>Name</label><input type="text" data-field="name" placeholder="e.g. Home loan" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Monthly EMI</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="amount" min="0" step="any" value="${data.amount||''}" /></div></div><div class="field"><label>Start Month</label><input type="month" data-field="startMonth" value="${data.startMonth||state.horizonStart}" /></div><div class="field"><label>Months Left</label><input type="number" data-field="months" min="1" step="1" value="${data.months||''}" placeholder="e.g. 24" /></div><div class="field"><label>Outstanding <span class="opt">optional</span></label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="outstandingPrincipal" min="0" step="any" value="${data.outstandingPrincipal||''}" placeholder="balance owed" /></div></div><div class="field"><label>ROI % p.a. <span class="opt">optional</span></label><input type="number" data-field="roi" min="0" max="50" step="0.05" value="${data.roi!==''&&data.roi!=null?(Number(data.roi)*100).toFixed(2):''}" placeholder="e.g. 8.25" /></div><button class="sc-timeline-btn" type="button" title="Manage timeline (step-up / close early)" data-timeline-kind="emi">⋯</button><button class="del-btn" title="Remove">×</button>`;
+  row.innerHTML = `<div class="field"><label>Name</label><input type="text" data-field="name" placeholder="e.g. Home loan" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Monthly EMI</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="amount" min="0" step="any" value="${data.amount||''}" /></div></div><div class="field"><label>Start Month</label><input type="month" data-field="startMonth" value="${data.startMonth||state.horizonStart}" /></div><div class="field"><label>Months Left</label><input type="number" data-field="months" min="1" step="1" value="${data.months||''}" placeholder="e.g. 24" /></div><div class="field"><label>Outstanding <span class="opt">optional</span></label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="outstandingPrincipal" min="0" step="any" value="${data.outstandingPrincipal||''}" placeholder="balance owed" /></div></div><div class="field"><label>ROI % p.a. <span class="opt">optional</span></label><input type="number" data-field="roi" min="0" max="50" step="0.05" value="${data.roi!==''&&data.roi!=null?(Number(data.roi)*100).toFixed(2):''}" placeholder="e.g. 8.25" /></div><button class="sc-timeline-btn" type="button" title="Manage timeline (step-up / close early)" data-timeline-kind="emi">Close / timeline</button><button class="del-btn" title="Remove">×</button>`;
   const tbtn = row.querySelector('.sc-timeline-btn');
   row._events = Array.isArray(data.events) ? data.events.slice() : [];
   if (tbtn) {
@@ -3842,8 +3849,8 @@ function addInvestmentRow(data={}) {
   const rate = data.rate !== undefined ? (data.rate * 100).toFixed(2) : (INSTRUMENT_TEMPLATES.find(t=>t.id===invId)?.defaultRate * 100).toFixed(2);
   const liquid = data.liquid !== undefined ? data.liquid : (INSTRUMENT_TEMPLATES.find(t=>t.id===invId)?.defaultLiquid ?? false);
   const cm = data.compoundsMonthly === true; // default annual
-  row.innerHTML = `<div class="field"><label>Instrument</label><select data-field="type">${opts}</select></div><div class="field"><label>Label</label><input type="text" data-field="name" placeholder="e.g. HDFC Savings" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Current balance</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="balance" min="0" step="any" value="${data.balance||0}" /></div></div><div class="field"><label>Monthly contribution</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="monthly" min="0" step="any" value="${data.monthlyContribution||0}" /></div></div><div class="field" style="grid-column:1 / -1;"><div class="toggle ${liquid?'on':''}" data-field="liquid"><div class="toggle-info"><div class="name">Treat as liquid</div><div class="desc">Can be converted to cash quickly, without material loss.</div></div><div class="switch"></div></div></div><div class="field" style="grid-column:1 / -1;"><div class="toggle ${cm?'on':''}" data-field="compoundsMonthly"><div class="toggle-info"><div class="name">Compounds monthly</div><div class="desc">Off (default) = interest credited once a year on the May anniversary, like FD/PPF. On = compounds every month, more realistic for equities (MFs, stocks, etc.).</div></div><div class="switch"></div></div></div><input type="hidden" data-field="rate" value="${rate||0}" /><button class="sc-timeline-btn" type="button" title="Manage timeline (change amount / close and redeem)" data-timeline-kind="investment">⋯</button><button class="del-btn" title="Remove">×</button>`;
-  row.style.gridTemplateColumns = '2fr 2fr 1.5fr 1.5fr auto';
+  row.innerHTML = `<div class="field"><label>Instrument</label><select data-field="type">${opts}</select></div><div class="field"><label>Label</label><input type="text" data-field="name" placeholder="e.g. HDFC Savings" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Current balance</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="balance" min="0" step="any" value="${data.balance||0}" /></div></div><div class="field"><label>Monthly contribution</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="monthly" min="0" step="any" value="${data.monthlyContribution||0}" /></div></div><div class="field" style="grid-column:1 / -1;"><div class="toggle ${liquid?'on':''}" data-field="liquid"><div class="toggle-info"><div class="name">Treat as liquid</div><div class="desc">Can be converted to cash quickly, without material loss.</div></div><div class="switch"></div></div></div><div class="field" style="grid-column:1 / -1;"><div class="toggle ${cm?'on':''}" data-field="compoundsMonthly"><div class="toggle-info"><div class="name">Compounds monthly</div><div class="desc">Off (default) = interest credited once a year on the May anniversary, like FD/PPF. On = compounds every month, more realistic for equities (MFs, stocks, etc.).</div></div><div class="switch"></div></div></div><input type="hidden" data-field="rate" value="${rate||0}" />`;
+  row.style.gridTemplateColumns = '2fr 2fr 1.5fr 1.5fr auto auto';
   const select = row.querySelector('select[data-field="type"]');
   const nameInput = row.querySelector('input[data-field="name"]');
   const liquidToggle = row.querySelector('.toggle[data-field="liquid"]');
@@ -3855,25 +3862,14 @@ function addInvestmentRow(data={}) {
     row.querySelector('input[data-field="rate"]').value = (tmpl.defaultRate * 100).toFixed(2);
   });
   liquidToggle.querySelector('.switch').addEventListener('click', () => liquidToggle.classList.toggle('on'));
-  // Timeline access, matching the EMI rows. Closing an instrument and redeeming it was only
-  // reachable from the Instruments page; the editor itself already supported investments, it
-  // was simply never wired up here. With this, closing can be done from Edit inputs and the
-  // Instruments page becomes optional rather than required.
-  row._events = Array.isArray(data.events) ? data.events.slice() : [];
-  const invTbtn = row.querySelector('.sc-timeline-btn');
-  if (invTbtn) {
-    const refreshInvBadge = () => { invTbtn.classList.toggle('has-events', (row._events || []).length > 0); };
-    refreshInvBadge();
-    invTbtn.addEventListener('click', () => openTimelineEditor('investment', row, refreshInvBadge));
-  }
-  const invDel = row.querySelector('.del-btn');
-  if (invDel) invDel.addEventListener('click', () => row.remove());
   const cmToggle = row.querySelector('.toggle[data-field="compoundsMonthly"]');
   if (cmToggle) cmToggle.querySelector('.switch').addEventListener('click', () => cmToggle.classList.toggle('on'));
   if (!nameInput.value.trim()) nameInput.value = INSTRUMENT_TEMPLATES.find(t=>t.id===invId)?.name || '';
   row._events = Array.isArray(data.events) ? data.events.slice() : [];
   const tlBtn = document.createElement('button');
-  tlBtn.className = 'sc-timeline-btn'; tlBtn.type = 'button'; tlBtn.innerHTML = '⋯';
+  // Labelled rather than an ellipsis: both instrument types have always had this control,
+  // but behind a bare glyph nobody finds "close and redeem" without being told it is there.
+  tlBtn.className = 'sc-timeline-btn'; tlBtn.type = 'button'; tlBtn.textContent = 'Close / timeline';
   tlBtn.title = 'Manage timeline (step-up / pause / close & redeem)';
   const refreshBadge = () => { tlBtn.classList.toggle('has-events', (row._events||[]).length > 0); };
   refreshBadge();
@@ -8057,15 +8053,53 @@ function renderBudget() {
     return mainRow + subRow;
   }
 
+  // ---- Live balances as a strip, not as grid rows -----------------------------------
+  // These are present-tense facts. Sitting in a month-by-month grid they read as a forecast:
+  // a card balance under NOV 26 looks like a prediction of next month's debt, and printing a
+  // dash there is no clearer. Pulled out above the table, where the Journal already shows
+  // them, the question "is this live or projected?" stops arising. The month-by-month cash
+  // position is what the Cash at end of month row is for.
+  (function renderLiveBalanceStrip() {
+    const host = document.getElementById('projLiveBalances');
+    if (!host) return;
+    const nowYM = _nowYM;
+    const adjThisMonth = (accId) => {
+      let t = 0;
+      (state.transactions || []).forEach(tx => {
+        if (!tx || tx.type !== 'adjustment' || tx.accountId !== accId) return;
+        if (!tx.date || tx.date.slice(0, 7) !== nowYM) return;
+        t += (tx.direction === 'subtract' ? -1 : 1) * (Number(tx.amount) || 0);
+      });
+      return t;
+    };
+    const tile = (label, acc, color) => {
+      if (!acc) return '';
+      const bal = Number(acc.openingBalance) || 0;
+      const adj = adjThisMonth(acc.id);
+      const adjLine = adj
+        ? `<div style="font-size:11px;color:${adj < 0 ? '#e06060' : '#7fb069'};font-style:italic;margin-top:3px;">${adj > 0 ? '+' : ''}${fmtMoney(adj, true)} adjusted this month</div>`
+        : '';
+      return `<div style="flex:1 1 180px;min-width:170px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:10px;padding:13px 15px;">
+        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:5px;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color};margin-right:7px;"></span>${label}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:19px;${bal < 0 ? 'color:#e06060;' : ''}">${fmtMoney(bal)}</div>
+        ${adjLine}</div>`;
+    };
+    host.innerHTML =
+      `<div style="flex:1 1 100%;font-size:11.5px;color:var(--ink-muted);margin-bottom:-4px;">Balances right now</div>` +
+      tile('Savings account', savAcc, 'var(--accent)') +
+      tile('Salary account', salAcc, '#6a9fb5') +
+      tile('Credit card', ccAcc, '#e06060');
+  })();
+
   const hasAdjSavings = _adjSavingsTotals.some(v => v !== 0);
   const hasAdjSalary  = _adjSalaryTotals.some(v => v !== 0);
   const hasAdjCC      = _adjCCTotals.some(v => v !== 0);
   const sectionTitleAccts = 'Account Balances <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— start of month (live for current month) · click ▸ to expand adjustments</span>';
-  document.getElementById('budgetAccountBalances').innerHTML =
-    `<tr class="section-head"><th colspan="${colspan}">${sectionTitleAccts}</th></tr>` +
-    _accountRowExpandable('savings', 'Savings account balance', 'var(--accent)', accSavingsRow, _adjSavingsTotals, hasAdjSavings) +
-    _accountRowExpandable('salary',  'Salary account balance',  '#8fbdaa', accSalaryRow,  _adjSalaryTotals,  hasAdjSalary) +
-    (ccAcc ? _accountRowExpandable('cc', 'Credit card balance', ccAcc.color || '#e06060', accCcRow, _adjCCTotals, hasAdjCC) : '');
+  // The three account rows have moved out of the grid and into the live-balances strip above
+  // the table. Inside a month-by-month grid they invited a reading they could not support —
+  // a card balance under NOV 26 looks like a forecast of next month's debt, and a dash there
+  // is no clearer. The per-month cash position is the Cash at end of month row's job.
+  document.getElementById('budgetAccountBalances').innerHTML = '';
 
   // Wire up caret toggle. We re-attach every render since innerHTML rebuilds the rows.
   document.querySelectorAll('#budgetAccountBalances .acct-expand').forEach(btn => {
