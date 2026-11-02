@@ -1844,7 +1844,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     <div class="nav-item" data-target="instruments"><span class="dot"></span>Instruments</div>
     <div class="nav-item" data-target="emiCalc"><span class="dot"></span>EMI Calculator</div>
     <div class="nav-item" data-target="settings"><span class="dot"></span>Rates &amp; Assumptions</div>
-    <div class="nav-item" data-target="editData"><span class="dot"></span>Edit my inputs</div>
+    <div class="nav-item" data-target="editData"><span class="dot"></span>Edit balances</div>
   </aside>
 
   <main class="main">
@@ -2089,7 +2089,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 
     <section class="section" id="instruments">
       <h1 class="section-title">Your <em>instruments</em>.</h1>
-      <p class="section-sub">Manage your investments and loans — adjust amounts, schedule step-ups, pauses, or close them out. Changes save and recompute instantly. To add a new instrument, use Edit my inputs.</p>
+      <p class="section-sub">Manage your investments and loans — adjust amounts, schedule step-ups, pauses, or close them out. Changes save and recompute instantly. To add a new instrument, use Edit balances.</p>
       <div id="instrumentsBody"></div>
     </section>
 
@@ -2128,7 +2128,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
     <div class="drawer-item" data-target="instruments">Instruments</div>
     <div class="drawer-item" data-target="emiCalc">EMI Calculator</div>
     <div class="drawer-item" data-target="settings">Rates &amp; Assumptions</div>
-    <div class="drawer-item" data-target="editData">Edit my inputs</div>
+    <div class="drawer-item" data-target="editData">Edit balances</div>
     <div class="drawer-label">Appearance</div>
     <div class="drawer-item" id="drawerThemeToggle">
       <span id="drawerThemeIcon">🌙</span>
@@ -2349,7 +2349,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.12.01';
+const APP_VERSION = '2026.05.12.02';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -5845,7 +5845,7 @@ function renderBudgetActuals() {
   }
 
   if (cats.length === 0 && (state.emis || []).length === 0) {
-    body.innerHTML = '<div class="budget-empty">No budget categories set yet. Add monthly limits via <strong>Edit my inputs → Expenses</strong>.</div>';
+    body.innerHTML = '<div class="budget-empty">No budget categories set yet. Add monthly limits via <strong>Edit balances → Expenses</strong>.</div>';
     return;
   }
 
@@ -9895,9 +9895,9 @@ function commitScenarioToBase(scId) {
       committed.push(`Upfront cost ${fmtMoney(Number(p.lumpSum), true)} as one-off expense (${p.startMonth})`);
     }
     if (Array.isArray(p.ageBands) && p.ageBands.length) {
-      skipped.push(`Age-based monthly costs can't auto-commit (they change as the child grows). They remain modeled in the projection/scenario; to bake into actuals, raise an expense category manually via Edit my inputs.`);
+      skipped.push(`Age-based monthly costs can't auto-commit (they change as the child grows). They remain modeled in the projection/scenario; to bake into actuals, raise an expense category manually via Edit balances.`);
     } else if (Number(p.monthlyCost) > 0) {
-      skipped.push(`Recurring monthly cost ${fmtMoney(p.monthlyCost, true)} cannot auto-commit. Add it via Edit my inputs → Expenses (raise a category like Family).`);
+      skipped.push(`Recurring monthly cost ${fmtMoney(p.monthlyCost, true)} cannot auto-commit. Add it via Edit balances → Expenses (raise a category like Family).`);
     }
   } else if (sc.type === 'retirement') {
     if (p.startMonth) {
@@ -9916,9 +9916,9 @@ function commitScenarioToBase(scId) {
         committed.push(`Income → ₹0 for ${count} months from ${p.startMonth}.`);
       }
       if (Number(p.expenseReductionPct) > 0) {
-        skipped.push(`Expense reduction of ${p.expenseReductionPct}% cannot auto-commit. Lower expenses manually via Edit my inputs.`);
+        skipped.push(`Expense reduction of ${p.expenseReductionPct}% cannot auto-commit. Lower expenses manually via Edit balances.`);
       }
-      skipped.push('SIP contributions stop in scenario, but cannot auto-commit. Set monthly contributions to 0 via Edit my inputs → Investments.');
+      skipped.push('SIP contributions stop in scenario, but cannot auto-commit. Set monthly contributions to 0 via Edit balances → Investments.');
     } else {
       skipped.push('Retirement parameters incomplete.');
     }
@@ -9948,7 +9948,7 @@ function commitScenarioToBase(scId) {
       });
     }
     if (p.monthlyExpenseStart && Number(p.monthlyExpenseAmount) > 0) {
-      skipped.push(`Recurring expense ${fmtMoney(p.monthlyExpenseAmount, true)}/mo from ${p.monthlyExpenseStart} cannot auto-commit. Add it as an EMI (Edit my inputs → EMIs) or raise a monthly category.`);
+      skipped.push(`Recurring expense ${fmtMoney(p.monthlyExpenseAmount, true)}/mo from ${p.monthlyExpenseStart} cannot auto-commit. Add it as an EMI (Edit balances → EMIs) or raise a monthly category.`);
     }
   }
 
@@ -11836,12 +11836,12 @@ function renderInstruments() {
       <div class="inst-section-title">Investments</div>
       <button class="btn ghost inst-add-btn" data-inst-new="investment">+ New investment</button>
     </div>
-    ${invs.length ? `<div class="inst-grid">${invCards}</div>` : `<p class="inst-empty">No investments yet — add one above, or in <a href="#" data-goto-edit>Edit my inputs</a>.</p>`}
+    ${invs.length ? `<div class="inst-grid">${invCards}</div>` : `<p class="inst-empty">No investments yet — add one above, or in <a href="#" data-goto-edit>Edit balances</a>.</p>`}
     <div class="inst-section-head" style="margin-top:28px;">
       <div class="inst-section-title">Loans &amp; EMIs</div>
       <button class="btn ghost inst-add-btn" data-inst-new="emi">+ New loan / EMI</button>
     </div>
-    ${emis.length ? `<div class="inst-grid">${emiCards}</div>` : `<p class="inst-empty">No EMIs yet — add one above, or in <a href="#" data-goto-edit>Edit my inputs</a>.</p>`}
+    ${emis.length ? `<div class="inst-grid">${emiCards}</div>` : `<p class="inst-empty">No EMIs yet — add one above, or in <a href="#" data-goto-edit>Edit balances</a>.</p>`}
   `;
 
   // Immediate-save field edits
@@ -12620,7 +12620,7 @@ document.addEventListener('keydown', (e) => {
     const wrap = document.getElementById('accountTiles');
     if (!wrap) return;
     if (!state.accounts || state.accounts.length === 0) {
-      wrap.innerHTML = '<div class="tx-empty">No accounts yet. Add them in onboarding (Edit my inputs).</div>';
+      wrap.innerHTML = '<div class="tx-empty">No accounts yet. Add them in onboarding (Edit balances).</div>';
       return;
     }
     wrap.innerHTML = state.accounts.map(a => {
