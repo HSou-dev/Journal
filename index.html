@@ -314,6 +314,21 @@ input::placeholder { color: var(--ink-muted); }
 .rep-row.is-closed:focus-within { opacity: 1; }
 .rep-row .field label { font-size: 10.5px; }
 .rep-row input, .rep-row select { padding: 12px 13px; font-size: 15px; min-height: 44px; border-radius: var(--radius-sm); }
+/* A grid cell defaults to min-content and will happily crush its input until the digits are
+   unreadable — an amount field was rendering about 40px wide, too narrow to count the zeroes
+   being typed. Cells may shrink, but never below a legible floor. */
+.rep-row .field, .field { min-width: 0; }
+.rep-row input[type="number"], .field input[type="number"], input[type="number"] { min-width: 96px; }
+.rep-row input[type="month"], .rep-row input[type="date"],
+.field input[type="month"], .field input[type="date"] { min-width: 148px; }
+.inline-prefix { min-width: 0; }
+.inline-prefix input { min-width: 0 !important; width: 100%; }
+@media (max-width: 760px) {
+  /* Narrow screens stack to two columns; an amount deserves the whole row rather than half of
+     one shared with a date picker. */
+  .rep-row .field:has(input[type="number"]) { grid-column: 1 / -1; }
+  .rep-row input[type="number"] { min-width: 0; }
+}
 .rep-row .inline-prefix::before { top: 50%; font-size: 12px; }
 .del-btn {
   background: transparent;
@@ -2349,7 +2364,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.12.02';
+const APP_VERSION = '2026.05.12.03';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -9359,7 +9374,7 @@ function renderScenarioFields(sc) {
       const freq = o.frequency || (o.repeat ? 'yearly' : 'once');
       const endHidden = freq === 'once' ? 'style="visibility:hidden;"' : '';
       return `
-      <div class="rep-row emi" data-sc-list="${list}" data-sc-list-idx="${i}" style="grid-template-columns:1fr 1fr 1fr 1fr 2fr auto;">
+      <div class="rep-row emi" data-sc-list="${list}" data-sc-list-idx="${i}" style="grid-template-columns:minmax(150px,1.1fr) minmax(130px,1fr) minmax(105px,.8fr) minmax(150px,1.1fr) minmax(140px,1.3fr) auto;">
         <div class="field"><label>Start month</label><input type="month" data-sc-list-field="month" value="${o.month||''}" /></div>
         <div class="field"><label>Amount</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-sc-list-field="amount" min="0" step="any" value="${o.amount||0}" /></div></div>
         <div class="field"><label>Frequency</label><select data-sc-list-field="frequency">
