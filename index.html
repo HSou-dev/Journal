@@ -2349,7 +2349,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.11.03';
+const APP_VERSION = '2026.05.12.01';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -5192,6 +5192,28 @@ function runProjection(overrides={}) {
   // Redemption inflows per month (full balance moved to savings when an investment closes).
   const redemptionInflow = new Array(n).fill(0);
 
+  // ---- inv.balance means VALUE TODAY, so today is the anchor ------------------------
+  // It used to be seeded at the horizon start and projected forward, which only worked while
+  // the field happened to hold a historical figure. Now that logging a contribution updates
+  // it, seeding at the horizon start would replay months of contributions already inside it.
+  // Months from the anchor forward project from today's figure; months before it are walked
+  // BACK through logged events, the same way savings already works.
+  const _anchorYM = (function () { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); })();
+  let _anchorIdx = months.findIndex(m => m.iso === _anchorYM);
+  if (_anchorIdx < 0) _anchorIdx = (months.length && months[0].iso > _anchorYM) ? 0 : months.length - 1;
+
+  // Logged contributions and redemptions per instrument per month, for the backward walk and
+  // for netting the current month's scheduled amount against what has already gone out.
+  const _loggedByInvMonth = {};
+  (state.transactions || []).forEach(tx => {
+    if (!tx || !tx.date || !tx.investmentId) return;
+    if (tx.type !== 'investment_contrib' && tx.type !== 'investment_redemption') return;
+    const ym = tx.date.slice(0, 7);
+    const sgn = tx.type === 'investment_contrib' ? 1 : -1;
+    (_loggedByInvMonth[tx.investmentId] = _loggedByInvMonth[tx.investmentId] || {});
+    _loggedByInvMonth[tx.investmentId][ym] = (_loggedByInvMonth[tx.investmentId][ym] || 0) + sgn * (Number(tx.amount) || 0);
+  });
+
   for (let i = 0; i < n; i++) {
     // Contribution multiplier: annual step-up only (expGrowthMul already encodes the annual
     // bracket — no additional monthly rate is applied to contributions here).
@@ -5223,6 +5245,20 @@ function runProjection(overrides={}) {
       } else if (!tl.active) {
         // Closed in a prior month → stays at 0, no compounding, no contribution.
         newBal = 0;
+      } else if (i < _anchorIdx) {
+        // BEFORE today: walk backwards from today's figure, removing logged events as we go.
+        // Growth is deliberately not un-applied — logged events are real, inferred history is
+        // not, and claiming a precise past value the user never recorded would be invention.
+        let back = Number(inv.balance) || 0;
+        const logged = _loggedByInvMonth[inv.id] || {};
+        Object.keys(logged).forEach(ym => { if (ym > months[i].iso) back -= logged[ym]; });
+        newBal = Math.max(0, back);
+      } else if (i === _anchorIdx) {
+        // Today: the stored figure already contains everything logged this month, so only the
+        // remainder of this month's scheduled contribution is still to come. Same convention
+        // the current-month close uses for SIPs.
+        const loggedThis = ((_loggedByInvMonth[inv.id] || {})[months[i].iso]) || 0;
+        newBal = (Number(inv.balance) || 0) + Math.max(0, contrib - Math.max(0, loggedThis));
       } else {
         newBal = invPrev[k] * (1 + mRate) + contrib;
       }
@@ -5524,15 +5560,12 @@ function runProjection(overrides={}) {
         // that lower opening, so residual is naturally correct. Touching contribPerMonth or
         // residualDelta would double-count the outflow.
         //
-        // We DO bump the investment balance forward by the delta (compounded), since the
-        // engine's growth math used the original scheduled contributions, not the logged
-        // amounts — so the investment balance hasn't reflected the extra money yet.
-        const mRate = invMonthlyRate[invKey] || 0;
-        let runningDelta = delta;
-        for (let j = i; j < n; j++) {
-          investBalDelta[invKey][j] += runningDelta;
-          runningDelta = runningDelta * (1 + mRate);
-        }
+        // The investment balance is NO LONGER bumped here. inv.balance now means value today
+        // and already contains every logged contribution, because applyTransactionDelta moves
+        // both sides. The engine anchors its series to that figure, so adding the logged
+        // amount again here would count the same money twice — which is precisely the fault
+        // that made Bonds, FD and Mutual Funds disagree between pages.
+        void delta;
       });
     }
 
@@ -12554,12 +12587,18 @@ document.addEventListener('keydown', (e) => {
         acc.openingBalance += dir * sign * tx.amount;
       }
     } else if (tx.type === 'investment_contrib') {
-      // Cash leaves the source account and is added to the investment balance.
-      // The projection engine handles the investment balance side via the actuals overlay
-      // (which compares logged contribution vs scheduled monthlyContribution per month and
-      // adjusts forward). Here we only move the source account.
+      // Cash leaves the source account AND lands in the instrument. Both sides move.
+      // Previously only the cash side did, while a redemption moved both — so inv.balance
+      // behaved as "value today" when selling and as a stale historical seed when buying.
+      // No consistent reading of it was possible, and the engine then re-added the same
+      // contributions on top. inv.balance now means one thing everywhere: value right now.
       const acc = (state.accounts || []).find(a => a.id === tx.accountId);
       if (acc) acc.openingBalance -= sign * tx.amount;
+      const invC = (state.investments || []).find(i => i.id === tx.investmentId);
+      if (invC) {
+        invC.balance = Math.max(0, (Number(invC.balance) || 0) + sign * tx.amount);
+        invC.balanceAsOf = (typeof _todayISODate === 'function') ? _todayISODate() : new Date().toISOString().slice(0, 10);
+      }
     } else if (tx.type === 'investment_redemption') {
       // Cash arrives at destination account; investment balance decreases by the redeemed amount.
       const acc = (state.accounts || []).find(a => a.id === tx.accountId);
@@ -12572,6 +12611,7 @@ document.addEventListener('keydown', (e) => {
       const inv = (state.investments || []).find(i => i.id === tx.investmentId);
       if (inv) {
         inv.balance = Math.max(0, (Number(inv.balance) || 0) - sign * tx.amount);
+        inv.balanceAsOf = (typeof _todayISODate === 'function') ? _todayISODate() : new Date().toISOString().slice(0, 10);
       }
     }
   }
