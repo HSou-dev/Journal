@@ -2012,6 +2012,21 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       </div>
     </div>
 
+    <!-- Account ledger / reconciliation -->
+    <div class="tx-modal-overlay" id="acctLedgerModal">
+      <div class="tx-modal" style="max-width:860px;">
+        <div class="tx-modal-head">
+          <div class="tx-modal-title" id="acctLedgerTitle">Account</div>
+          <button class="tx-modal-close" data-acct-ledger-close>&times;</button>
+        </div>
+        <div class="tx-modal-body" id="acctLedgerBody"></div>
+        <div class="tx-modal-foot">
+          <button class="btn ghost" id="acctLedgerEdit">Edit this account</button>
+          <button class="btn" data-acct-ledger-close>Done</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Scenario template chooser modal -->
     <div class="tx-modal-overlay" id="scTemplateModal">
       <div class="tx-modal" style="max-width:560px;">
@@ -2364,7 +2379,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.12.03';
+const APP_VERSION = '2026.05.13.02';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -6975,6 +6990,135 @@ function sharedNetWorthSeries(p) {
   });
 }
 
+
+/* The ONE definition of a transaction's effect on an account balance. applyTransactionDelta
+   mutates state and also handles the instrument side; this returns just the account effect,
+   so the reconciliation view never needs its own copy of the sign rules. A regression guard
+   asserts the two agree for every transaction type — a second implementation of these rules
+   would drift, and this codebase has already produced six such duplicates. */
+function accountDeltaFor(tx, accId, accType) {
+  if (!tx) return 0;
+  const amt = Number(tx.amount) || 0;
+  switch (tx.type) {
+    case 'expense':
+    case 'investment_contrib':
+      return tx.accountId === accId ? -amt : 0;
+    case 'income':
+    case 'investment_redemption':
+      return tx.accountId === accId ? amt : 0;
+    case 'transfer': {
+      let d = 0;
+      if (tx.fromAccountId === accId) d -= amt;
+      if (tx.toAccountId === accId) d += amt;
+      return d;
+    }
+    case 'adjustment': {
+      if (tx.accountId !== accId) return 0;
+      const dir = tx.direction === 'subtract' ? -1 : 1;
+      // A liability is stored negative, so "I owe more" moves it down.
+      return accType === 'liability' ? -dir * amt : dir * amt;
+    }
+    default: return 0;
+  }
+}
+
+/* Reconciliation view for one account: every movement, with a running balance that must
+   land on the figure shown on the tile. If it does not, the discrepancy is the point. */
+
+/* Breakdown for one Net Worth headline. Reads the components captured where the card was
+   computed, so the panel cannot drift from the number it explains. */
+function openNetWorthBreakdown(key) {
+  const d = (window._nwBreakdowns || {})[key];
+  if (!d) return;
+  const parts = d.parts.filter(x => Math.abs(x.val) > 0.5);
+  const sum = parts.reduce((a, x) => a + x.val, 0);
+  const drift = Math.abs(sum - d.total);
+  document.getElementById('acctLedgerTitle').textContent = d.title;
+  document.getElementById('acctLedgerBody').innerHTML = `
+    <div style="font-size:12px;color:var(--ink-muted);margin-bottom:12px;line-height:1.6;">${d.note}</div>
+    <div style="border:1px solid var(--line);border-radius:9px;overflow:hidden;">
+      ${parts.length ? parts.map(x => `<div style="display:flex;justify-content:space-between;gap:12px;padding:10px 13px;border-bottom:1px solid var(--line);font-size:13px;">
+        <span>${escapeHtml(x.name)}</span>
+        <span style="font-family:'JetBrains Mono',monospace;${x.val < 0 ? 'color:var(--red);' : ''}">${fmtMoney(x.val)}</span></div>`).join('')
+        : `<div style="padding:12px 13px;font-size:13px;color:var(--ink-muted);font-style:italic;">Nothing in this category at the chosen month.</div>`}
+      <div style="display:flex;justify-content:space-between;gap:12px;padding:12px 13px;font-size:14px;font-weight:600;">
+        <span>Total</span><span style="font-family:'JetBrains Mono',monospace;">${fmtMoney(d.total)}</span></div>
+    </div>
+    ${drift > 1 ? `<div style="margin-top:10px;font-size:11.5px;color:var(--red);">The parts above come to ${fmtMoney(sum)}, which is ${fmtMoney(drift)} away from the headline. That gap is a fault worth reporting.</div>` : ''}`;
+  const editBtn = document.getElementById('acctLedgerEdit');
+  if (editBtn) editBtn.style.display = 'none';
+  openScModal('acctLedgerModal');
+}
+
+function openAccountLedger(accId) {
+  const acc = (state.accounts || []).find(a => a.id === accId);
+  if (!acc) return;
+  const R = n => fmtMoney(n);
+  const rows = (state.transactions || [])
+    .map(t => ({ t, d: accountDeltaFor(t, accId, acc.type) }))
+    .filter(x => x.d !== 0)
+    .sort((a, b) => (a.t.date || '').localeCompare(b.t.date || ''));
+
+  const total = rows.reduce((s2, x) => s2 + x.d, 0);
+  const current = Number(acc.openingBalance) || 0;
+  const opening = current - total;
+  const isLiab = acc.type === 'liability';
+  const inFlow = rows.filter(x => x.d > 0).reduce((s2, x) => s2 + x.d, 0);
+  const outFlow = rows.filter(x => x.d < 0).reduce((s2, x) => s2 + x.d, 0);
+
+  document.getElementById('acctLedgerTitle').textContent = acc.name || accId;
+
+  let run = opening;
+  const body = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+      ${[['Starting point', R(opening), 'Before the first logged entry'],
+         [isLiab ? 'Charged' : 'Money in', R(isLiab ? Math.abs(outFlow) : inFlow), ''],
+         [isLiab ? 'Paid off' : 'Money out', R(isLiab ? inFlow : Math.abs(outFlow)), ''],
+         ['Balance now', R(current), rows.length + ' entries']]
+        .map(([l, v, sub]) => `<div style="flex:1 1 150px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:9px;padding:11px 13px;">
+          <div style="font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-muted);">${l}</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:16px;margin-top:3px;">${v}</div>
+          ${sub ? `<div style="font-size:10.5px;color:var(--ink-muted);margin-top:2px;">${sub}</div>` : ''}
+        </div>`).join('')}
+    </div>
+    <div style="font-size:11.5px;color:var(--ink-muted);margin-bottom:10px;line-height:1.6;">
+      The balance is a running total of everything logged; nothing ever resets it. So if the
+      starting point above is not what this account actually held before you began logging,
+      the difference lives there rather than in any single entry below.
+      ${isLiab ? ' For a card, a negative figure is money owed: charges push it down, paying the bill brings it back toward zero.' : ''}
+    </div>
+    <div style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:9px;">
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+        <thead><tr style="position:sticky;top:0;background:var(--bg-elevated);">
+          <th style="text-align:left;padding:8px 10px;font-weight:500;color:var(--ink-muted);">Date</th>
+          <th style="text-align:left;padding:8px 10px;font-weight:500;color:var(--ink-muted);">What</th>
+          <th style="text-align:right;padding:8px 10px;font-weight:500;color:var(--ink-muted);">Change</th>
+          <th style="text-align:right;padding:8px 10px;font-weight:500;color:var(--ink-muted);">Running</th>
+        </tr></thead>
+        <tbody>
+        ${rows.map(({ t, d }) => {
+          run += d;
+          const note = escapeHtml(t.note || t.category || t.type || '');
+          return `<tr style="border-top:1px solid var(--line);">
+            <td style="padding:7px 10px;white-space:nowrap;color:var(--ink-muted);">${t.date || ''}</td>
+            <td style="padding:7px 10px;">${note}<span style="color:var(--ink-muted);font-size:11px;"> · ${t.type}</span></td>
+            <td style="padding:7px 10px;text-align:right;font-family:'JetBrains Mono',monospace;color:${d < 0 ? 'var(--red)' : 'var(--accent-bright)'};">${d > 0 ? '+' : ''}${R(Math.abs(d) * (d < 0 ? -1 : 1))}</td>
+            <td style="padding:7px 10px;text-align:right;font-family:'JetBrains Mono',monospace;">${R(run)}</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  document.getElementById('acctLedgerBody').innerHTML = body;
+  const editBtn = document.getElementById('acctLedgerEdit');
+  if (editBtn) editBtn.style.display = '';
+  if (editBtn) editBtn.onclick = () => {
+    closeScModal('acctLedgerModal');
+    if (typeof openSingleStepEdit === 'function') openSingleStepEdit(6);
+  };
+  openScModal('acctLedgerModal');
+}
+
 function projectSavingsChain(p) {
   const isos = p.isos;
   const n = isos.length;
@@ -9044,7 +9188,44 @@ function renderNetWorth() {
     { label:'Non-Liquid Assets', val:nonLiquidAtDate, color:'blue' },
     { label:'Debts · '+valDate, val:debtsAtDate, color:'red' }
   ];
-  kpiEl.innerHTML = kpiData.map(k => `<div class="card kpi"><div class="card-head">${k.label}</div><div class="val ${k.color}">${fmtMoney(k.val, true)}</div></div>`).join('');
+  // Each card opens its own breakdown. A headline figure that cannot be taken apart is a
+  // figure that has to be taken on trust, and every reconciliation problem in this app has
+  // started with exactly that. Components are gathered here, where they were computed, so
+  // the panel reports the same arithmetic the card does rather than recreating it.
+  const _nwLiquidParts = [
+    { name: (valDate === _nowYMkey() ? 'Cash and savings (live)' : 'Cash and savings'), val: _cashForLiquidity },
+    ...p.investments.filter(i => i.liquid).map(inv => ({ name: inv.name, val: p.bal[inv.id + '_' + inv.name][idx] || 0 }))
+  ];
+  const _nwIlliquidParts = p.investments.filter(i => !i.liquid)
+    .map(inv => ({ name: inv.name, val: p.bal[inv.id + '_' + inv.name][idx] || 0 }));
+  const _nwDebtParts = [
+    ...(state.accounts || []).filter(a => a.type === 'liability')
+      .map(a => ({ name: a.name + ' (outstanding)', val: Math.abs(Number(a.openingBalance) || 0) })),
+    ...(_emiRemain > 0 ? [{ name: 'EMI instalments still to pay', val: _emiRemain }] : [])
+  ];
+  const _nwScAsset = ((p.scAssetSeries || [])[idx] || 0);
+  const _nwScLiab = ((p.scLiabSeries || [])[idx] || 0);
+  const _nwTotalParts = [
+    { name: 'Liquidity', val: lqAtDate },
+    { name: 'Non-liquid assets', val: nonLiquidAtDate },
+    ...(_nwScAsset ? [{ name: 'Property bought in a scenario', val: _nwScAsset }] : []),
+    ...(_nwScLiab ? [{ name: 'Loan outstanding on that property', val: _nwScLiab }] : []),
+    { name: 'Debts', val: -debtsAtDate }
+  ];
+  window._nwBreakdowns = {
+    total:    { title: 'Net worth · ' + valDate, parts: _nwTotalParts, total: nwAtDate,
+                note: 'Everything owned, less everything owed, at the chosen month.' },
+    liquid:   { title: 'Liquidity · ' + valDate, parts: _nwLiquidParts, total: lqAtDate,
+                note: 'Money reachable within days: cash plus anything marked liquid on the Instruments list. Property and locked instruments are excluded by design.' },
+    illiquid: { title: 'Non-liquid assets · ' + valDate, parts: _nwIlliquidParts, total: nonLiquidAtDate,
+                note: 'Instruments NOT marked liquid. Real, but not available at short notice.' },
+    debts:    { title: 'Debts · ' + valDate, parts: _nwDebtParts, total: debtsAtDate,
+                note: 'Outstanding balances on liability accounts, plus every EMI instalment still scheduled. EMIs sit outside liability accounts, so these do not overlap.' }
+  };
+  const _nwKeys = ['total', 'liquid', 'illiquid', 'debts'];
+  kpiEl.innerHTML = kpiData.map((k, i2) => `<div class="card kpi" data-nw-card="${_nwKeys[i2]}" style="cursor:pointer;" title="See what makes this up"><div class="card-head">${k.label}</div><div class="val ${k.color}">${fmtMoney(k.val, true)}</div><div style="font-size:10.5px;color:var(--ink-muted);margin-top:6px;">tap for the breakdown</div></div>`).join('');
+  kpiEl.querySelectorAll('[data-nw-card]').forEach(el =>
+    el.addEventListener('click', () => openNetWorthBreakdown(el.getAttribute('data-nw-card'))));
 
   destroyChart('nwLine');
   const _nwAccent = resolveCssColor('var(--accent)', '#2E7D5B');
@@ -10994,6 +11175,11 @@ function wireScenariosUI() {
     });
   });
   // Timeline editor modal handlers
+  document.querySelectorAll('[data-acct-ledger-close]').forEach(el =>
+    el.addEventListener('click', () => closeScModal('acctLedgerModal')));
+  const _alOv = document.getElementById('acctLedgerModal');
+  if (_alOv) _alOv.addEventListener('click', e => { if (e.target === _alOv) closeScModal('acctLedgerModal'); });
+
   const tlSave = document.getElementById('timelineSave');
   if (tlSave) tlSave.addEventListener('click', saveTimelineEditor);
   document.querySelectorAll('[data-timeline-close]').forEach(el => {
@@ -12641,12 +12827,14 @@ document.addEventListener('keydown', (e) => {
     wrap.innerHTML = state.accounts.map(a => {
       const v = a.openingBalance || 0;
       const isNeg = v < 0;
-      return `<div class="acc-tile ${a.type === 'liability' ? 'liability' : ''}" data-acc-tile-id="${a.id}" title="Edit account"><div class="acc-tile-label">${escapeHtml(a.name)}</div><div class="acc-tile-balance ${isNeg ? 'neg' : ''}">${fmtMoney(v)}</div></div>`;
+      return `<div class="acc-tile ${a.type === 'liability' ? 'liability' : ''}" data-acc-tile-id="${a.id}" title="See every movement and reconcile"><div class="acc-tile-label">${escapeHtml(a.name)}</div><div class="acc-tile-balance ${isNeg ? 'neg' : ''}">${fmtMoney(v)}</div></div>`;
     }).join('');
     // Make tiles clickable — they jump to the Accounts edit step, where the user can change balances or add/remove accounts.
     wrap.querySelectorAll('.acc-tile').forEach(tile => {
       tile.addEventListener('click', () => {
-        if (typeof openSingleStepEdit === 'function') openSingleStepEdit(6);
+        const id = tile.getAttribute('data-acc-tile-id');
+        if (id && typeof openAccountLedger === 'function') openAccountLedger(id);
+        else if (typeof openSingleStepEdit === 'function') openSingleStepEdit(6);
       });
     });
   }
