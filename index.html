@@ -2379,7 +2379,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.05.13.02';
+const APP_VERSION = '2026.05.13.03';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -7455,7 +7455,12 @@ window._openOneTimePopover = function(anchor, cid) {
 };
 
 function renderBudget() {
-  const start = state.budgetStart || state.horizonStart;
+  // Same reasoning: the sheet opens at the current month, not at the horizon start, so the
+  // first column is where you actually are. Changing the window still works as before.
+  const start = state.budgetStart || (function () {
+    const now = _nowYMkey();
+    return (now >= state.horizonStart && now <= state.horizonEnd) ? now : state.horizonStart;
+  })();
   const end   = state.budgetEnd   || state.horizonEnd;
   document.getElementById('budgetStart').value = start;
   document.getElementById('budgetEnd').value   = end;
@@ -9043,7 +9048,10 @@ function _computeNetWorthMilestones(p, nwSeries) {
 }
 
 function renderNetWorth() {
-  const valDate = state.valuationDate || state.horizonEnd;
+  // Default to the current month rather than the end of the horizon. Opening on a date ten
+  // years out meant the first figures seen were a projection, not a position, and had to be
+  // dialled back before they meant anything. The control still accepts any month.
+  const valDate = state.valuationDate || _nowYMkey();
   document.getElementById('nwDate').value = valDate;
   const extEnd = valDate > state.horizonEnd ? valDate : state.horizonEnd;
   const p = runProjection({ horizonEnd: extEnd, scenarios: activeScenariosForRender() });
@@ -13532,6 +13540,5 @@ document.addEventListener('keydown', (e) => {
   });
 })();
 </script>
-
 </body>
 </html>
