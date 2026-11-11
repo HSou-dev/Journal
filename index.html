@@ -2379,7 +2379,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.11.11.01';
+const APP_VERSION = '2026.11.11.02';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -5800,6 +5800,26 @@ function runProjection(overrides={}) {
   }
 })();
 
+// The month the Projection sheet and Net Worth open on: the current month, or the horizon start
+// if today sits outside the horizon. One definition, used by launchDashboard, both renderers'
+// fallbacks and the sheet's Reset button, so they cannot drift apart.
+function _defaultOpenMonth() {
+  const now = _nowYMkey();
+  return (state && now >= state.horizonStart && now <= state.horizonEnd) ? now : (state ? state.horizonStart : now);
+}
+function _addMonthsYM(ym, k) {
+  const [y, m] = ym.split('-').map(Number);
+  const t = y * 12 + (m - 1) + k;
+  return Math.floor(t / 12) + '-' + String((t % 12) + 1).padStart(2, '0');
+}
+function _monthsBetweenYM(a, b) {
+  const [ay, am] = a.split('-').map(Number), [by, bm] = b.split('-').map(Number);
+  return (by * 12 + bm) - (ay * 12 + am);
+}
+// Set ONCE per page load. Re-running the wizard mid-session must not throw away a month the
+// user has just picked on either page; a fresh load always opens on the current month.
+let _openingDatesApplied = false;
+
 function launchDashboard() {
   scheduleSave();
   // Mark body as "in-app" so the bottom nav + FAB show on mobile.
@@ -5807,15 +5827,25 @@ function launchDashboard() {
   document.body.classList.add('app-active');
   // Only set default dates if not already set (preserve returning users' selections)
   if (!state.snapshotDate) state.snapshotDate = state.horizonStart;
-  // Default budget window is one year from horizonStart, not full horizon
-  if (!state.budgetStart || !state.budgetEnd) {
-    const [hsy, hsm] = state.horizonStart.split('-').map(Number);
-    const beM = hsm === 1 ? 12 : hsm - 1;
-    const beYear = hsm === 1 ? hsy : hsy + 1;
-    state.budgetStart = state.horizonStart;
-    state.budgetEnd   = beYear + '-' + String(beM).padStart(2,'0');
+  // Projection sheet and Net Worth OPEN ON THE CURRENT MONTH on every load (v2026.11.11.02).
+  // Previously this block wrote horizonStart / horizonEnd into budgetStart / valuationDate when
+  // they were empty, and kept whatever was saved otherwise. Both renderers' current-month
+  // fallbacks therefore never ran on a real load: the v2026.05.13.03 fix only worked when the
+  // renderers were called with those fields empty, which never happens after this point.
+  // The sheet keeps the WIDTH of the user's last window (12 months if none), shifted to start
+  // now. Picking another month still works and holds for the session.
+  if (!_openingDatesApplied) {
+    const open = _defaultOpenMonth();
+    let width = 11;
+    if (state.budgetStart && state.budgetEnd && state.budgetEnd >= state.budgetStart) width = _monthsBetweenYM(state.budgetStart, state.budgetEnd);
+    state.budgetStart = open;
+    state.budgetEnd   = _addMonthsYM(open, width);
+    state.valuationDate = open;
+    _openingDatesApplied = true;
   }
-  if (!state.valuationDate) state.valuationDate = state.horizonEnd;
+  if (!state.budgetStart) state.budgetStart = _defaultOpenMonth();
+  if (!state.budgetEnd) state.budgetEnd = _addMonthsYM(state.budgetStart, 11);
+  if (!state.valuationDate) state.valuationDate = _defaultOpenMonth();
   if (!state.liquidityDate) state.liquidityDate = state.horizonEnd;
   document.getElementById('wizardRoot').classList.add('hidden');
   const appWrap = document.getElementById('appWrap');
@@ -7598,10 +7628,7 @@ window._openOneTimePopover = function(anchor, cid) {
 function renderBudget() {
   // Same reasoning: the sheet opens at the current month, not at the horizon start, so the
   // first column is where you actually are. Changing the window still works as before.
-  const start = state.budgetStart || (function () {
-    const now = _nowYMkey();
-    return (now >= state.horizonStart && now <= state.horizonEnd) ? now : state.horizonStart;
-  })();
+  const start = state.budgetStart || _defaultOpenMonth();
   const end   = state.budgetEnd   || state.horizonEnd;
   document.getElementById('budgetStart').value = start;
   document.getElementById('budgetEnd').value   = end;
@@ -9195,7 +9222,7 @@ function renderNetWorth() {
   // Default to the current month rather than the end of the horizon. Opening on a date ten
   // years out meant the first figures seen were a projection, not a position, and had to be
   // dialled back before they meant anything. The control still accepts any month.
-  const valDate = state.valuationDate || _nowYMkey();
+  const valDate = state.valuationDate || _defaultOpenMonth();
   document.getElementById('nwDate').value = valDate;
   const extEnd = valDate > state.horizonEnd ? valDate : state.horizonEnd;
   const p = runProjection({ horizonEnd: extEnd, scenarios: activeScenariosForRender() });
@@ -11739,11 +11766,9 @@ function wireDashboard() {
   // (dashRun / dashReset event listeners removed — Dashboard section deleted in v18)
   document.getElementById('budgetRun').addEventListener('click', () => { state.budgetStart = document.getElementById('budgetStart').value; state.budgetEnd = document.getElementById('budgetEnd').value; renderBudget(); });
   document.getElementById('budgetReset').addEventListener('click', () => {
-    const [hsy, hsm] = state.horizonStart.split('-').map(Number);
-    const beM = hsm === 1 ? 12 : hsm - 1;
-    const beY = hsm === 1 ? hsy : hsy + 1;
-    state.budgetStart = state.horizonStart;
-    state.budgetEnd   = beY + '-' + String(beM).padStart(2,'0');
+    // Reset returns to the opening default (current month, 12 months), not the horizon start.
+    state.budgetStart = _defaultOpenMonth();
+    state.budgetEnd   = _addMonthsYM(state.budgetStart, 11);
     renderBudget();
   });
   document.getElementById('nwRun').addEventListener('click', () => { state.valuationDate = document.getElementById('nwDate').value; renderNetWorth(); });
