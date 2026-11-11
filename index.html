@@ -2379,7 +2379,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.11.11.05';
+const APP_VERSION = '2026.11.11.06';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3898,10 +3898,12 @@ function applyRevisions(scenarios, monthsMeta, n, ctx, expenseMul, contribMul, e
   const isos = monthsMeta.map(m => m.iso);
   const money = v => Math.round(v).toLocaleString('en-IN');
   const rowsByScenario = new Map();
-  const addRow = (sc, label, kind, values) => {
+  // revTarget names the base row a revision changes ('category:exRent', 'emi:<id>', 'invest:<id_name>'),
+  // so the Projection sheet can show the revised amount IN that row instead of a separate delta row.
+  const addRow = (sc, label, kind, values, revTarget) => {
     if (!values.some(v => v !== 0)) return;
     if (!rowsByScenario.has(sc)) rowsByScenario.set(sc, []);
-    rowsByScenario.get(sc).push({ label, kind, values });
+    rowsByScenario.get(sc).push({ label, kind, values, revTarget });
   };
   gkeys.forEach(tk => {
     groups[tk].forEach(r => {
@@ -3916,7 +3918,7 @@ function applyRevisions(scenarios, monthsMeta, n, ctx, expenseMul, contribMul, e
           const d = (revisionAmountAt(r, i, isos, ctx.expGrowthAt) - base[i]) * expenseMul[i];
           row[i] = d; expenseDelta[i] += d;
         }
-        addRow(r.sc, 'Revise ' + (ctx.categoryLabel[r.ref] || r.ref) + ' to ' + money(r.newAmount) + ' from ' + r.from, 'expense', row);
+        addRow(r.sc, 'Revise ' + (ctx.categoryLabel[r.ref] || r.ref) + ' to ' + money(r.newAmount) + ' from ' + r.from, 'expense', row, 'category:' + r.ref);
       } else if (r.target === 'emi') {
         // Only months inside the EMI's own active window are touched. A closed loan has no
         // window after its close month, so a revision can never restart payments.
@@ -3927,7 +3929,7 @@ function applyRevisions(scenarios, monthsMeta, n, ctx, expenseMul, contribMul, e
           const d = (r.newAmount - sch.amounts[i]) * expenseMul[i];
           row[i] = d; expenseDelta[i] += d;
         }
-        addRow(r.sc, 'Revise ' + (sch.name || r.ref) + ' EMI to ' + money(r.newAmount) + ' from ' + r.from, 'expense', row);
+        addRow(r.sc, 'Revise ' + (sch.name || r.ref) + ' EMI to ' + money(r.newAmount) + ' from ' + r.from, 'expense', row, 'emi:' + r.ref);
       } else if (r.target === 'invest') {
         // Contributions are not expenses: nothing goes into expenseDelta. The engine reads
         // contribOverride and replaces the scheduled contribution; the row is for display only.
@@ -3941,7 +3943,7 @@ function applyRevisions(scenarios, monthsMeta, n, ctx, expenseMul, contribMul, e
           contribOverride[k][i] = amt;
           row[i] = (amt - inv.base[i]) * contribMul[i];
         }
-        addRow(r.sc, 'Revise ' + (inv.name || r.ref) + ' contribution to ' + money(r.newAmount) + ' from ' + r.from, 'contribution', row);
+        addRow(r.sc, 'Revise ' + (inv.name || r.ref) + ' contribution to ' + money(r.newAmount) + ' from ' + r.from, 'contribution', row, 'invest:' + k);
       }
     });
   });
@@ -8255,9 +8257,22 @@ function renderBudget() {
   // go into the inflows section; expense rows (kind: 'expense' or 'expenseReduction') go into outflows.
   const scenarioIncomeRows = [];
   const scenarioExpenseRows = [];
+  // Revisions ('Change my plan') change an EXISTING row, so they are shown in that row: Rent reads
+  // 0 from March rather than staying 42,405 with a separate -42,405 row further down. revFold holds
+  // the engine's own delta per row (sliced to the window); revNames the scenario names for the marker.
+  // The delta is added as-is, so every column still sums to the engine's Total Expenses.
+  const revFold = {}, revNames = {};
   (p.scenarioBreakdowns || []).forEach(sb => {
     sb.rows.forEach(r => {
       const slice = r.values.slice(sliceFrom, sliceTo);
+      if (r.revTarget) {
+        if (r.kind !== 'contribution') {
+          const acc = revFold[r.revTarget] || (revFold[r.revTarget] = new Array(slice.length).fill(0));
+          for (let i = 0; i < slice.length; i++) acc[i] += slice[i] || 0;
+        }
+        (revNames[r.revTarget] = revNames[r.revTarget] || new Set()).add(sb.scenarioName);
+        return;
+      }
       const labelled = `${escapeHtml(sb.scenarioName)} · ${escapeHtml(r.label)}`;
       const item = { label: labelled, values: slice, scenario: true };
       if (r.kind === 'contribution') {
@@ -8271,6 +8286,10 @@ function renderBudget() {
     });
   });
 
+  const revNote = key => revNames[key] ? Array.from(revNames[key]).join(' + ') : null;
+  // Marker for a row changed by a previewed revision. Placed BEFORE the label so the EMI grouping,
+  // which matches labels ending in "(EMI)", still finds the row.
+  const revMark = r => r && r.revNote ? `<span title="Changed by ${escapeHtml(r.revNote)}" style="color:var(--gold-bright);font-style:italic;">✎ ${escapeHtml(r.revNote)} · </span>` : '';
   // Helper to render a scenario row with italic styling (per user preference)
   const scRowHtml = r => `<tr style="font-style:italic;color:var(--ink-dim);"><th>${r.label}</th>${cells(r.values)}</tr>`;
 
@@ -8525,7 +8544,7 @@ function renderBudget() {
     `<tr class="section-head"><th colspan="${colspan}">Inflows</th></tr>` +
     incomeRows.map(r => {
       const cellHtml = r.overlay ? cellsOverlay(r.overlay) : cells(r.values);
-      return `<tr><th>${escapeHtml(r.label)}</th>${cellHtml}</tr>`;
+      return `<tr><th>${revMark(r)}${escapeHtml(r.label)}</th>${cellHtml}</tr>`;
     }).join('') +
     scenarioIncomeRows.map(scRowHtml).join('') +
     `<tr class="subtotal"><th>Total Income</th>${cells(totalIncome)}</tr>`;
@@ -8548,6 +8567,8 @@ function renderBudget() {
     if (sch) {
       for (let i = sch.startIdx; i <= sch.endIdx; i++) row[i] = sch.amounts[i];
     }
+    const _rf = revFold['emi:' + e.id];
+    if (_rf) for (let i = 0; i < n; i++) row[i] += _rf[i] || 0;
     const ov = overlayEmiRow(e.id, row);
     const nums = (ov && ov.numeric) ? ov.numeric : row;
     // Count inactive rows whether or not they are currently shown, so the control can say
@@ -8557,7 +8578,7 @@ function renderBudget() {
       _hiddenEmis++;
       if (!_showInactiveInstruments) return;
     }
-    expenseRows.push({ label: e.name + ' (EMI)', overlay: ov });
+    expenseRows.push({ label: e.name + ' (EMI)', overlay: ov, revNote: revNote('emi:' + e.id) });
   });
   if (_hiddenEmis > 0) {
     expenseRows.push({ label: '__inactiveNote__', inactiveCount: _hiddenEmis, kind: 'emi' });
@@ -8565,9 +8586,10 @@ function renderBudget() {
   // Expense categories — grown per month per engine, overlaid with journal actuals
   getExpenseCats().forEach(c => {
     if (!(state[c.key] > 0)) return;
-    const slice = (p.expCategorySeries[c.key] || []).slice(sliceFrom, sliceTo);
+    const _rf = revFold['category:' + c.key];
+    const slice = (p.expCategorySeries[c.key] || []).slice(sliceFrom, sliceTo).map((v, i) => v + (_rf ? (_rf[i] || 0) : 0));
     const ov = overlayCategoryRow(c.key, slice);
-    expenseRows.push({ label: c.label, overlay: ov });
+    expenseRows.push({ label: c.label, overlay: ov, revNote: revNote('category:' + c.key) });
   });
   // One-off expenses — engine has aggregated series; for breakdown we still want labelled rows.
   // Walk the originals and re-expand each one (mirroring engine math) so each row is labelled separately.
@@ -8687,7 +8709,7 @@ function renderBudget() {
       } else {
         cellHtml = r.overlay ? cellsOverlay(r.overlay) : cells(r.values);
       }
-      return `<tr><th>${escapeHtml(r.label)}</th>${cellHtml}</tr>`;
+      return `<tr><th>${revMark(r)}${escapeHtml(r.label)}</th>${cellHtml}</tr>`;
     }).join('') +
     scenarioExpenseRows.map(scRowHtml).join('') +
     `<tr class="subtotal"><th>Total Expenses</th>${cells(totalExpense)}</tr>`;
@@ -8708,7 +8730,7 @@ function renderBudget() {
     }
     if (!inv.monthlyContribution && !hasActuals) return;
     const ov = overlayInvestmentContribRow(inv.id, slice);
-    contribRows.push({ label: inv.name, overlay: ov });
+    contribRows.push({ label: inv.name, overlay: ov, revNote: revNote('invest:' + k) });
   });
   // Re-derive cash contribution row from overlaid surplus + overlaid investment contribs.
   // For a past month: cashContrib = overlaidSurplus - sum(overlaid investment contribs for that month)
@@ -8840,7 +8862,7 @@ function renderBudget() {
   document.getElementById('budgetSavings').innerHTML =
     `<tr class="section-head"><th colspan="${colspan}">Surplus &amp; Allocation</th></tr>` +
     `<tr class="surplus-row"><th>Net Surplus</th>${cells(surplus)}</tr>` +
-    scheduledInvRows.map(r => `<tr><th>${escapeHtml(r.label)}</th>${cellsOverlay(r.overlay)}</tr>`).join('') +
+    scheduledInvRows.map(r => `<tr><th>${revMark(r)}${escapeHtml(r.label)}</th>${cellsOverlay(r.overlay)}</tr>`).join('') +
     (otherOneTimeRow.numeric.some(v => v > 0)
       ? `<tr><th>Other one-time investments <span style="color:var(--ink-muted);font-size:11px;font-style:italic;">— FD, ETF, etc.</span></th>${cellsOverlay(otherOneTimeRow)}</tr>`
       : '') +
