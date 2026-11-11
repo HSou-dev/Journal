@@ -2379,7 +2379,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.11.11.04';
+const APP_VERSION = '2026.11.11.05';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -9749,8 +9749,14 @@ function _rvCurrentText(targetVal, from, newAmountStr, priorChanges, isAuto) {
   const sign = d > 0 ? '+' : '−';
   return `${lead}: <strong>${fmtMoney(pl.cur)}</strong> → <strong style="color:var(--gold-bright);">${fmtMoney(nv)}</strong>/mo <span style="color:var(--ink-muted);">(${sign}${fmtMoney(Math.abs(d))})${tail}</span>`;
 }
+// Is this amount box still showing the default the editor put there? Decided by VALUE, not by
+// events: the app's number pad writes digits without firing 'input' until Done, so an event-based
+// flag stayed "untouched" when 0 was typed and Save tapped, and the change was dropped on save.
+function _rvIsDefault(amtEl) {
+  return amtEl.dataset.rvDefault != null && amtEl.value === amtEl.dataset.rvDefault;
+}
 // Read every row in the editor, refill defaults, refresh the lines. A row's amount is a DEFAULT
-// (data-rv-auto="1") until the user types in it; defaults follow target/month changes and changes
+// while it still equals the number filled in (data-rv-default); defaults follow target/month changes and changes
 // to earlier rows. Defaults are not counted as "earlier rows" for other rows: by construction they
 // equal what is already in effect, so they change nothing.
 // `trigger` is the row whose target/month just changed: it is filled even if empty.
@@ -9759,7 +9765,7 @@ function _rvRefreshRows(trigger) {
   const read = r => {
     const amtEl = r.querySelector('[data-rv-field="newAmount"]');
     const t = _rvParseTarget(r.querySelector('[data-rv-field="target"]').value);
-    return Object.assign({}, t, { from: r.querySelector('[data-rv-field="from"]').value, newAmount: amtEl.value === '' ? '' : Number(amtEl.value), auto: amtEl.dataset.rvAuto === '1' });
+    return Object.assign({}, t, { from: r.querySelector('[data-rv-field="from"]').value, newAmount: amtEl.value === '' ? '' : Number(amtEl.value), auto: _rvIsDefault(amtEl) });
   };
   rows.forEach((r, idx) => {
     const amtEl = r.querySelector('[data-rv-field="newAmount"]');
@@ -9770,12 +9776,13 @@ function _rvRefreshRows(trigger) {
       .map(o => o.v);
     const tv = r.querySelector('[data-rv-field="target"]').value;
     const pl = _rvPlannedAt(tv, me.from, prior);
-    const fillable = amtEl.dataset.rvAuto === '1' || (r === trigger && amtEl.value === '');
+    const wasDefault = _rvIsDefault(amtEl);
+    const fillable = wasDefault || (r === trigger && amtEl.value === '');
     if (fillable) {
-      if (pl.cur != null) { amtEl.value = String(Math.round(pl.cur)); amtEl.dataset.rvAuto = '1'; }
-      else if (amtEl.dataset.rvAuto === '1') { amtEl.value = ''; }
+      if (pl.cur != null) { amtEl.value = String(Math.round(pl.cur)); amtEl.dataset.rvDefault = amtEl.value; }
+      else if (wasDefault) { amtEl.value = ''; delete amtEl.dataset.rvDefault; }
     }
-    r.querySelector('[data-rv-current]').innerHTML = _rvCurrentText(tv, me.from, amtEl.value, prior, amtEl.dataset.rvAuto === '1');
+    r.querySelector('[data-rv-current]').innerHTML = _rvCurrentText(tv, me.from, amtEl.value, prior, _rvIsDefault(amtEl));
   });
 }
 
@@ -9965,7 +9972,7 @@ function renderScenarioFields(sc) {
         <div class="field" style="grid-column:1 / 3;"><label>What changes</label><select data-rv-field="target" style="width:100%;">${_rvTargetOptions(tv)}</select></div>
         <button class="del-btn" data-rv-del title="Remove" style="grid-column:3;grid-row:1;align-self:center;">×</button>
         <div class="field"><label>From month</label><input type="month" data-rv-field="from" value="${escapeHtml(c.from || '')}" style="width:100%;" /></div>
-        <div class="field"><label>New amount / mo</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-rv-field="newAmount" min="0" step="any" value="${amt}" placeholder="0 to stop" style="width:100%;" ${c._auto ? 'data-rv-auto="1"' : ''} /></div></div>
+        <div class="field"><label>New amount / mo</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-rv-field="newAmount" min="0" step="any" value="${amt}" placeholder="0 to stop" style="width:100%;" ${c._default != null ? `data-rv-default="${escapeHtml(String(c._default))}"` : ''} /></div></div>
         <div data-rv-current style="grid-column:1 / -1;font-size:12.5px;color:var(--ink-dim);margin-top:-2px;"></div>
       </div>`;
     }).join('');
@@ -10204,7 +10211,7 @@ function bindScenarioFieldHandlers(sc) {
     });
     const amtEl = row.querySelector('[data-rv-field="newAmount"]');
     // Typing makes the amount the user's own; it is never overwritten after that.
-    const onAmt = () => { amtEl.dataset.rvAuto = '0'; _rvRefreshRows(null); };
+    const onAmt = () => _rvRefreshRows(null);
     amtEl.addEventListener('input', onAmt); amtEl.addEventListener('change', onAmt);
     row.querySelector('[data-rv-del]').addEventListener('click', () => {
       readScenarioEditFields(sc);
@@ -10405,8 +10412,10 @@ function readScenarioEditFields(sc) {
       const raw = (r.querySelector('[data-rv-field="newAmount"]').value || '').trim();
       // Keep '' distinct from 0: an empty box is unfinished, 0 means stop.
       const newAmount = raw === '' || !isFinite(Number(raw)) ? '' : Math.max(0, Number(raw));
-      const auto = r.querySelector('[data-rv-field="newAmount"]').dataset.rvAuto === '1';
-      arr.push(Object.assign({}, t, { from, newAmount }, auto ? { _auto: true } : {}));
+      // Carry the filled-in default through re-renders, so a row stays a default only while its
+      // value still matches it.
+      const amtEl = r.querySelector('[data-rv-field="newAmount"]');
+      arr.push(Object.assign({}, t, { from, newAmount }, amtEl.dataset.rvDefault != null ? { _default: amtEl.dataset.rvDefault } : {}));
     });
     sc.params.changes = arr;
   }
@@ -11566,6 +11575,12 @@ function wireScenariosUI() {
   _scWired = true;
   document.getElementById('scAdd').addEventListener('click', openTemplateChooser);
   document.getElementById('scEditSave').addEventListener('click', () => {
+    // If the number pad is still open, finish it exactly as Done would before reading the form.
+    // Otherwise an unfinished entry (e.g. "40000+5000") is read raw and lost.
+    if (document.body.classList.contains('numpad-open')) {
+      const npDone = document.querySelector('.np-btn[data-action="done"]');
+      if (npDone) npDone.click();
+    }
     let target = null;
     if (_scEditingId === '__draft__' && _scDraft) {
       readScenarioEditFields(_scDraft);
@@ -11586,8 +11601,17 @@ function wireScenariosUI() {
       // An untouched default equals what the projection already has and grows the same way, so it
       // changes nothing: drop it rather than store a row that only looks like a decision.
       target.params.changes = (target.params.changes || [])
-        .filter(c => _rvChangeComplete(c) && !c._auto)
-        .map(c => { const o = Object.assign({}, c); delete o._auto; return o; });
+        .filter(c => _rvChangeComplete(c) && !(c._default != null && String(c.newAmount) === String(c._default)))
+        .map(c => { const o = Object.assign({}, c); delete o._default; return o; });
+      // Never save an empty one silently: that is how a typed change could vanish without trace.
+      if (!target.params.changes.length) {
+        alert('Nothing to save yet: no row has a new amount.\n\nEach row still shows the projected amount. Change the amount (0 to stop) in at least one row.');
+        const fields = document.getElementById('scEditFields');
+        fields.innerHTML = renderScenarioFields(target);
+        bindScenarioFieldHandlers(target);
+        if (!target.params.changes.length) { target.params.changes = [ _rvBlankChange() ]; fields.innerHTML = renderScenarioFields(target); bindScenarioFieldHandlers(target); }
+        return;
+      }
     }
     if (_scEditingId === '__draft__' && _scDraft) {
       if (!Array.isArray(state.scenarios)) state.scenarios = [];
