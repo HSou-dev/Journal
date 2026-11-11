@@ -2379,7 +2379,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.11.11.03';
+const APP_VERSION = '2026.11.11.04';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3867,7 +3867,29 @@ function resolveRevisionStack(scenarios) {
 //   categoryBase[key]  base monthly amount per month (state[key] x expMul x expGrowthMul); only LIVE categories
 //   categoryLabel[key]
 //   emis[id]           { name, startIdx, endIdx, amounts[] } from emiScheduleFor, the same schedule the engine charges
-//   invs[key]          { id, name, active[], base[] } contribution before scenario scaling; key = id_name
+//   invs[key]          { id, name, active[], base[], growAt } contribution before scenario scaling; key = id_name
+//   expGrowthAt(iso)   the app's annual expense step-up multiplier for any calendar month
+
+// Growth curve a revised amount follows, the same one its base follows: categories step up at
+// the expense rate, contributions at the same rate when growContributions is on, EMIs never.
+function revisionGrowth(ctx, r) {
+  if (!ctx) return null;
+  if (r.target === 'category') return ctx.expGrowthAt || null;
+  if (r.target === 'invest') {
+    const k = Object.keys(ctx.invs || {}).find(kk => ctx.invs[kk].id === r.ref);
+    return k ? ctx.invs[k].growAt : null;
+  }
+  return null;
+}
+// The amount revision r sets in month i. newAmount is what is paid in the first month the change
+// applies; from there it steps up exactly as the base would (v2026.11.11.04 — it was flat before,
+// which silently stopped inflation on anything revised). Used by the engine AND the editor's
+// default, so the default can never disagree with what the engine charges.
+function revisionAmountAt(r, i, isos, growAt) {
+  if (!growAt) return r.newAmount;
+  return r.newAmount * growAt(isos[i]) / growAt(r.from);
+}
+
 function applyRevisions(scenarios, monthsMeta, n, ctx, expenseMul, contribMul, expenseDelta, contribOverride, breakdowns) {
   if (!ctx) return;
   const groups = resolveRevisionStack(scenarios);
@@ -3891,7 +3913,7 @@ function applyRevisions(scenarios, monthsMeta, n, ctx, expenseMul, contribMul, e
         if (!base) return;
         for (let i = 0; i < n; i++) {
           if (!inWin(i)) continue;
-          const d = (r.newAmount - base[i]) * expenseMul[i];
+          const d = (revisionAmountAt(r, i, isos, ctx.expGrowthAt) - base[i]) * expenseMul[i];
           row[i] = d; expenseDelta[i] += d;
         }
         addRow(r.sc, 'Revise ' + (ctx.categoryLabel[r.ref] || r.ref) + ' to ' + money(r.newAmount) + ' from ' + r.from, 'expense', row);
@@ -3915,8 +3937,9 @@ function applyRevisions(scenarios, monthsMeta, n, ctx, expenseMul, contribMul, e
         if (!contribOverride[k]) contribOverride[k] = new Array(n).fill(null);
         for (let i = 0; i < n; i++) {
           if (!inWin(i) || !inv.active[i]) continue;
-          contribOverride[k][i] = r.newAmount;
-          row[i] = (r.newAmount - inv.base[i]) * contribMul[i];
+          const amt = revisionAmountAt(r, i, isos, inv.growAt);
+          contribOverride[k][i] = amt;
+          row[i] = (amt - inv.base[i]) * contribMul[i];
         }
         addRow(r.sc, 'Revise ' + (inv.name || r.ref) + ' contribution to ' + money(r.newAmount) + ' from ' + r.from, 'contribution', row);
       }
@@ -5025,6 +5048,14 @@ function resolveInstrumentTimeline(events, months, baseAmount) {
   return out;
 }
 
+// Calendar anchor for annual step-ups (salary, expenses, contributions) and annual interest
+// anniversaries: the PLAN start, never the start of whatever window is being viewed. These rules
+// used to read the projection's own first month, so opening the Projection sheet on Jun 2028
+// restarted inflation there and showed rent two increases lower than every other page.
+function _growthAnchorYM(fallback) {
+  return (state && /^\d{4}-\d{2}$/.test(state.horizonStart || '')) ? state.horizonStart : fallback;
+}
+
 function runProjection(overrides={}) {
   const horizonStart = overrides.horizonStart || state.horizonStart;
   let horizonEnd = overrides.horizonEnd || state.horizonEnd;
@@ -5047,7 +5078,7 @@ function runProjection(overrides={}) {
   //       after appraisal in the NEXT year.
   // Applies to salary (per-person appraisal month), expenses, and investment contributions.
   // NO monthly compounding of growth rates — only an annual step-up in the increment month.
-  const [hY, hM] = horizonStart.split('-').map(Number);
+  const [hY, hM] = _growthAnchorYM(horizonStart).split('-').map(Number);
 
   // Per-person appraisal months from state (default April=4).
   const p1ApprMonth  = (typeof state.p1BumpMonth      === 'number' ? state.p1BumpMonth      : 4);
@@ -5303,7 +5334,10 @@ function runProjection(overrides={}) {
     invTimeline[inv.id + '_' + inv.name] = resolveInstrumentTimeline(inv.events, months, inv.monthlyContribution || 0);
   });
 
-  const reviseCtx = { categoryBase, categoryLabel, emis: {}, invs: {} };
+  // Step-up multiplier for ANY calendar month, from the same hikesForMonth rule as expGrowthMul.
+  // A revision's from month may sit before the window being viewed; this prices it correctly.
+  const expGrowthAt = (iso) => { const [y, m] = iso.split('-').map(Number); return Math.pow(1 + expenseGrowth, hikesForMonth({ y, m }, expBumpMonth)); };
+  const reviseCtx = { categoryBase, categoryLabel, expGrowthAt, emis: {}, invs: {} };
   (state.emis || []).forEach(e => {
     if (!e || !e.id) return;
     const sch = emiScheduleFor(e, months);
@@ -5315,6 +5349,7 @@ function runProjection(overrides={}) {
     reviseCtx.invs[k] = {
       id: inv.id, name: inv.name,
       active: tl.map(t => !!t.active),
+      growAt: growContrib ? expGrowthAt : null,
       base: tl.map((t, i) => (t.amount || 0) * (growContrib ? expGrowthMul[i] : 1))
     };
   });
@@ -5534,7 +5569,7 @@ function runProjection(overrides={}) {
     // Onboard ON or AFTER appraisal month → first interest next year.
     // (The user has already received this year's annual credit before onboarding.)
     const horizonStart = result.isos[0] || state.horizonStart;
-    const [hY, hM] = horizonStart.split('-').map(Number);
+    const [hY, hM] = _growthAnchorYM(horizonStart).split('-').map(Number);
     const firstAnniversaryYear = hM < expBumpMonth ? hY : hY + 1;
 
     // Returns true if this (y, m) is an anniversary at which interest should be credited.
@@ -5758,7 +5793,7 @@ function runProjection(overrides={}) {
         const expBumpMonth = (typeof state.expenseBumpMonth === 'number' ? state.expenseBumpMonth : 4);
         const anniversaryMonth = (expBumpMonth % 12) + 1;
         const horizonStart = result.isos[0] || state.horizonStart;
-        const [hY, hM] = horizonStart.split('-').map(Number);
+        const [hY, hM] = _growthAnchorYM(horizonStart).split('-').map(Number);
         const firstAnniversaryYear = hM < expBumpMonth ? hY : hY + 1;
         const isAnniversary = (y, m) => (m === anniversaryMonth) && (y >= firstAnniversaryYear);
         const adjustedCashContrib = result.cashContribSeries.map((c, i) => (c || 0) + residualDelta[i]);
@@ -8507,9 +8542,11 @@ function renderBudget() {
   let _hiddenEmis = 0;
   (state.emis || []).forEach(e => {
     const row = new Array(n).fill(0);
-    const win = _emiActiveWindow(e, _emiWinMonths);
-    if (win) {
-      for (let i = win.startIdx; i <= win.endIdx; i++) row[i] = e.amount;
+    // Shared schedule, the same one the engine charges. This row used to write e.amount into
+    // every active month, so a Step up / down event changed the engine total but not this row.
+    const sch = emiScheduleFor(e, _emiWinMonths);
+    if (sch) {
+      for (let i = sch.startIdx; i <= sch.endIdx; i++) row[i] = sch.amounts[i];
     }
     const ov = overlayEmiRow(e.id, row);
     const nums = (ov && ov.numeric) ? ov.numeric : row;
@@ -9656,14 +9693,19 @@ function _rvRefreshBase() {
   const p = runProjection({ scenarios: [] });
   _rvBaseSnap = { isos: p.isos, ctx: p.reviseBase };
 }
-function _rvCurrentText(targetVal, from, newAmountStr) {
+// What the projection has for `targetVal` in month `from`, BEFORE this row: the base plan, or an
+// earlier row in this same scenario that is already in effect then. Earlier rows are resolved by
+// the engine's own resolveRevisionStack and priced by revisionAmountAt, so this is exactly what
+// the Projection sheet shows with this scenario previewed.
+// Returns { cur, dead, via } where via is the from-month of the earlier row used, if any.
+function _rvPlannedAt(targetVal, from, priorChanges) {
   if (!_rvBaseSnap) _rvRefreshBase();
   const t = _rvParseTarget(targetVal);
-  if (!t.target) return '<span style="color:var(--ink-muted);">Pick what changes to see its planned amount.</span>';
-  if (!/^\d{4}-\d{2}$/.test(from || '')) return '<span style="color:var(--ink-muted);">Pick a month.</span>';
-  const i = _rvBaseSnap.isos.indexOf(from);
-  if (i < 0) return '<span style="color:var(--ink-muted);">That month is outside your plan horizon.</span>';
-  const ctx = _rvBaseSnap.ctx;
+  if (!t.target) return { dead: '', empty: 'Pick what changes to see its planned amount.' };
+  if (!/^\d{4}-\d{2}$/.test(from || '')) return { dead: '', empty: 'Pick a month.' };
+  const isos = _rvBaseSnap.isos, ctx = _rvBaseSnap.ctx;
+  const i = isos.indexOf(from);
+  if (i < 0) return { dead: '', empty: 'That month is outside your plan horizon.' };
   let cur = null, dead = '';
   if (t.target === 'category') {
     const arr = ctx.categoryBase[t.key];
@@ -9678,13 +9720,63 @@ function _rvCurrentText(targetVal, from, newAmountStr) {
     else if (!ctx.invs[k].active[i]) dead = 'This investment is closed by then, so this change has no effect.';
     else cur = ctx.invs[k].base[i];
   }
-  if (dead) return `<span style="color:#e06060;">${dead}</span>`;
-  const label = _rvBaseSnap.isos[i];
+  if (dead) return { dead };
+  let via = null;
+  const prior = (priorChanges || []).filter(_rvChangeComplete);
+  if (prior.length) {
+    const groups = resolveRevisionStack([{ type: 'revise', params: { changes: prior } }]);
+    const ref = t.target === 'category' ? t.key : t.id;
+    const g = groups[t.target + ':' + ref] || [];
+    const r = g.find(x => x.from <= from && (x.until == null || from < x.until));
+    if (r) { cur = revisionAmountAt(r, i, isos, revisionGrowth(ctx, r)); via = r.from; }
+  }
+  return { cur, via, dead: '' };
+}
+function _rvCurrentText(targetVal, from, newAmountStr, priorChanges, isAuto) {
+  const pl = _rvPlannedAt(targetVal, from, priorChanges);
+  if (pl.empty) return `<span style="color:var(--ink-muted);">${pl.empty}</span>`;
+  if (pl.dead) return `<span style="color:#e06060;">${pl.dead}</span>`;
+  const t = _rvParseTarget(targetVal);
+  const lead = pl.via ? `With your ${pl.via} change, ${from}` : `Projection for ${from}`;
   const hasNew = newAmountStr !== '' && newAmountStr != null && isFinite(Number(newAmountStr));
-  if (!hasNew) return `Planned for ${label}: <strong>${fmtMoney(cur)}</strong>/mo`;
-  const nv = Math.max(0, Number(newAmountStr)), d = nv - cur;
-  const sign = d > 0 ? '+' : (d < 0 ? '−' : '±');
-  return `${label}: <strong>${fmtMoney(cur)}</strong> → <strong style="color:var(--gold-bright);">${fmtMoney(nv)}</strong>/mo <span style="color:var(--ink-muted);">(${sign}${fmtMoney(Math.abs(d))})</span>`;
+  const grows = t.target === 'category' || (t.target === 'invest' && state.growContributions !== false);
+  const tail = grows ? ' Grows yearly at your expense rate after that.' : '';
+  if (!hasNew) return `${lead}: <strong>${fmtMoney(pl.cur)}</strong>/mo`;
+  const nv = Math.max(0, Number(newAmountStr)), d = nv - pl.cur;
+  if (Math.abs(d) < 0.5) {
+    return `${lead}: <strong>${fmtMoney(pl.cur)}</strong>/mo. <span style="color:var(--ink-muted);">${isAuto ? 'Default from the projection: change the amount, or this row is dropped on save.' : 'Same as planned, no change.'}</span>`;
+  }
+  const sign = d > 0 ? '+' : '−';
+  return `${lead}: <strong>${fmtMoney(pl.cur)}</strong> → <strong style="color:var(--gold-bright);">${fmtMoney(nv)}</strong>/mo <span style="color:var(--ink-muted);">(${sign}${fmtMoney(Math.abs(d))})${tail}</span>`;
+}
+// Read every row in the editor, refill defaults, refresh the lines. A row's amount is a DEFAULT
+// (data-rv-auto="1") until the user types in it; defaults follow target/month changes and changes
+// to earlier rows. Defaults are not counted as "earlier rows" for other rows: by construction they
+// equal what is already in effect, so they change nothing.
+// `trigger` is the row whose target/month just changed: it is filled even if empty.
+function _rvRefreshRows(trigger) {
+  const rows = [...document.querySelectorAll('#scEditFields [data-rv-row]')];
+  const read = r => {
+    const amtEl = r.querySelector('[data-rv-field="newAmount"]');
+    const t = _rvParseTarget(r.querySelector('[data-rv-field="target"]').value);
+    return Object.assign({}, t, { from: r.querySelector('[data-rv-field="from"]').value, newAmount: amtEl.value === '' ? '' : Number(amtEl.value), auto: amtEl.dataset.rvAuto === '1' });
+  };
+  rows.forEach((r, idx) => {
+    const amtEl = r.querySelector('[data-rv-field="newAmount"]');
+    const me = read(r);
+    // Rows that apply before this one: earlier month, or same month and earlier in the list.
+    const prior = rows.map((x, j) => ({ j, v: read(x) }))
+      .filter(o => o.j !== idx && !o.v.auto && o.v.target === me.target && (o.v.from < me.from || (o.v.from === me.from && o.j < idx)))
+      .map(o => o.v);
+    const tv = r.querySelector('[data-rv-field="target"]').value;
+    const pl = _rvPlannedAt(tv, me.from, prior);
+    const fillable = amtEl.dataset.rvAuto === '1' || (r === trigger && amtEl.value === '');
+    if (fillable) {
+      if (pl.cur != null) { amtEl.value = String(Math.round(pl.cur)); amtEl.dataset.rvAuto = '1'; }
+      else if (amtEl.dataset.rvAuto === '1') { amtEl.value = ''; }
+    }
+    r.querySelector('[data-rv-current]').innerHTML = _rvCurrentText(tv, me.from, amtEl.value, prior, amtEl.dataset.rvAuto === '1');
+  });
 }
 
 let _scEditingId = null; // id being edited, or '__draft__' if creating
@@ -9873,15 +9965,15 @@ function renderScenarioFields(sc) {
         <div class="field" style="grid-column:1 / 3;"><label>What changes</label><select data-rv-field="target" style="width:100%;">${_rvTargetOptions(tv)}</select></div>
         <button class="del-btn" data-rv-del title="Remove" style="grid-column:3;grid-row:1;align-self:center;">×</button>
         <div class="field"><label>From month</label><input type="month" data-rv-field="from" value="${escapeHtml(c.from || '')}" style="width:100%;" /></div>
-        <div class="field"><label>New amount / mo</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-rv-field="newAmount" min="0" step="any" value="${amt}" placeholder="0 to stop" style="width:100%;" /></div></div>
-        <div data-rv-current style="grid-column:1 / -1;font-size:12.5px;color:var(--ink-dim);margin-top:-2px;">${_rvCurrentText(tv, c.from, amt === '' ? '' : String(amt))}</div>
+        <div class="field"><label>New amount / mo</label><div class="inline-prefix" data-prefix="${cur}"><input type="number" data-rv-field="newAmount" min="0" step="any" value="${amt}" placeholder="0 to stop" style="width:100%;" ${c._auto ? 'data-rv-auto="1"' : ''} /></div></div>
+        <div data-rv-current style="grid-column:1 / -1;font-size:12.5px;color:var(--ink-dim);margin-top:-2px;"></div>
       </div>`;
     }).join('');
     return nameField + `
       <div style="font-size:12px;color:var(--ink-muted);margin:0 0 10px;line-height:1.5;">
-        Each change replaces the planned monthly amount from that month on. Enter 0 to stop an EMI or contribution.
-        The new amount stays fixed; it does not inflate. If two changes hit the same item, the later month wins from that month on.
-        Investment changes move contributions, not expenses.
+        Pick an item and a month: the amount box fills with what the projection has then. Type the new amount; 0 stops an EMI or contribution.
+        From that month the new amount steps up each year at your expense rate, like the rest of the plan (contributions only if they grow in your plan; EMIs never).
+        If two changes hit the same item, the later month wins from that month on. Investment changes move contributions, not expenses.
       </div>
       <div id="scRvList">${rows || '<div style="color:var(--ink-muted);font-style:italic;font-size:13px;margin-bottom:8px;">No changes yet.</div>'}</div>
       <button class="btn ghost" data-sc-add-row="changes" style="margin-bottom:6px;">+ Add a change</button>`;
@@ -10105,13 +10197,15 @@ function bindScenarioFieldHandlers(sc) {
   });
   // Change my plan: live "planned → new" line, and row delete.
   document.querySelectorAll('#scEditFields [data-rv-row]').forEach(row => {
-    const upd = () => {
-      const tv = row.querySelector('[data-rv-field="target"]').value;
-      const from = row.querySelector('[data-rv-field="from"]').value;
-      const amt = row.querySelector('[data-rv-field="newAmount"]').value;
-      row.querySelector('[data-rv-current]').innerHTML = _rvCurrentText(tv, from, amt);
-    };
-    row.querySelectorAll('[data-rv-field]').forEach(el => { el.addEventListener('input', upd); el.addEventListener('change', upd); });
+    ['target', 'from'].forEach(f => {
+      const el = row.querySelector(`[data-rv-field="${f}"]`);
+      const h = () => _rvRefreshRows(row);
+      el.addEventListener('input', h); el.addEventListener('change', h);
+    });
+    const amtEl = row.querySelector('[data-rv-field="newAmount"]');
+    // Typing makes the amount the user's own; it is never overwritten after that.
+    const onAmt = () => { amtEl.dataset.rvAuto = '0'; _rvRefreshRows(null); };
+    amtEl.addEventListener('input', onAmt); amtEl.addEventListener('change', onAmt);
     row.querySelector('[data-rv-del]').addEventListener('click', () => {
       readScenarioEditFields(sc);
       sc.params.changes.splice(Number(row.dataset.rvRow), 1);
@@ -10120,6 +10214,7 @@ function bindScenarioFieldHandlers(sc) {
       bindScenarioFieldHandlers(sc);
     });
   });
+  if (document.querySelector('#scEditFields [data-rv-row]')) _rvRefreshRows(null);
   // Custom: row delete. The × on income/expense event rows had no handler.
   document.querySelectorAll('#scEditFields [data-sc-list-del]').forEach(btn => {
     btn.addEventListener('click', () => { const r = btn.closest('[data-sc-list]'); if (r) r.remove(); });
@@ -10310,7 +10405,8 @@ function readScenarioEditFields(sc) {
       const raw = (r.querySelector('[data-rv-field="newAmount"]').value || '').trim();
       // Keep '' distinct from 0: an empty box is unfinished, 0 means stop.
       const newAmount = raw === '' || !isFinite(Number(raw)) ? '' : Math.max(0, Number(raw));
-      arr.push(Object.assign({}, t, { from, newAmount }));
+      const auto = r.querySelector('[data-rv-field="newAmount"]').dataset.rvAuto === '1';
+      arr.push(Object.assign({}, t, { from, newAmount }, auto ? { _auto: true } : {}));
     });
     sc.params.changes = arr;
   }
@@ -11487,7 +11583,11 @@ function wireScenariosUI() {
       });
     }
     if (target && target.type === 'revise' && target.params) {
-      target.params.changes = (target.params.changes || []).filter(_rvChangeComplete);
+      // An untouched default equals what the projection already has and grows the same way, so it
+      // changes nothing: drop it rather than store a row that only looks like a decision.
+      target.params.changes = (target.params.changes || [])
+        .filter(c => _rvChangeComplete(c) && !c._auto)
+        .map(c => { const o = Object.assign({}, c); delete o._auto; return o; });
     }
     if (_scEditingId === '__draft__' && _scDraft) {
       if (!Array.isArray(state.scenarios)) state.scenarios = [];
