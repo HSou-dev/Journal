@@ -2379,7 +2379,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.11.11.06';
+const APP_VERSION = '2026.11.11.07';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3379,6 +3379,11 @@ window._getNumpadPref = () => {
     if (activeInput === input) return;
     if (activeInput) hide(true);
     activeInput = input;
+    // Fresh entry: a box still showing a default the app filled in (Change my plan's
+    // data-rv-default) is replaced by the first digit typed, like a calculator, instead of
+    // having digits appended to it. Only for such defaults; every other field still appends.
+    if (input.dataset.rvDefault != null && input.value === input.dataset.rvDefault) input.dataset.npFresh = '1';
+    else delete input.dataset.npFresh;
     // Suppress OS keyboard
     originalReadonly = input.readOnly;
     originalInputmode = input.getAttribute('inputmode');
@@ -3448,11 +3453,17 @@ window._getNumpadPref = () => {
     if (!activeInput) return;
     let normalized = ch;
     if (ch === '−') normalized = '-';
+    if (activeInput.dataset.npFresh === '1') {
+      delete activeInput.dataset.npFresh;
+      // A digit or decimal point starts a new number; an operator builds on the default (44949 + 5000).
+      if (/^[0-9.]$/.test(normalized)) activeInput.value = '';
+    }
     activeInput.value = (activeInput.value || '') + normalized;
     refresh();
   }
   function backspace() {
     if (!activeInput) return;
+    delete activeInput.dataset.npFresh;
     activeInput.value = (activeInput.value || '').slice(0, -1);
     refresh();
   }
@@ -3827,7 +3838,7 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
   // Runs AFTER the loop above because a revision is a delta against the base plan AS SCALED by
   // the other scenarios: retirement's expenseMul / contribMul must apply to the revised amount
   // the same way they apply to the base, or a revision would leak through a retirement cut.
-  applyRevisions(scenarios, monthsMeta, n, reviseCtx, expenseMul, contribMul, expenseDelta, contribOverride, breakdowns);
+  applyRevisions(scenarios, monthsMeta, n, reviseCtx, expenseMul, contribMul, expenseDelta, contribOverride, breakdowns, incomeMul, incomeDelta);
 
   return { incomeDelta, expenseDelta, assetDelta, liabDelta, incomeMul, expenseMul, contribMul, contribOverride, breakdowns };
 }
@@ -3849,7 +3860,7 @@ function resolveRevisionStack(scenarios) {
       if (c.newAmount == null || c.newAmount === '' || !isFinite(Number(c.newAmount))) return;
       if (!/^\d{4}-\d{2}$/.test(c.from || '')) return;
       let ref = null;
-      if (c.target === 'category') ref = c.key;
+      if (c.target === 'category' || c.target === 'salary') ref = c.key;
       else if (c.target === 'emi' || c.target === 'invest') ref = c.id;
       if (!ref) return;
       const tkey = c.target + ':' + ref;
@@ -3869,12 +3880,15 @@ function resolveRevisionStack(scenarios) {
 //   emis[id]           { name, startIdx, endIdx, amounts[] } from emiScheduleFor, the same schedule the engine charges
 //   invs[key]          { id, name, active[], base[], growAt } contribution before scenario scaling; key = id_name
 //   expGrowthAt(iso)   the app's annual expense step-up multiplier for any calendar month
+//   salaries[p1|p2]    { name, base[], mask[], growAt } the person's income row (salary + other) as
+//                      planned; mask false where a recorded salary or retirement stop takes priority
 
 // Growth curve a revised amount follows, the same one its base follows: categories step up at
 // the expense rate, contributions at the same rate when growContributions is on, EMIs never.
 function revisionGrowth(ctx, r) {
   if (!ctx) return null;
   if (r.target === 'category') return ctx.expGrowthAt || null;
+  if (r.target === 'salary') return (ctx.salaries && ctx.salaries[r.ref]) ? ctx.salaries[r.ref].growAt : null;
   if (r.target === 'invest') {
     const k = Object.keys(ctx.invs || {}).find(kk => ctx.invs[kk].id === r.ref);
     return k ? ctx.invs[k].growAt : null;
@@ -3890,7 +3904,7 @@ function revisionAmountAt(r, i, isos, growAt) {
   return r.newAmount * growAt(isos[i]) / growAt(r.from);
 }
 
-function applyRevisions(scenarios, monthsMeta, n, ctx, expenseMul, contribMul, expenseDelta, contribOverride, breakdowns) {
+function applyRevisions(scenarios, monthsMeta, n, ctx, expenseMul, contribMul, expenseDelta, contribOverride, breakdowns, incomeMul, incomeDelta) {
   if (!ctx) return;
   const groups = resolveRevisionStack(scenarios);
   const gkeys = Object.keys(groups);
@@ -3930,6 +3944,19 @@ function applyRevisions(scenarios, monthsMeta, n, ctx, expenseMul, contribMul, e
           row[i] = d; expenseDelta[i] += d;
         }
         addRow(r.sc, 'Revise ' + (sch.name || r.ref) + ' EMI to ' + money(r.newAmount) + ' from ' + r.from, 'expense', row, 'emi:' + r.ref);
+      } else if (r.target === 'salary') {
+        // Salary (the person's monthly income row: salary + other income). Steps up at the salary
+        // growth rate in that person's appraisal month, like the base. Months with a recorded
+        // salary (Journal / Step 2 override) or after a retirement stop are masked out: those
+        // win over a revision, the same way a close event wins over an EMI revision.
+        const sal = ctx.salaries && ctx.salaries[r.ref];
+        if (!sal || !incomeDelta) return;
+        for (let i = 0; i < n; i++) {
+          if (!inWin(i) || !sal.mask[i]) continue;
+          const d = (revisionAmountAt(r, i, isos, sal.growAt) - sal.base[i]) * (incomeMul ? incomeMul[i] : 1);
+          row[i] = d; incomeDelta[i] += d;
+        }
+        addRow(r.sc, 'Revise ' + (sal.name || r.ref) + ' salary to ' + money(r.newAmount) + ' from ' + r.from, 'income', row, 'salary:' + r.ref);
       } else if (r.target === 'invest') {
         // Contributions are not expenses: nothing goes into expenseDelta. The engine reads
         // contribOverride and replaces the scheduled contribution; the row is for display only.
@@ -5339,7 +5366,22 @@ function runProjection(overrides={}) {
   // Step-up multiplier for ANY calendar month, from the same hikesForMonth rule as expGrowthMul.
   // A revision's from month may sit before the window being viewed; this prices it correctly.
   const expGrowthAt = (iso) => { const [y, m] = iso.split('-').map(Number); return Math.pow(1 + expenseGrowth, hikesForMonth({ y, m }, expBumpMonth)); };
-  const reviseCtx = { categoryBase, categoryLabel, expGrowthAt, emis: {}, invs: {} };
+  const reviseCtx = { categoryBase, categoryLabel, expGrowthAt, emis: {}, invs: {}, salaries: {} };
+  {
+    const ovMonths = { p1: new Set(), p2: new Set() };
+    (state.incomeOverrides || []).forEach(o => { if (o && (o.person === 'p1' || o.person === 'p2')) ovMonths[o.person].add(o.month); });
+    (state._txDerivedOverrides || []).forEach(o => { if (o) ovMonths[o.person === 'p2' ? 'p2' : 'p1'].add(o.month); });
+    const salGrowAt = appr => (iso) => { const [y, m] = iso.split('-').map(Number); return Math.pow(1 + salaryGrowth, hikesForMonth({ y, m }, appr)); };
+    const addSal = (key, series, appr, stopISO, name) => {
+      reviseCtx.salaries[key] = {
+        name, base: series.slice(),
+        mask: months.map(m => !ovMonths[key].has(m.iso) && !(stopISO && m.iso >= stopISO)),
+        growAt: salGrowAt(appr)
+      };
+    };
+    addSal('p1', p1Series, p1ApprMonth, _retire && _retire.p1StopISO, state.p1Name || 'You');
+    addSal('p2', p2Series, p2ApprMonth, _retire && _retire.p2StopISO, state.p2Name || 'Partner');
+  }
   (state.emis || []).forEach(e => {
     if (!e || !e.id) return;
     const sch = emiScheduleFor(e, months);
@@ -8233,17 +8275,39 @@ function renderBudget() {
   const colspan = n + 1;
   const constantRow = v => new Array(n).fill(v);
 
+  // Revisions ('Change my plan') change an EXISTING row, so they are shown in that row: Rent reads
+  // 0 from March rather than staying 42,405 with a separate -42,405 row further down. revFold holds
+  // the engine's own delta per row (sliced to the window); revNames the scenario names for the marker.
+  // The delta is added as-is, so every column still sums to the engine's totals.
+  const revFold = {}, revNames = {};
+  (p.scenarioBreakdowns || []).forEach(sb => {
+    sb.rows.forEach(r => {
+      if (!r.revTarget) return;
+      const slice = r.values.slice(sliceFrom, sliceTo);
+      if (r.kind !== 'contribution') {
+        const acc = revFold[r.revTarget] || (revFold[r.revTarget] = new Array(slice.length).fill(0));
+        for (let i = 0; i < slice.length; i++) acc[i] += slice[i] || 0;
+      }
+      (revNames[r.revTarget] = revNames[r.revTarget] || new Set()).add(sb.scenarioName);
+    });
+  });
+  const revNote = key => revNames[key] ? Array.from(revNames[key]).join(' + ') : null;
+  // Marker for a row changed by a previewed revision. Placed BEFORE the label so the EMI grouping,
+  // which matches labels ending in "(EMI)", still finds the row.
+  const revMark = r => r && r.revNote ? `<span title="Changed by ${escapeHtml(r.revNote)}" style="color:var(--gold-bright);font-style:italic;">✎ ${escapeHtml(r.revNote)} · </span>` : '';
+  const withFold = (slice, key) => { const f = revFold[key]; return f ? slice.map((v, i) => v + (f[i] || 0)) : slice; };
+
   const incomeRows = [];
-  const p1Slice = p.p1Series.slice(sliceFrom, sliceTo);
-  const p2Slice = p.p2Series.slice(sliceFrom, sliceTo);
+  const p1Slice = withFold(p.p1Series.slice(sliceFrom, sliceTo), 'salary:p1');
+  const p2Slice = withFold(p.p2Series.slice(sliceFrom, sliceTo), 'salary:p2');
   const oneOffIncSlice = p.oneOffIncSeries.slice(sliceFrom, sliceTo);
   if (p1Slice.some(v => v > 0)) {
     const ov = overlayIncomeSalaryRow('p1', p1Slice);
-    incomeRows.push({ label: (state.p1Name || 'You') + ' · Salary', overlay: ov });
+    incomeRows.push({ label: (state.p1Name || 'You') + ' · Salary', overlay: ov, revNote: revNote('salary:p1') });
   }
   if (state.mode === 'partner' && p2Slice.some(v => v > 0)) {
     const ov = overlayIncomeSalaryRow('p2', p2Slice);
-    incomeRows.push({ label: (state.p2Name || 'Partner') + ' · Salary', overlay: ov });
+    incomeRows.push({ label: (state.p2Name || 'Partner') + ' · Salary', overlay: ov, revNote: revNote('salary:p2') });
   }
   if (oneOffIncSlice.some(v => v > 0)) incomeRows.push({ label: 'Ad-Hoc Income', values: oneOffIncSlice });
 
@@ -8257,22 +8321,10 @@ function renderBudget() {
   // go into the inflows section; expense rows (kind: 'expense' or 'expenseReduction') go into outflows.
   const scenarioIncomeRows = [];
   const scenarioExpenseRows = [];
-  // Revisions ('Change my plan') change an EXISTING row, so they are shown in that row: Rent reads
-  // 0 from March rather than staying 42,405 with a separate -42,405 row further down. revFold holds
-  // the engine's own delta per row (sliced to the window); revNames the scenario names for the marker.
-  // The delta is added as-is, so every column still sums to the engine's Total Expenses.
-  const revFold = {}, revNames = {};
   (p.scenarioBreakdowns || []).forEach(sb => {
     sb.rows.forEach(r => {
+      if (r.revTarget) return;   // shown inside the row it changes (revFold, above)
       const slice = r.values.slice(sliceFrom, sliceTo);
-      if (r.revTarget) {
-        if (r.kind !== 'contribution') {
-          const acc = revFold[r.revTarget] || (revFold[r.revTarget] = new Array(slice.length).fill(0));
-          for (let i = 0; i < slice.length; i++) acc[i] += slice[i] || 0;
-        }
-        (revNames[r.revTarget] = revNames[r.revTarget] || new Set()).add(sb.scenarioName);
-        return;
-      }
       const labelled = `${escapeHtml(sb.scenarioName)} · ${escapeHtml(r.label)}`;
       const item = { label: labelled, values: slice, scenario: true };
       if (r.kind === 'contribution') {
@@ -8286,10 +8338,6 @@ function renderBudget() {
     });
   });
 
-  const revNote = key => revNames[key] ? Array.from(revNames[key]).join(' + ') : null;
-  // Marker for a row changed by a previewed revision. Placed BEFORE the label so the EMI grouping,
-  // which matches labels ending in "(EMI)", still finds the row.
-  const revMark = r => r && r.revNote ? `<span title="Changed by ${escapeHtml(r.revNote)}" style="color:var(--gold-bright);font-style:italic;">✎ ${escapeHtml(r.revNote)} · </span>` : '';
   // Helper to render a scenario row with italic styling (per user preference)
   const scRowHtml = r => `<tr style="font-style:italic;color:var(--ink-dim);"><th>${r.label}</th>${cells(r.values)}</tr>`;
 
@@ -9593,7 +9641,7 @@ const SCENARIO_TEMPLATES = [
   { type:'kid', label:'Have a child', icon:'👶', desc:'Age-based monthly costs (India estimates, editable) + optional upfront cost.', color:'var(--accent)' },
   { type:'retirement', label:'Retire early', icon:'🏖️', desc:'Income stops; expenses optionally reduced.', color:'#b58ac4' },
   { type:'custom', label:'Custom', icon:'✦', desc:'Free-form one-offs and a recurring expense bump.', color:'#e0a868' },
-  { type:'revise', label:'Change my plan', icon:'✎', desc:'From a chosen month, change rent or any expense, an EMI, or an investment contribution.', color:'#5eb3a8' }
+  { type:'revise', label:'Change my plan', icon:'✎', desc:'From a chosen month, change a salary, rent or any expense, an EMI, or an investment contribution.', color:'#5eb3a8' }
 ];
 
 function defaultParamsForType(type) {
@@ -9672,30 +9720,39 @@ function _rvChangeComplete(c) {
 }
 function _rvTargetValue(c) {
   if (!c || !c.target) return '';
-  return c.target + ':' + (c.target === 'category' ? c.key : c.id);
+  return c.target + ':' + ((c.target === 'category' || c.target === 'salary') ? c.key : c.id);
 }
 function _rvParseTarget(v) {
   const i = (v || '').indexOf(':');
   if (i < 0) return { target: '' };
   const target = v.slice(0, i), ref = v.slice(i + 1);
-  return target === 'category' ? { target, key: ref } : { target, id: ref };
+  return (target === 'category' || target === 'salary') ? { target, key: ref } : { target, id: ref };
 }
 function _rvTargetLabel(c) {
   if (!c) return '';
   if (c.target === 'category') { const cat = getExpenseCats().find(x => x.key === c.key); return cat ? cat.label : c.key + ' (deleted)'; }
+  if (c.target === 'salary') return _rvSalaryLabel(c.key);
   if (c.target === 'emi') { const e = (state.emis || []).find(x => x.id === c.id); return e ? (e.name || 'EMI') + ' EMI' : c.id + ' (removed)'; }
   if (c.target === 'invest') { const v = (state.investments || []).find(x => x.id === c.id); return v ? (v.name || v.id) + ' SIP' : c.id + ' (removed)'; }
   return '';
 }
+function _rvSalaryLabel(key) {
+  const name = key === 'p2' ? (state.p2Name || 'Partner') : (state.p1Name || 'You');
+  const other = key === 'p2' ? state.p2Other : state.p1Other;
+  return name + ' · Salary' + (other > 0 ? ' (incl. other income)' : '');
+}
 function _rvTargetOptions(selected) {
   const now = _nowYMkey();
   const opt = (v, label) => `<option value="${escapeHtml(v)}" ${v === selected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+  // Salaries: same rows as the Projection sheet shows (partner only in partner mode).
+  const sals = [opt('salary:p1', _rvSalaryLabel('p1'))];
+  if (state.mode === 'partner') sals.push(opt('salary:p2', _rvSalaryLabel('p2')));
   const cats = getExpenseCats().map(c => opt('category:' + c.key, c.label));
   // EMIs still running now or starting later. Revising a closed loan has no effect, so it is not offered.
   const emis = (state.emis || []).filter(e => e && e.id && (_emiEndIso(e) || '') >= now).map(e => opt('emi:' + e.id, e.name || 'EMI'));
   const seen = new Set();
   const invs = (state.investments || []).filter(v => v && v.id !== 'savings' && !seen.has(v.id) && seen.add(v.id)).map(v => opt('invest:' + v.id, v.name || v.id));
-  const all = [].concat(cats, emis, invs).join('');
+  const all = [].concat(sals, cats, emis, invs).join('');
   // A saved change whose target has since been deleted or closed keeps its selection, labelled,
   // so the row is never silently re-pointed at something else.
   let orphan = '';
@@ -9704,6 +9761,7 @@ function _rvTargetOptions(selected) {
     orphan = `<option value="${escapeHtml(selected)}" selected>${escapeHtml(ol)}${/\((deleted|removed)\)$/.test(ol) ? '' : ' (closed)'}</option>`;
   }
   return `<option value="" ${selected ? '' : 'selected'}>Choose what changes…</option>${orphan}
+    <optgroup label="Salaries">${sals.join('')}</optgroup>
     <optgroup label="Expenses">${cats.join('')}</optgroup>
     ${emis.length ? `<optgroup label="EMIs">${emis.join('')}</optgroup>` : ''}
     ${invs.length ? `<optgroup label="Investments (monthly contribution)">${invs.join('')}</optgroup>` : ''}`;
@@ -9732,6 +9790,11 @@ function _rvPlannedAt(targetVal, from, priorChanges) {
   if (t.target === 'category') {
     const arr = ctx.categoryBase[t.key];
     if (!arr) dead = 'This category has been deleted, so this change is ignored.'; else cur = arr[i];
+  } else if (t.target === 'salary') {
+    const sal = ctx.salaries && ctx.salaries[t.key];
+    if (!sal) dead = 'This salary is not part of your plan.';
+    else if (!sal.mask[i]) dead = 'A recorded salary or a retirement stop already sets that month, and it takes priority, so this change has no effect there.';
+    else cur = sal.base[i];
   } else if (t.target === 'emi') {
     const sch = ctx.emis[t.id];
     if (!sch || i < sch.startIdx || i > sch.endIdx) dead = 'This EMI is not running in that month, so this change has no effect.';
@@ -9747,7 +9810,7 @@ function _rvPlannedAt(targetVal, from, priorChanges) {
   const prior = (priorChanges || []).filter(_rvChangeComplete);
   if (prior.length) {
     const groups = resolveRevisionStack([{ type: 'revise', params: { changes: prior } }]);
-    const ref = t.target === 'category' ? t.key : t.id;
+    const ref = (t.target === 'category' || t.target === 'salary') ? t.key : t.id;
     const g = groups[t.target + ':' + ref] || [];
     const r = g.find(x => x.from <= from && (x.until == null || from < x.until));
     if (r) { cur = revisionAmountAt(r, i, isos, revisionGrowth(ctx, r)); via = r.from; }
@@ -9762,7 +9825,8 @@ function _rvCurrentText(targetVal, from, newAmountStr, priorChanges, isAuto) {
   const lead = pl.via ? `With your ${pl.via} change, ${from}` : `Projection for ${from}`;
   const hasNew = newAmountStr !== '' && newAmountStr != null && isFinite(Number(newAmountStr));
   const grows = t.target === 'category' || (t.target === 'invest' && state.growContributions !== false);
-  const tail = grows ? ' Grows yearly at your expense rate after that.' : '';
+  const tail = t.target === 'salary' ? ' Grows at your salary rate at each appraisal after that.'
+             : (grows ? ' Grows yearly at your expense rate after that.' : '');
   if (!hasNew) return `${lead}: <strong>${fmtMoney(pl.cur)}</strong>/mo`;
   const nv = Math.max(0, Number(newAmountStr)), d = nv - pl.cur;
   if (Math.abs(d) < 0.5) {
@@ -10001,7 +10065,7 @@ function renderScenarioFields(sc) {
     return nameField + `
       <div style="font-size:12px;color:var(--ink-muted);margin:0 0 10px;line-height:1.5;">
         Pick an item and a month: the amount box fills with what the projection has then. Type the new amount; 0 stops an EMI or contribution.
-        From that month the new amount steps up each year at your expense rate, like the rest of the plan (contributions only if they grow in your plan; EMIs never).
+        From that month the new amount keeps growing like the rest of the plan: salaries at your salary rate at each appraisal, expenses at your expense rate (contributions only if they grow in your plan; EMIs never).
         If two changes hit the same item, the later month wins from that month on. Investment changes move contributions, not expenses.
       </div>
       <div id="scRvList">${rows || '<div style="color:var(--ink-muted);font-style:italic;font-size:13px;margin-bottom:8px;">No changes yet.</div>'}</div>
@@ -10232,6 +10296,13 @@ function bindScenarioFieldHandlers(sc) {
       el.addEventListener('input', h); el.addEventListener('change', h);
     });
     const amtEl = row.querySelector('[data-rv-field="newAmount"]');
+    // Desktop: clicking into a box that still shows its default selects it, so typing replaces it.
+    // Deferred so it runs after the calculator promotion (number -> text), which drops any selection.
+    amtEl.addEventListener('focus', () => setTimeout(() => {
+      if (document.activeElement === amtEl && _rvIsDefault(amtEl) && !document.body.classList.contains('numpad-open')) {
+        try { amtEl.select(); } catch (e) {}
+      }
+    }, 0));
     // Typing makes the amount the user's own; it is never overwritten after that.
     const onAmt = () => _rvRefreshRows(null);
     amtEl.addEventListener('input', onAmt); amtEl.addEventListener('change', onAmt);
