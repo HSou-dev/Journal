@@ -2379,7 +2379,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.11.11.07';
+const APP_VERSION = '2026.11.11.08';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -2535,6 +2535,8 @@ function migrateState(s) {
   if ((s.schemaVersion || 0) < 6) {
     if (typeof s.p1BumpMonth !== 'number') s.p1BumpMonth = 4;       // April
     if (typeof s.p2BumpMonth !== 'number') s.p2BumpMonth = 4;       // April
+    // Per-person raise-by-year rows over the default salary growth (v2026.11.11.08).
+    if (!s.raiseSchedule || typeof s.raiseSchedule !== 'object') s.raiseSchedule = { p1: [], p2: [] };
     if (typeof s.expenseBumpMonth !== 'number') s.expenseBumpMonth = 4;
   }
   // Schema v7: adjustments now propagate to the projection sheet as ad-hoc income
@@ -3848,6 +3850,44 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
 // two scenarios revising the same rent must not both apply. Equal `from`: later list entry wins.
 // Returns { tkey: [ {sc, c, target, ref, newAmount, from, until} ] } where `until` is the first
 // month the NEXT revision takes over (exclusive), or null for the last one.
+// Raise-schedule rows: { from, to, rate, month } — years `from`..`to` get a raise of `rate`
+// (decimal; 0 = no raise that year) that first shows in pay in calendar month `month` (1-12).
+// Accepts the base schedule (state.raiseSchedule[p]) and scenario 'raise' changes (fromYear/toYear).
+function _normRaiseEntries(list) {
+  const out = [];
+  (list || []).forEach(e => {
+    if (!e) return;
+    const from = Number(e.from != null ? e.from : e.fromYear);
+    const to = Number(e.to != null ? e.to : (e.toYear != null && e.toYear !== '' ? e.toYear : from));
+    const rate = Number(e.rate), month = Number(e.month);
+    if (!Number.isInteger(from) || !Number.isInteger(to) || to < from || from < 1900 || to > 2200) return;
+    if (!isFinite(rate) || rate <= -1 || !Number.isInteger(month) || month < 1 || month > 12) return;
+    out.push({ from, to, rate, month });
+  });
+  return out;
+}
+// A person's monthly salary under a scenario: the base amount grown by the raise schedule (base
+// rows + `raiseEntries`), replaced from each revision's month by its new amount grown by the SAME
+// schedule. Months masked out (recorded salary, retirement stop) keep the base value.
+// The single definition used by the engine's applyRevisions AND the editor's default.
+// revs: resolved stack entries (from/until/newAmount) for this person, in date order.
+function salaryPathFor(sal, isos, raiseEntries, revs) {
+  const g = (raiseEntries && raiseEntries.length) ? sal.growthWith(raiseEntries) : sal.growAt;
+  const n = isos.length, raised = new Array(n), path = new Array(n), gov = new Array(n).fill(-1);
+  for (let i = 0; i < n; i++) {
+    if (!sal.mask[i]) { raised[i] = path[i] = sal.base[i]; continue; }
+    raised[i] = path[i] = sal.baseAmount * g(isos[i]);
+    (revs || []).forEach((r, j) => {
+      if (isos[i] >= r.from && (r.until == null || isos[i] < r.until)) { path[i] = r.newAmount * g(isos[i]) / g(r.from); gov[i] = j; }
+    });
+  }
+  return { raised, path, gov, growth: g };
+}
+function _raiseSummary(entries) {
+  return entries.map(e => (e.from === e.to ? e.from : e.from + '-' + e.to) + ' ' + (Math.round(e.rate * 10000) / 100) + '% from ' +
+    ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][e.month - 1]).join(', ');
+}
+
 function resolveRevisionStack(scenarios) {
   const groups = {};
   let seq = 0;
@@ -3880,8 +3920,9 @@ function resolveRevisionStack(scenarios) {
 //   emis[id]           { name, startIdx, endIdx, amounts[] } from emiScheduleFor, the same schedule the engine charges
 //   invs[key]          { id, name, active[], base[], growAt } contribution before scenario scaling; key = id_name
 //   expGrowthAt(iso)   the app's annual expense step-up multiplier for any calendar month
-//   salaries[p1|p2]    { name, base[], mask[], growAt } the person's income row (salary + other) as
-//                      planned; mask false where a recorded salary or retirement stop takes priority
+//   salaries[p1|p2]    { name, baseAmount, base[], mask[], growAt, growthWith(entries), raiseFor(year, entries) }
+//                      the person's income row (salary + other) as planned; mask false where a
+//                      recorded salary or retirement stop takes priority; growth = the raise schedule
 
 // Growth curve a revised amount follows, the same one its base follows: categories step up at
 // the expense rate, contributions at the same rate when growContributions is on, EMIs never.
@@ -3908,7 +3949,10 @@ function applyRevisions(scenarios, monthsMeta, n, ctx, expenseMul, contribMul, e
   if (!ctx) return;
   const groups = resolveRevisionStack(scenarios);
   const gkeys = Object.keys(groups);
-  if (!gkeys.length) return;
+  // Raise-schedule rows are not amount revisions, so they are not in `groups`; a scenario holding
+  // only raise rows must still reach the salary section below.
+  const hasRaise = (scenarios || []).some(sc => sc && sc.type === 'revise' && ((sc.params && sc.params.changes) || []).some(c => c && c.target === 'raise'));
+  if (!gkeys.length && !hasRaise) return;
   const isos = monthsMeta.map(m => m.iso);
   const money = v => Math.round(v).toLocaleString('en-IN');
   const rowsByScenario = new Map();
@@ -3945,18 +3989,7 @@ function applyRevisions(scenarios, monthsMeta, n, ctx, expenseMul, contribMul, e
         }
         addRow(r.sc, 'Revise ' + (sch.name || r.ref) + ' EMI to ' + money(r.newAmount) + ' from ' + r.from, 'expense', row, 'emi:' + r.ref);
       } else if (r.target === 'salary') {
-        // Salary (the person's monthly income row: salary + other income). Steps up at the salary
-        // growth rate in that person's appraisal month, like the base. Months with a recorded
-        // salary (Journal / Step 2 override) or after a retirement stop are masked out: those
-        // win over a revision, the same way a close event wins over an EMI revision.
-        const sal = ctx.salaries && ctx.salaries[r.ref];
-        if (!sal || !incomeDelta) return;
-        for (let i = 0; i < n; i++) {
-          if (!inWin(i) || !sal.mask[i]) continue;
-          const d = (revisionAmountAt(r, i, isos, sal.growAt) - sal.base[i]) * (incomeMul ? incomeMul[i] : 1);
-          row[i] = d; incomeDelta[i] += d;
-        }
-        addRow(r.sc, 'Revise ' + (sal.name || r.ref) + ' salary to ' + money(r.newAmount) + ' from ' + r.from, 'income', row, 'salary:' + r.ref);
+        return;   // salaries are priced per person below, together with raise-schedule changes
       } else if (r.target === 'invest') {
         // Contributions are not expenses: nothing goes into expenseDelta. The engine reads
         // contribOverride and replaces the scheduled contribution; the row is for display only.
@@ -3974,6 +4007,46 @@ function applyRevisions(scenarios, monthsMeta, n, ctx, expenseMul, contribMul, e
       }
     });
   });
+  // ---- Salaries: raise-schedule changes and new-salary revisions, per person ----
+  // Attribution keeps every row additive: first each scenario's raise rows in turn (path with its
+  // raises minus the path before them), then each salary revision (its months, minus the raised
+  // path). The rows sum to (final salary - base salary) x incomeMul, which is what goes into income.
+  Object.keys(ctx.salaries || {}).forEach(pk => {
+    const sal = ctx.salaries[pk];
+    const raiseBySc = [];
+    (scenarios || []).forEach(sc => {
+      if (!sc || sc.type !== 'revise') return;
+      const rows = ((sc.params && sc.params.changes) || []).filter(c => c && c.target === 'raise' && c.key === pk);
+      const entries = _normRaiseEntries(rows);
+      if (entries.length) raiseBySc.push({ sc, entries });
+    });
+    const revs = groups['salary:' + pk] || [];
+    if (!raiseBySc.length && !revs.length) return;
+    if (!incomeDelta) return;
+    const im = i => (incomeMul ? incomeMul[i] : 1);
+    let prev = sal.base, cumulative = [];
+    raiseBySc.forEach(({ sc, entries }) => {
+      cumulative = cumulative.concat(entries);
+      const pr = salaryPathFor(sal, isos, cumulative, []).raised;
+      const row = new Array(n).fill(0);
+      for (let i = 0; i < n; i++) { const d = (pr[i] - prev[i]) * im(i); row[i] = d; incomeDelta[i] += d; }
+      addRow(sc, 'Raises for ' + (sal.name || pk) + ': ' + _raiseSummary(entries), 'income', row, 'salary:' + pk);
+      prev = pr;
+    });
+    if (revs.length) {
+      const pf = salaryPathFor(sal, isos, cumulative, revs);
+      revs.forEach((r, j) => {
+        const row = new Array(n).fill(0);
+        for (let i = 0; i < n; i++) {
+          if (pf.gov[i] !== j) continue;
+          const d = (pf.path[i] - prev[i]) * im(i);
+          row[i] = d; incomeDelta[i] += d;
+        }
+        addRow(r.sc, 'Revise ' + (sal.name || pk) + ' salary to ' + money(r.newAmount) + ' from ' + r.from, 'income', row, 'salary:' + pk);
+      });
+    }
+  });
+
   rowsByScenario.forEach((rows, sc) => {
     breakdowns.push({ scenarioId: sc.id, scenarioName: sc.name || sc.type, scenarioType: sc.type, rows });
   });
@@ -5131,14 +5204,56 @@ function runProjection(overrides={}) {
     return (meta.y - firstYear) + (meta.m >= incrMonth ? 1 : 0);
   }
 
+  // Per-person salary growth: THE definition (v2026.11.11.08). Default, unchanged: salaryGrowth
+  // each year, landing the month after the appraisal month, from the first increment year on
+  // (hikesForMonth). A raise schedule overrides chosen years with its own rate and the month the
+  // raise first shows in pay; 0% skips that year (e.g. a job switch). Later rows win on overlap.
+  // A scheduled raise landing on or before the plan start is already in the entered salary.
+  const planStartIso = _growthAnchorYM(horizonStart);
+  function salaryGrowthFn(apprMonth, entries) {
+    const incrMonth = (apprMonth % 12) + 1;
+    const firstYear = firstIncrementYear(apprMonth);
+    const ov = {}; let minY = firstYear;
+    _normRaiseEntries(entries).forEach(e => { for (let y = e.from; y <= e.to; y++) { ov[y] = e; if (y < minY) minY = y; } });
+    const hasOv = Object.keys(ov).length > 0;
+    const memo = {};
+    const fn = (iso) => {
+      if (memo[iso] !== undefined) return memo[iso];
+      const [y, m] = iso.split('-').map(Number);
+      let mul;
+      if (!hasOv) mul = Math.pow(1 + salaryGrowth, hikesForMonth({ y, m }, apprMonth));
+      else {
+        mul = 1;
+        for (let Y = minY; Y <= y; Y++) {
+          const e = ov[Y];
+          if (e) {
+            const land = Y + '-' + String(e.month).padStart(2, '0');
+            if (land > planStartIso && (y > Y || m >= e.month)) mul *= (1 + e.rate);
+          } else if (Y >= firstYear && (y > Y || m >= incrMonth)) mul *= (1 + salaryGrowth);
+        }
+      }
+      return (memo[iso] = mul);
+    };
+    // The raise year Y gets under this schedule: { rate, month, counted } (for the editors).
+    fn.raiseFor = (Y) => {
+      const e = ov[Y];
+      if (e) return { rate: e.rate, month: e.month, counted: (Y + '-' + String(e.month).padStart(2, '0')) > planStartIso, scheduled: true };
+      return { rate: salaryGrowth, month: incrMonth, counted: Y >= firstYear, scheduled: false };
+    };
+    return fn;
+  }
+  const _raiseSched = state.raiseSchedule || {};
+  const p1Growth = salaryGrowthFn(p1ApprMonth, _raiseSched.p1);
+  const p2Growth = salaryGrowthFn(p2ApprMonth, _raiseSched.p2);
+
   const salaryMul    = new Array(n);  // p1 multiplier (alias used by growContributions)
   const p1SalaryMul  = new Array(n);
   const p2SalaryMul  = new Array(n);
   const expGrowthMul = new Array(n);
   for (let i = 0; i < n; i++) {
     const meta = months[i];
-    p1SalaryMul[i]  = Math.pow(1 + salaryGrowth,  hikesForMonth(meta, p1ApprMonth));
-    p2SalaryMul[i]  = Math.pow(1 + salaryGrowth,  hikesForMonth(meta, p2ApprMonth));
+    p1SalaryMul[i]  = p1Growth(meta.iso);
+    p2SalaryMul[i]  = p2Growth(meta.iso);
     expGrowthMul[i] = Math.pow(1 + expenseGrowth, hikesForMonth(meta, expBumpMonth));
     salaryMul[i]    = p1SalaryMul[i];
   }
@@ -5371,16 +5486,19 @@ function runProjection(overrides={}) {
     const ovMonths = { p1: new Set(), p2: new Set() };
     (state.incomeOverrides || []).forEach(o => { if (o && (o.person === 'p1' || o.person === 'p2')) ovMonths[o.person].add(o.month); });
     (state._txDerivedOverrides || []).forEach(o => { if (o) ovMonths[o.person === 'p2' ? 'p2' : 'p1'].add(o.month); });
-    const salGrowAt = appr => (iso) => { const [y, m] = iso.split('-').map(Number); return Math.pow(1 + salaryGrowth, hikesForMonth({ y, m }, appr)); };
-    const addSal = (key, series, appr, stopISO, name) => {
+    const addSal = (key, series, appr, stopISO, name, baseAmount, growth) => {
+      const baseEntries = _normRaiseEntries(_raiseSched[key]);
       reviseCtx.salaries[key] = {
-        name, base: series.slice(),
+        name, baseAmount, base: series.slice(),
         mask: months.map(m => !ovMonths[key].has(m.iso) && !(stopISO && m.iso >= stopISO)),
-        growAt: salGrowAt(appr)
+        growAt: growth,
+        // Scenario raise rows layer on top of the base schedule (later rows win).
+        growthWith: extra => salaryGrowthFn(appr, baseEntries.concat(_normRaiseEntries(extra))),
+        raiseFor: (Y, extra) => (extra && extra.length ? salaryGrowthFn(appr, baseEntries.concat(_normRaiseEntries(extra))) : growth).raiseFor(Y)
       };
     };
-    addSal('p1', p1Series, p1ApprMonth, _retire && _retire.p1StopISO, state.p1Name || 'You');
-    addSal('p2', p2Series, p2ApprMonth, _retire && _retire.p2StopISO, state.p2Name || 'Partner');
+    addSal('p1', p1Series, p1ApprMonth, _retire && _retire.p1StopISO, state.p1Name || 'You', p1BaseAmount, p1Growth);
+    addSal('p2', p2Series, p2ApprMonth, _retire && _retire.p2StopISO, state.p2Name || 'Partner', p2BaseAmount, p2Growth);
   }
   (state.emis || []).forEach(e => {
     if (!e || !e.id) return;
@@ -9700,8 +9818,11 @@ function scenarioSummary(sc) {
   if (sc.type === 'revise') {
     const ch = (p.changes || []).filter(_rvChangeComplete);
     if (!ch.length) return 'no changes';
-    const shown = ch.slice().sort((a, b) => a.from < b.from ? -1 : 1).slice(0, 2)
-      .map(c => `${_rvTargetLabel(c)} → ${fmtMoney(Number(c.newAmount), true)} from ${c.from}`);
+    const sk = c => c.target === 'raise' ? (c.fromYear + '-' + String(c.month).padStart(2, '0')) : c.from;
+    const shown = ch.slice().sort((a, b) => sk(a) < sk(b) ? -1 : 1).slice(0, 2)
+      .map(c => c.target === 'raise'
+        ? `${_rvTargetLabel(c)} ${Number(c.toYear) > Number(c.fromYear) ? c.fromYear + '–' + c.toYear : c.fromYear}: ${_rvPct(c.rate)} from ${_RV_MON[c.month - 1]}`
+        : `${_rvTargetLabel(c)} → ${fmtMoney(Number(c.newAmount), true)} from ${c.from}`);
     return shown.join(' · ') + (ch.length > 2 ? ` · +${ch.length - 2} more` : '');
   }
   return '';
@@ -9715,23 +9836,35 @@ function _rvBlankChange() {
   return { target: '', from: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'), newAmount: '' };
 }
 function _rvChangeComplete(c) {
+  if (c && c.target === 'raise') return !!c.key && _normRaiseEntries([c]).length === 1;
   return !!(c && c.target && (c.key || c.id) && /^\d{4}-\d{2}$/.test(c.from || '') &&
             c.newAmount != null && c.newAmount !== '' && isFinite(Number(c.newAmount)));
 }
+const _RV_MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// A new 'Annual raise' row: next year, pre-filled with what the plan already has for that year.
+function _rvRaiseDefault(pk) {
+  if (!_rvBaseSnap) _rvRefreshBase();
+  const Y = new Date().getFullYear() + 1;
+  const sal = _rvBaseSnap.ctx.salaries && _rvBaseSnap.ctx.salaries[pk];
+  const d = sal ? sal.raiseFor(Y) : { rate: 0, month: 5 };
+  return { target: 'raise', key: pk, fromYear: Y, toYear: Y, rate: Math.round(d.rate * 10000) / 10000, month: d.month };
+}
+function _rvPct(r) { return (Math.round(Number(r) * 10000) / 100) + '%'; }
 function _rvTargetValue(c) {
   if (!c || !c.target) return '';
-  return c.target + ':' + ((c.target === 'category' || c.target === 'salary') ? c.key : c.id);
+  return c.target + ':' + ((c.target === 'category' || c.target === 'salary' || c.target === 'raise') ? c.key : c.id);
 }
 function _rvParseTarget(v) {
   const i = (v || '').indexOf(':');
   if (i < 0) return { target: '' };
   const target = v.slice(0, i), ref = v.slice(i + 1);
-  return (target === 'category' || target === 'salary') ? { target, key: ref } : { target, id: ref };
+  return (target === 'category' || target === 'salary' || target === 'raise') ? { target, key: ref } : { target, id: ref };
 }
 function _rvTargetLabel(c) {
   if (!c) return '';
   if (c.target === 'category') { const cat = getExpenseCats().find(x => x.key === c.key); return cat ? cat.label : c.key + ' (deleted)'; }
   if (c.target === 'salary') return _rvSalaryLabel(c.key);
+  if (c.target === 'raise') return (c.key === 'p2' ? (state.p2Name || 'Partner') : (state.p1Name || 'You')) + ' · Annual raise';
   if (c.target === 'emi') { const e = (state.emis || []).find(x => x.id === c.id); return e ? (e.name || 'EMI') + ' EMI' : c.id + ' (removed)'; }
   if (c.target === 'invest') { const v = (state.investments || []).find(x => x.id === c.id); return v ? (v.name || v.id) + ' SIP' : c.id + ' (removed)'; }
   return '';
@@ -9745,8 +9878,9 @@ function _rvTargetOptions(selected) {
   const now = _nowYMkey();
   const opt = (v, label) => `<option value="${escapeHtml(v)}" ${v === selected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
   // Salaries: same rows as the Projection sheet shows (partner only in partner mode).
-  const sals = [opt('salary:p1', _rvSalaryLabel('p1'))];
-  if (state.mode === 'partner') sals.push(opt('salary:p2', _rvSalaryLabel('p2')));
+  const pName = k => (k === 'p2' ? (state.p2Name || 'Partner') : (state.p1Name || 'You'));
+  const sals = [opt('salary:p1', _rvSalaryLabel('p1')), opt('raise:p1', pName('p1') + ' · Annual raise')];
+  if (state.mode === 'partner') sals.push(opt('salary:p2', _rvSalaryLabel('p2')), opt('raise:p2', pName('p2') + ' · Annual raise'));
   const cats = getExpenseCats().map(c => opt('category:' + c.key, c.label));
   // EMIs still running now or starting later. Revising a closed loan has no effect, so it is not offered.
   const emis = (state.emis || []).filter(e => e && e.id && (_emiEndIso(e) || '') >= now).map(e => opt('emi:' + e.id, e.name || 'EMI'));
@@ -9778,7 +9912,7 @@ function _rvRefreshBase() {
 // the engine's own resolveRevisionStack and priced by revisionAmountAt, so this is exactly what
 // the Projection sheet shows with this scenario previewed.
 // Returns { cur, dead, via } where via is the from-month of the earlier row used, if any.
-function _rvPlannedAt(targetVal, from, priorChanges) {
+function _rvPlannedAt(targetVal, from, priorChanges, raiseChanges) {
   if (!_rvBaseSnap) _rvRefreshBase();
   const t = _rvParseTarget(targetVal);
   if (!t.target) return { dead: '', empty: 'Pick what changes to see its planned amount.' };
@@ -9794,7 +9928,15 @@ function _rvPlannedAt(targetVal, from, priorChanges) {
     const sal = ctx.salaries && ctx.salaries[t.key];
     if (!sal) dead = 'This salary is not part of your plan.';
     else if (!sal.mask[i]) dead = 'A recorded salary or a retirement stop already sets that month, and it takes priority, so this change has no effect there.';
-    else cur = sal.base[i];
+    else {
+      // Same function the engine uses: base grown by the raise schedule (incl. this scenario's
+      // raise rows), replaced by earlier salary rows in this scenario.
+      const prior = (priorChanges || []).filter(c => _rvChangeComplete(c) && c.target === 'salary' && c.key === t.key);
+      const revs = prior.length ? (resolveRevisionStack([{ type: 'revise', params: { changes: prior } }])['salary:' + t.key] || []) : [];
+      const raise = (raiseChanges || []).filter(c => c && c.target === 'raise' && c.key === t.key && _rvChangeComplete(c));
+      const pf = salaryPathFor(sal, isos, raise, revs);
+      return { cur: pf.path[i], via: pf.gov[i] >= 0 ? revs[pf.gov[i]].from : null, viaRaise: raise.length > 0, dead: '' };
+    }
   } else if (t.target === 'emi') {
     const sch = ctx.emis[t.id];
     if (!sch || i < sch.startIdx || i > sch.endIdx) dead = 'This EMI is not running in that month, so this change has no effect.';
@@ -9817,12 +9959,12 @@ function _rvPlannedAt(targetVal, from, priorChanges) {
   }
   return { cur, via, dead: '' };
 }
-function _rvCurrentText(targetVal, from, newAmountStr, priorChanges, isAuto) {
-  const pl = _rvPlannedAt(targetVal, from, priorChanges);
+function _rvCurrentText(targetVal, from, newAmountStr, priorChanges, isAuto, raiseChanges) {
+  const pl = _rvPlannedAt(targetVal, from, priorChanges, raiseChanges);
   if (pl.empty) return `<span style="color:var(--ink-muted);">${pl.empty}</span>`;
   if (pl.dead) return `<span style="color:#e06060;">${pl.dead}</span>`;
   const t = _rvParseTarget(targetVal);
-  const lead = pl.via ? `With your ${pl.via} change, ${from}` : `Projection for ${from}`;
+  const lead = pl.via ? `With your ${pl.via} change, ${from}` : (pl.viaRaise ? `With your raise changes, ${from}` : `Projection for ${from}`);
   const hasNew = newAmountStr !== '' && newAmountStr != null && isFinite(Number(newAmountStr));
   const grows = t.target === 'category' || (t.target === 'invest' && state.growContributions !== false);
   const tail = t.target === 'salary' ? ' Grows at your salary rate at each appraisal after that.'
@@ -9841,13 +9983,39 @@ function _rvCurrentText(targetVal, from, newAmountStr, priorChanges, isAuto) {
 function _rvIsDefault(amtEl) {
   return amtEl.dataset.rvDefault != null && amtEl.value === amtEl.dataset.rvDefault;
 }
+function _rvRaiseText(c) {
+  if (!_rvBaseSnap) _rvRefreshBase();
+  const sal = _rvBaseSnap.ctx.salaries && _rvBaseSnap.ctx.salaries[c.key];
+  if (!sal) return '<span style="color:#e06060;">This salary is not part of your plan.</span>';
+  const e = _normRaiseEntries([c])[0];
+  if (!e) return '<span style="color:var(--ink-muted);">Enter the year(s), a raise % (0 for none) and the month it shows in pay.</span>';
+  const plan = sal.raiseFor(e.from);
+  const planTxt = plan.counted ? `${_rvPct(plan.rate)} from ${_RV_MON[plan.month - 1]}` : 'no raise counted (already in your salary)';
+  const yrs = e.to > e.from ? `${e.from}–${e.to}` : `${e.from}`;
+  const startIso = _rvBaseSnap.isos[0];
+  const land = e.from + '-' + String(e.month).padStart(2, '0');
+  const early = land <= startIso ? ` <span style="color:#e06060;">A raise landing in ${land} is before your plan starts, so ${e.from}'s is already in your salary and ignored.</span>` : '';
+  const mine = e.rate === 0 ? `no raise${e.to > e.from ? ' each year' : ''}` : `${_rvPct(e.rate)} from ${_RV_MON[e.month - 1]}${e.to > e.from ? ' each year' : ''}`;
+  return `Plan for ${e.from}: <strong>${planTxt}</strong> → <strong style="color:var(--gold-bright);">${mine}</strong> in ${yrs}. <span style="color:var(--ink-muted);">Years you don't list keep the plan's raise.</span>${early}`;
+}
 // Read every row in the editor, refill defaults, refresh the lines. A row's amount is a DEFAULT
 // while it still equals the number filled in (data-rv-default); defaults follow target/month changes and changes
 // to earlier rows. Defaults are not counted as "earlier rows" for other rows: by construction they
 // equal what is already in effect, so they change nothing.
 // `trigger` is the row whose target/month just changed: it is filled even if empty.
+function _rvReadRaiseRow(r) {
+  const t = _rvParseTarget(r.querySelector('[data-rv-field="target"]').value);
+  const f = k => { const el = r.querySelector(`[data-rv-field="${k}"]`); return el ? el.value : ''; };
+  const rate = f('rate');
+  return { target: 'raise', key: t.key, fromYear: f('fromYear') === '' ? '' : Number(f('fromYear')),
+           toYear: f('toYear') === '' ? '' : Number(f('toYear')), rate: rate === '' ? '' : Number(rate) / 100, month: Number(f('month')) };
+}
 function _rvRefreshRows(trigger) {
-  const rows = [...document.querySelectorAll('#scEditFields [data-rv-row]')];
+  const all = [...document.querySelectorAll('#scEditFields [data-rv-row]')];
+  const raiseRows = all.filter(r => r.dataset.rvKind === 'raise');
+  const raiseVals = raiseRows.map(_rvReadRaiseRow);
+  raiseRows.forEach((r, k) => { r.querySelector('[data-rv-current]').innerHTML = _rvRaiseText(raiseVals[k]); });
+  const rows = all.filter(r => r.dataset.rvKind !== 'raise');
   const read = r => {
     const amtEl = r.querySelector('[data-rv-field="newAmount"]');
     const t = _rvParseTarget(r.querySelector('[data-rv-field="target"]').value);
@@ -9861,14 +10029,14 @@ function _rvRefreshRows(trigger) {
       .filter(o => o.j !== idx && !o.v.auto && o.v.target === me.target && (o.v.from < me.from || (o.v.from === me.from && o.j < idx)))
       .map(o => o.v);
     const tv = r.querySelector('[data-rv-field="target"]').value;
-    const pl = _rvPlannedAt(tv, me.from, prior);
+    const pl = _rvPlannedAt(tv, me.from, prior, raiseVals);
     const wasDefault = _rvIsDefault(amtEl);
     const fillable = wasDefault || (r === trigger && amtEl.value === '');
     if (fillable) {
       if (pl.cur != null) { amtEl.value = String(Math.round(pl.cur)); amtEl.dataset.rvDefault = amtEl.value; }
       else if (wasDefault) { amtEl.value = ''; delete amtEl.dataset.rvDefault; }
     }
-    r.querySelector('[data-rv-current]').innerHTML = _rvCurrentText(tv, me.from, amtEl.value, prior, _rvIsDefault(amtEl));
+    r.querySelector('[data-rv-current]').innerHTML = _rvCurrentText(tv, me.from, amtEl.value, prior, _rvIsDefault(amtEl), raiseVals);
   });
 }
 
@@ -10050,8 +10218,22 @@ function renderScenarioFields(sc) {
   }
   if (sc.type === 'revise') {
     _rvRefreshBase();
+    const monOpts = sel => _RV_MON.map((m, k) => `<option value="${k + 1}" ${Number(sel) === k + 1 ? 'selected' : ''}>${m}</option>`).join('');
     const rows = (p.changes || []).map((c, i) => {
       const tv = _rvTargetValue(c);
+      if (c.target === 'raise') {
+        const pct = (c.rate === '' || c.rate == null) ? '' : Math.round(Number(c.rate) * 10000) / 100;
+        return `
+      <div class="rep-row emi" data-rv-row="${i}" data-rv-kind="raise" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;">
+        <div class="field" style="grid-column:1 / 3;"><label>What changes</label><select data-rv-field="target" style="width:100%;">${_rvTargetOptions(tv)}</select></div>
+        <button class="del-btn" data-rv-del title="Remove" style="grid-column:3;grid-row:1;align-self:center;">×</button>
+        <div class="field"><label>From year</label><input type="number" data-rv-field="fromYear" data-plain-number="1" min="2000" max="2200" step="1" value="${escapeHtml(String(c.fromYear ?? ''))}" style="width:100%;" /></div>
+        <div class="field"><label>To year</label><input type="number" data-rv-field="toYear" data-plain-number="1" min="2000" max="2200" step="1" value="${escapeHtml(String(c.toYear ?? ''))}" style="width:100%;" /></div>
+        <div class="field"><label>Raise % (0 = none)</label><input type="number" data-rv-field="rate" data-plain-number="1" min="-50" max="100" step="0.25" value="${pct}" style="width:100%;" /></div>
+        <div class="field"><label>Shows in pay from</label><select data-rv-field="month" style="width:100%;">${monOpts(c.month)}</select></div>
+        <div data-rv-current style="grid-column:1 / -1;font-size:12.5px;color:var(--ink-dim);margin-top:-2px;"></div>
+      </div>`;
+      }
       const amt = (c.newAmount === '' || c.newAmount == null) ? '' : c.newAmount;
       return `
       <div class="rep-row emi" data-rv-row="${i}" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;">
@@ -10065,6 +10247,7 @@ function renderScenarioFields(sc) {
     return nameField + `
       <div style="font-size:12px;color:var(--ink-muted);margin:0 0 10px;line-height:1.5;">
         Pick an item and a month: the amount box fills with what the projection has then. Type the new amount; 0 stops an EMI or contribution.
+        For a job switch, use <em>Annual raise</em> to skip or change a year's raise (0% = no raise) and set the month it shows in pay; a From–To range covers a new appraisal cycle.
         From that month the new amount keeps growing like the rest of the plan: salaries at your salary rate at each appraisal, expenses at your expense rate (contributions only if they grow in your plan; EMIs never).
         If two changes hit the same item, the later month wins from that month on. Investment changes move contributions, not expenses.
       </div>
@@ -10290,28 +10473,57 @@ function bindScenarioFieldHandlers(sc) {
   });
   // Change my plan: live "planned → new" line, and row delete.
   document.querySelectorAll('#scEditFields [data-rv-row]').forEach(row => {
-    ['target', 'from'].forEach(f => {
-      const el = row.querySelector(`[data-rv-field="${f}"]`);
-      const h = () => _rvRefreshRows(row);
-      el.addEventListener('input', h); el.addEventListener('change', h);
-    });
-    const amtEl = row.querySelector('[data-rv-field="newAmount"]');
-    // Desktop: clicking into a box that still shows its default selects it, so typing replaces it.
-    // Deferred so it runs after the calculator promotion (number -> text), which drops any selection.
-    amtEl.addEventListener('focus', () => setTimeout(() => {
-      if (document.activeElement === amtEl && _rvIsDefault(amtEl) && !document.body.classList.contains('numpad-open')) {
-        try { amtEl.select(); } catch (e) {}
-      }
-    }, 0));
-    // Typing makes the amount the user's own; it is never overwritten after that.
-    const onAmt = () => _rvRefreshRows(null);
-    amtEl.addEventListener('input', onAmt); amtEl.addEventListener('change', onAmt);
-    row.querySelector('[data-rv-del]').addEventListener('click', () => {
-      readScenarioEditFields(sc);
-      sc.params.changes.splice(Number(row.dataset.rvRow), 1);
+    const idx = Number(row.dataset.rvRow);
+    const isRaise = row.dataset.rvKind === 'raise';
+    const fam = v => (v || '').startsWith('raise:') ? 'raise' : 'amount';
+    const rerender = () => {
       const fields = document.getElementById('scEditFields');
       fields.innerHTML = renderScenarioFields(sc);
       bindScenarioFieldHandlers(sc);
+    };
+    const tSel = row.querySelector('[data-rv-field="target"]');
+    const onTarget = () => {
+      // Switching between an amount row and an Annual raise row changes the inputs: rebuild it.
+      if (fam(tSel.value) !== (isRaise ? 'raise' : 'amount')) {
+        readScenarioEditFields(sc);
+        const t = _rvParseTarget(tSel.value);
+        sc.params.changes[idx] = fam(tSel.value) === 'raise' ? _rvRaiseDefault(t.key) : Object.assign(_rvBlankChange(), t);
+        rerender();
+        const fresh = document.querySelector(`#scEditFields [data-rv-row="${idx}"]`);
+        if (fresh) _rvRefreshRows(fresh);
+        return;
+      }
+      if (isRaise) {
+        // Same family, other person: pre-fill that person's planned raise for the chosen year.
+        _rvRefreshRows(null);
+      } else _rvRefreshRows(row);
+    };
+    tSel.addEventListener('change', onTarget);
+    if (isRaise) {
+      row.querySelectorAll('[data-rv-field]').forEach(el => {
+        if (el === tSel) return;
+        el.addEventListener('input', () => _rvRefreshRows(null)); el.addEventListener('change', () => _rvRefreshRows(null));
+      });
+    } else {
+      const fromEl = row.querySelector('[data-rv-field="from"]');
+      const h = () => _rvRefreshRows(row);
+      fromEl.addEventListener('input', h); fromEl.addEventListener('change', h);
+      const amtEl = row.querySelector('[data-rv-field="newAmount"]');
+      // Desktop: clicking into a box that still shows its default selects it, so typing replaces it.
+      // Deferred so it runs after the calculator promotion (number -> text), which drops any selection.
+      amtEl.addEventListener('focus', () => setTimeout(() => {
+        if (document.activeElement === amtEl && _rvIsDefault(amtEl) && !document.body.classList.contains('numpad-open')) {
+          try { amtEl.select(); } catch (e) {}
+        }
+      }, 0));
+      // Typing makes the amount the user's own; it is never overwritten after that.
+      const onAmt = () => _rvRefreshRows(null);
+      amtEl.addEventListener('input', onAmt); amtEl.addEventListener('change', onAmt);
+    }
+    row.querySelector('[data-rv-del]').addEventListener('click', () => {
+      readScenarioEditFields(sc);
+      sc.params.changes.splice(idx, 1);
+      rerender();
     });
   });
   if (document.querySelector('#scEditFields [data-rv-row]')) _rvRefreshRows(null);
@@ -10500,6 +10712,7 @@ function readScenarioEditFields(sc) {
   if (sc.type === 'revise') {
     const arr = [];
     rvRows.forEach(r => {
+      if (r.dataset.rvKind === 'raise') { arr.push(_rvReadRaiseRow(r)); return; }
       const t = _rvParseTarget(r.querySelector('[data-rv-field="target"]').value);
       const from = r.querySelector('[data-rv-field="from"]').value || '';
       const raw = (r.querySelector('[data-rv-field="newAmount"]').value || '').trim();
@@ -11695,7 +11908,11 @@ function wireScenariosUI() {
       // changes nothing: drop it rather than store a row that only looks like a decision.
       target.params.changes = (target.params.changes || [])
         .filter(c => _rvChangeComplete(c) && !(c._default != null && String(c.newAmount) === String(c._default)))
-        .map(c => { const o = Object.assign({}, c); delete o._default; return o; });
+        .map(c => {
+          const o = Object.assign({}, c); delete o._default;
+          if (o.target === 'raise') { const e = _normRaiseEntries([o])[0]; Object.assign(o, { fromYear: e.from, toYear: e.to, rate: e.rate, month: e.month }); }
+          return o;
+        });
       // Never save an empty one silently: that is how a typed change could vanish without trace.
       if (!target.params.changes.length) {
         alert('Nothing to save yet: no row has a new amount.\n\nEach row still shows the projected amount. Change the amount (0 to stop) in at least one row.');
@@ -11802,6 +12019,45 @@ function renderSettings() {
   if (state.mode === 'partner') {
     buildBumpRow(`${(state.p2Name || 'Person 2')} appraisal month`, 'p2', state.p2BumpMonth ?? 4, '#7fb069');
   }
+
+  // Raise by year (v2026.11.11.08): per-person rows over the defaults above. Read by the engine's
+  // salaryGrowthFn, the single salary-growth rule. Saved on Apply like every other rate here.
+  const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const raiseRowHtml = (r) => `
+    <div data-raise-row style="display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:6px;align-items:end;margin:6px 0;">
+      <label style="font-size:11px;color:var(--ink-muted);">From year<input type="number" data-raise-field="from" data-plain-number="1" min="2000" max="2200" step="1" value="${r.from ?? ''}" style="width:100%;padding:4px 6px;" /></label>
+      <label style="font-size:11px;color:var(--ink-muted);">To year<input type="number" data-raise-field="to" data-plain-number="1" min="2000" max="2200" step="1" value="${r.to ?? ''}" style="width:100%;padding:4px 6px;" /></label>
+      <label style="font-size:11px;color:var(--ink-muted);">Raise %<input type="number" data-raise-field="rate" data-plain-number="1" min="-50" max="100" step="0.25" value="${r.rate == null || r.rate === '' ? '' : Math.round(r.rate * 10000) / 100}" style="width:100%;padding:4px 6px;" /></label>
+      <label style="font-size:11px;color:var(--ink-muted);">Shows in pay<select data-raise-field="month" style="width:100%;padding:4px 6px;">${MON.map((m, k) => `<option value="${k + 1}" ${Number(r.month) === k + 1 ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+      <button class="del-btn" data-raise-del title="Remove" style="justify-self:start;">×</button>
+    </div>`;
+  const buildRaiseBlock = (pk) => {
+    const name = pk === 'p2' ? (state.p2Name || 'Person 2') : (state.p1Name || 'Person 1');
+    const appr = pk === 'p2' ? (state.p2BumpMonth ?? 4) : (state.p1BumpMonth ?? 4);
+    const defMonth = (appr % 12) + 1;
+    const defPct = Math.round((state.salaryGrowthRate ?? 0.08) * 10000) / 100;
+    const rows = ((state.raiseSchedule || {})[pk] || []);
+    const el = document.createElement('div');
+    el.className = 'rate-row';
+    el.style.cssText = 'display:block;';
+    el.innerHTML = `<div class="rate-name"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#7fb069;margin-right:6px;"></span>${escapeHtml(name)} · raise by year</div>
+      <div class="rate-note" style="margin-bottom:4px;">Years without a row use the defaults above: ${defPct}% showing in pay from ${MON[defMonth - 1]}. Add a year to change its raise or the month it shows in pay; 0% skips that year (e.g. a job switch). A From–To range covers a new appraisal cycle. Later rows win where years overlap.</div>
+      <div data-raise-list="${pk}">${rows.map(raiseRowHtml).join('')}</div>
+      <button class="btn ghost" data-raise-add="${pk}" style="margin-top:4px;">+ Add year</button>`;
+    el.querySelector('[data-raise-add]').addEventListener('click', () => {
+      const list = el.querySelector('[data-raise-list]');
+      const tos = [...list.querySelectorAll('[data-raise-field="to"]')].map(i => Number(i.value)).filter(Boolean);
+      const Y = tos.length ? Math.max(...tos) + 1 : new Date().getFullYear() + 1;
+      list.insertAdjacentHTML('beforeend', raiseRowHtml({ from: Y, to: Y, rate: (state.salaryGrowthRate ?? 0.08), month: defMonth }));
+    });
+    el.addEventListener('click', (e) => {
+      const del = e.target.closest('[data-raise-del]');
+      if (del) del.closest('[data-raise-row]').remove();
+    });
+    wrap.appendChild(el);
+  };
+  buildRaiseBlock('p1');
+  if (state.mode === 'partner') buildRaiseBlock('p2');
 
   const expRow = document.createElement('div');
   expRow.className = 'rate-row';
@@ -12171,6 +12427,18 @@ function wireDashboard() {
       if (key === 'p1')       state.p1BumpMonth = val;
       else if (key === 'p2')  state.p2BumpMonth = val;
       else if (key === 'exp') state.expenseBumpMonth = val;
+    });
+    // Raise by year: rebuild each shown person's schedule from its rows (incomplete rows dropped).
+    document.querySelectorAll('#settingsRateRows [data-raise-list]').forEach(list => {
+      const pk = list.dataset.raiseList;
+      const rows = [...list.querySelectorAll('[data-raise-row]')].map(r => {
+        const f = k => r.querySelector(`[data-raise-field="${k}"]`).value;
+        const from = f('from') === '' ? NaN : Number(f('from'));
+        const to = f('to') === '' ? from : Number(f('to'));
+        return { from, to, rate: f('rate') === '' ? NaN : Number(f('rate')) / 100, month: Number(f('month')) };
+      });
+      if (!state.raiseSchedule || typeof state.raiseSchedule !== 'object') state.raiseSchedule = {};
+      state.raiseSchedule[pk] = _normRaiseEntries(rows);
     });
     const cgTog = document.querySelector('#settingsRateRows .toggle[data-grow-contrib]');
     if (cgTog) state.growContributions = cgTog.classList.contains('on');
