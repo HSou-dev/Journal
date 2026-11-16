@@ -1614,6 +1614,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
 </header>
 <div class="tagline"><div class="tagline-inner">Numbers with intention — a considered view of your financial life.</div></div>
 
+<input type="file" id="ledgerImportFile" accept=".json,application/json" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" tabindex="-1" aria-hidden="true" />
 <div id="wizardRoot">
   <div class="wizard-wrap">
     <div class="wiz-header">
@@ -1637,6 +1638,10 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       <div class="panel-head"><span class="panel-num">No. 01</span><span class="panel-divider"></span><span class="panel-num">Identity</span></div>
       <h2 class="panel-title">Who is <em>planning</em>?</h2>
       <p class="panel-desc">Tell Ledger who this plan is for and which currency to use.</p>
+      <div id="importBackupBox" style="margin:0 0 22px;padding:12px 14px;border:1px dashed var(--line);border-radius:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+        <div style="flex:1;min-width:200px;font-size:13px;color:var(--ink-dim);line-height:1.5;">Already use Ledger on another account or device? Load your backup file (Edit balances → Export data) and skip setup.</div>
+        <button class="btn ghost" type="button" id="wizImportBtn">Import a backup</button>
+      </div>
       <div style="margin-bottom: 24px;">
         <div class="subsection-title" style="margin-bottom:12px;">Planning <em>mode</em></div>
         <div class="radio-cards" id="modeCards">
@@ -2129,6 +2134,7 @@ tr:hover td { background: rgba(255,255,255,0.01); }
       <div id="editGrid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:20px;"></div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:20px;">
         <button class="btn ghost" id="exportBtn">Export data · JSON</button>
+        <button class="btn ghost" id="importBtn">Import data · JSON</button>
         <button class="btn ghost" id="resetAllBtn">Start fresh</button>
       </div>
     </section>
@@ -2379,7 +2385,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.11.11.08';
+const APP_VERSION = '2026.11.11.09';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -2791,6 +2797,132 @@ function scheduleSave() {
   }, 1200);
 }
 
+// One-time housekeeping after a plan is loaded, whether from the cloud on sign-in or from an
+// imported backup. Schema v7: re-sync derived overlays for adjustment transactions so they appear
+// on the projection sheet, then clear the flag. syncSalaryOverrideFromTx lives in another IIFE;
+// it is reached through the window._syncDerivedFromTx alias that scope exposes.
+function _afterStateLoaded() {
+  if (state._needsAdjustmentResync && typeof window._syncDerivedFromTx === 'function') {
+    (state.transactions || []).forEach(tx => {
+      if (tx && tx.type === 'adjustment') window._syncDerivedFromTx(tx, 'upsert');
+    });
+    delete state._needsAdjustmentResync;
+    scheduleSave();
+  }
+}
+
+// ---- Backup: export / import (v2026.11.11.09) ---------------------------------------------
+// A backup is the whole plan (the same object saved to the cloud), wrapped with when/which
+// version made it and some counts for the confirmation. Import also accepts the raw state that
+// earlier versions of "Export data" downloaded.
+const LEDGER_DOC_LIMIT = 1000000;   // the cloud stores the plan as one document (1 MiB limit)
+function _ledgerCounts(st) {
+  const tx = Array.isArray(st.transactions) ? st.transactions : [];
+  const latest = tx.reduce((m, t) => (t && t.date && t.date > m) ? t.date : m, '');
+  return {
+    names: [st.p1Name, st.mode === 'partner' ? st.p2Name : null].filter(Boolean).join(' & '),
+    horizon: (st.horizonStart || '?') + ' to ' + (st.horizonEnd || '?'),
+    accounts: (st.accounts || []).length, transactions: tx.length,
+    investments: (st.investments || []).filter(i => i && i.id !== 'savings').length,
+    emis: (st.emis || []).length, scenarios: (st.scenarios || []).length, latestEntry: latest || null
+  };
+}
+function buildLedgerBackup(src) {
+  const clean = JSON.parse(JSON.stringify(src || state));
+  delete clean._previewMode; delete clean._previewScenarioIds;   // screen state, not data
+  return { app: 'Ledger', kind: 'backup', format: 1, appVersion: APP_VERSION, exportedAt: new Date().toISOString(), counts: _ledgerCounts(clean), state: clean };
+}
+function _downloadJSON(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function _todayStamp() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function exportLedgerBackup(prefix) {
+  _downloadJSON(buildLedgerBackup(), (prefix || 'ledger-backup') + '-' + _todayStamp() + '.json');
+}
+// Returns { state, meta } or throws an Error whose message is shown to the user as-is.
+function parseLedgerBackup(text) {
+  let obj;
+  try { obj = JSON.parse(text); } catch (e) { throw new Error('This file is not a valid backup: it could not be read as JSON.'); }
+  const wrapped = !!(obj && obj.app === 'Ledger' && obj.state && typeof obj.state === 'object');
+  const st = wrapped ? obj.state : obj;
+  if (!st || typeof st !== 'object' || Array.isArray(st)) throw new Error('This file is not a Ledger backup.');
+  if (!stateHasData(st)) throw new Error('This file is not a Ledger backup: it has no plan name or plan dates.');
+  const size = JSON.stringify(st).length;
+  if (size > LEDGER_DOC_LIMIT) throw new Error('This backup is too large to store in one account (' + Math.round(size / 1024) + ' KB; the limit is about 1,000 KB).');
+  return { state: st, meta: { wrapped, exportedAt: wrapped ? obj.exportedAt : null, appVersion: wrapped ? obj.appVersion : null, counts: _ledgerCounts(st) } };
+}
+function _backupSummary(meta) {
+  const c = meta.counts;
+  const when = meta.exportedAt ? new Date(meta.exportedAt).toLocaleString() : 'unknown (older export)';
+  const lines = [
+    'Exported: ' + when + (meta.appVersion ? '  (v' + meta.appVersion + ')' : ''),
+    'Plan: ' + (c.names || '?') + ', ' + c.horizon,
+    c.accounts + ' accounts · ' + c.transactions + ' Journal entries · ' + c.investments + ' investments · ' + c.emis + ' EMIs · ' + c.scenarios + ' scenarios',
+    'Latest entry: ' + (c.latestEntry || 'none')
+  ];
+  if (meta.appVersion && meta.appVersion > APP_VERSION) lines.push('', 'Note: this backup was made by a newer version of Ledger (v' + meta.appVersion + ') than this one (v' + APP_VERSION + '). Update the app first if anything looks off.');
+  return lines.join('\n');
+}
+// Replace the plan with an imported one and open the app on it. Saves straight away rather than
+// waiting for the usual debounce, so closing the tab right after importing cannot lose it.
+async function applyLedgerBackup(st) {
+  const s = JSON.parse(JSON.stringify(st));
+  delete s._previewMode; delete s._previewScenarioIds;
+  state = migrateState({ ...freshState(), ...s });
+  _rvBaseSnap = null;
+  _openingDatesApplied = false;
+  _afterStateLoaded();
+  if (currentUser && window._fb && window._fb.configured) {
+    setSyncStatus('saving', 'Saving…');
+    try { await window._fb.saveData(currentUser.uid, state); setSyncStatus('synced', 'Synced'); }
+    catch (e) { setSyncStatus('offline', 'Offline'); scheduleSave(); }
+  } else {
+    try { localStorage.setItem('ledger_state', JSON.stringify(state)); } catch (e) {}
+  }
+  launchDashboard();
+  if (typeof updatePreviewBanner === 'function') updatePreviewBanner();
+}
+let _importMode = null;   // 'new' (setup screen) or 'replace' (Edit balances)
+function startLedgerImport(mode) {
+  _importMode = mode;
+  const inp = document.getElementById('ledgerImportFile');
+  inp.value = '';
+  inp.click();
+}
+async function _onImportFileChosen(file) {
+  if (!file) return;
+  let parsed;
+  try { parsed = parseLedgerBackup(await file.text()); }
+  catch (e) { alert(e.message); return; }
+  const where = currentUser && currentUser.email ? currentUser.email : 'this device';
+  const summary = _backupSummary(parsed.meta);
+  if (_importMode === 'replace') {
+    if (!confirm('Replace ALL data in ' + where + ' with this backup?\n\n' + summary +
+                 '\n\nA backup of the data being replaced downloads first, so you can undo this.')) return;
+    exportLedgerBackup('ledger-backup-before-import');
+  } else {
+    if (!confirm('Load this backup into ' + where + '?\n\n' + summary)) return;
+  }
+  await applyLedgerBackup(parsed.state);
+}
+(function wireLedgerImport() {
+  const wire = () => {
+    const inp = document.getElementById('ledgerImportFile');
+    if (!inp || inp.dataset.wired) return;
+    inp.dataset.wired = '1';
+    inp.addEventListener('change', () => _onImportFileChosen(inp.files && inp.files[0]));
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('#wizImportBtn')) startLedgerImport('new');
+      else if (e.target.closest('#importBtn')) startLedgerImport('replace');
+    });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
+})();
+
 function stateHasData(s) {
   return !!(s && s.p1Name && s.p1Name.trim() && s.horizonStart && s.horizonEnd && s.horizonEnd > s.horizonStart);
 }
@@ -2825,19 +2957,7 @@ async function enterApp() {
   // Run month-end auto-sweep before the dashboard renders so any newly created
   // sweep transactions are visible immediately and reflected in projections.
   if (stateHasData(state)) {
-    // Schema v7 migration: re-sync derived overlays for all adjustment transactions
-    // so they appear on the projection sheet. One-time, then we clear the flag.
-    // syncSalaryOverrideFromTx lives in another IIFE scope; we access it via the
-    // window._syncDerivedFromTx alias that scope exposes.
-    if (state._needsAdjustmentResync && typeof window._syncDerivedFromTx === 'function') {
-      (state.transactions || []).forEach(tx => {
-        if (tx && tx.type === 'adjustment') {
-          window._syncDerivedFromTx(tx, 'upsert');
-        }
-      });
-      delete state._needsAdjustmentResync;
-      scheduleSave();
-    }
+    _afterStateLoaded();
     // Auto-sweep removed (schema v10). Salary-account residue is intentionally kept
     // (e.g. as a credit-card reserve) and no longer force-moved into savings.
     launchDashboard();
@@ -12447,13 +12567,7 @@ function wireDashboard() {
     // Switch to Projection so the user sees their changes reflected immediately
     activateSection('budget');
   });
-  document.getElementById('exportBtn').addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'ledger-data.json'; a.click();
-    URL.revokeObjectURL(url);
-  });
+  document.getElementById('exportBtn').addEventListener('click', () => exportLedgerBackup('ledger-backup'));
   document.getElementById('resetAllBtn').addEventListener('click', () => {
     if (!confirm('Reset everything and start a new plan?')) return;
     state = freshState();
