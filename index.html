@@ -2385,7 +2385,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.11.11.09';
+const APP_VERSION = '2026.11.23.01';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3707,10 +3707,12 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
           const downRow = new Array(n).fill(0);
           downRow[idx] = downPayment;
           expenseDelta[idx] += downPayment;
-          scRows.push({ label: 'Down payment', kind: 'expense', values: downRow });
+          scRows.push({ label: 'Down payment', kind: 'expense', values: downRow, lump: true });
         }
-        // EMI row + delta
-        if (loanAmt > 0 && loanYears > 0) {
+        // EMI row + delta. Once committed, the loan is a real EMI in state.emis (so Budget,
+        // Journal and the EMI pages handle it natively); the scenario then stops charging it.
+        const _emiMaterialised = !!(sc.committed && (state.emis || []).some(e => e && e.fromScenario === sc.id));
+        if (loanAmt > 0 && loanYears > 0 && !_emiMaterialised) {
           const emi = computeEMI(loanAmt, loanRate, loanYears);
           const endIdx = Math.min(n - 1, idx + loanYears * 12 - 1);
           const emiRow = new Array(n).fill(0);
@@ -3783,7 +3785,7 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
           const lumpRow = new Array(n).fill(0);
           lumpRow[idx] = lumpSum;
           expenseDelta[idx] += lumpSum;
-          scRows.push({ label: 'Upfront cost', kind: 'expense', values: lumpRow });
+          scRows.push({ label: 'Upfront cost', kind: 'expense', values: lumpRow, lump: true });
         }
         // Age-banded monthly costs. Each band: { maxAge, amount } meaning "applies while
         // the child's age (in years) is < maxAge". Bands are checked in order. If the user
@@ -3810,7 +3812,7 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
               expenseDelta[i] += grown;
             }
           }
-          scRows.push({ label: bands ? 'Child cost (age-based, with growth)' : 'Monthly cost (with growth)', kind: 'expense', values: monthlyRow });
+          scRows.push({ label: bands ? 'Child cost (age-based, with growth)' : 'Monthly cost (with growth)', kind: 'expense', values: monthlyRow, recurring: true });
         }
       }
     } else if (sc.type === 'retirement') {
@@ -3905,7 +3907,9 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
         scRows.push({
           label: o.note ? `${o.note}${freqLabel}` : `Expense${freqLabel} (${o.month})`,
           kind: 'expense',
-          values: row
+          values: row,
+          recurring: o.frequency === 'monthly',
+          lump: o.frequency !== 'monthly'
         });
       });
       if (p.monthlyExpenseStart && Number(p.monthlyExpenseAmount)) {
@@ -3922,7 +3926,7 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
             row[i] = grownAmt;
             expenseDelta[i] += grownAmt;
           }
-          scRows.push({ label: `Recurring expense bump`, kind: 'expense', values: row });
+          scRows.push({ label: `Recurring expense bump`, kind: 'expense', values: row, recurring: true });
         }
       }
       // Recurring income bump — mirror of monthlyExpenseStart/Amount above.
@@ -4354,6 +4358,33 @@ function plannedOneOffsInMonth(ym) {
     if (ty === oy) out.push({ id: o.id, note: o.note || 'One-off expense', amount: Number(o.amount) || 0 });
     else if (o.repeat && ty > oy) out.push({ id: o.id, note: o.note || 'One-off expense', amount: (Number(o.amount) || 0) * Math.pow(1 + g, ty - oy) });
   });
+  _committedLumpsInMonth(ym).forEach(x => out.push(x));
+  return out;
+}
+// One-off costs of committed scenarios (delivery, a down payment) planned in month ym, priced by
+// the engine. Cached per month and committed-scenario content: the Journal asks repeatedly.
+let _clCache = { key: null, byMonth: {} };
+function _committedLumpsInMonth(ym) {
+  const committed = (state.scenarios || []).filter(s => s && s.committed);
+  if (!committed.length) return [];
+  const key = JSON.stringify([state.horizonStart, committed]);
+  if (_clCache.key !== key) _clCache = { key, byMonth: {} };
+  if (_clCache.byMonth[ym]) return _clCache.byMonth[ym];
+  const out = [];
+  try {
+    const end = ym > currentCalendarMonth() ? ym : currentCalendarMonth();
+    const p = runProjection({ horizonEnd: end, scenarios: [] });
+    const i = p.isos.indexOf(ym);
+    if (i >= 0) (p.scenarioBreakdowns || []).forEach(sb => {
+      const sc = committed.find(x => x.id === sb.scenarioId);
+      if (!sc) return;
+      sb.rows.forEach(r => {
+        if (!r.lump || r.kind !== 'expense' || !(r.values[i] > 0)) return;
+        out.push({ id: 'scn:' + sc.id + ':' + r.label.toLowerCase().replace(/[^a-z0-9]+/g, '-'), note: (sc.name || sc.type) + ' · ' + r.label, amount: r.values[i] });
+      });
+    });
+  } catch (e) {}
+  _clCache.byMonth[ym] = out;
   return out;
 }
 
@@ -5106,6 +5137,57 @@ function initWizard() {
 // ----- Preview Mode -----
 // Transient: not persisted, resets each session.
 // state._previewMode (bool) and state._previewScenarioIds (array of scenario ids).
+// ---- Committed scenarios (v2026.11.11.10) -------------------------------------------------
+// "Commit to base" no longer copies pieces of a scenario into the inputs (which skipped what had
+// no matching input, then deleted the scenario). A committed scenario is part of the base plan:
+// runProjection always applies it, so every page includes it from its own dates, exactly as a
+// preview shows it. Previews stack on top. One rule, in the engine, so pages cannot disagree.
+function _scenariosForProjection(overrides) {
+  const extra = (overrides && overrides.scenarios) || [];
+  const excl = new Set((overrides && overrides.excludeScenarioIds) || []);
+  const committed = (state && Array.isArray(state.scenarios) ? state.scenarios : []).filter(s => s && s.committed && !excl.has(s.id));
+  const ids = new Set(committed.map(s => s.id));
+  // excludeScenarioIds leaves COMMITTED scenarios out of the base (e.g. the one being edited);
+  // scenarios passed explicitly are always applied.
+  return committed.concat(extra.filter(s => s && !ids.has(s.id)));
+}
+// A committed scenario's own expense category (created on commit for its recurring costs).
+function _scenarioCategoryKey(sc) {
+  const c = (state.customCategories || []).find(x => x && x.fromScenario === sc.id);
+  return c ? c.key : null;
+}
+// Which base row a scenario breakdown row is shown inside (null = shown as its own row):
+// revisions fold into the row they change; a committed scenario's recurring costs fold into
+// its own category. Shared by the Projection sheet and the Budget page.
+function _foldKeyForRow(sc, r) {
+  if (r.revTarget) return r.revTarget;
+  if (sc && sc.committed && r.recurring && r.kind === 'expense') {
+    const k = _scenarioCategoryKey(sc);
+    if (k) return 'category:' + k;
+  }
+  return null;
+}
+// Per-row adjustments over months [from, to) of projection p: { fold: {key: values[]},
+// names: {key: Set(what-if scenario names)} }. Names are only for previewed what-ifs (they get
+// the marker); committed changes are the plan and are shown plainly.
+function planFoldFor(p, from, to) {
+  const fold = {}, names = {};
+  (p.scenarioBreakdowns || []).forEach(sb => {
+    const sc = (state.scenarios || []).find(x => x.id === sb.scenarioId);
+    sb.rows.forEach(r => {
+      const key = _foldKeyForRow(sc, r);
+      if (!key) return;
+      const slice = r.values.slice(from, to);
+      if (r.kind !== 'contribution') {
+        const acc = fold[key] || (fold[key] = new Array(slice.length).fill(0));
+        for (let i = 0; i < slice.length; i++) acc[i] += slice[i] || 0;
+      }
+      if (!(sc && sc.committed)) (names[key] = names[key] || new Set()).add(sb.scenarioName);
+    });
+  });
+  return { fold, names };
+}
+
 function activeScenariosForRender() {
   // Preview is the only mechanism that applies scenarios to the rendered view.
   // The `enabled` flag is intentionally ignored here: previewing a scenario means
@@ -5587,7 +5669,7 @@ function runProjection(overrides={}) {
   }
 
   // ---- SCENARIO OVERLAY ----
-  const scenarioList = overrides.scenarios || [];
+  const scenarioList = _scenariosForProjection(overrides);
 
   // Investments and their lifecycle timelines (events: setAmount/pause/resume/close), resolved
   // once over the horizon. Hoisted above the scenario overlay so a revise scenario can read the
@@ -6263,6 +6345,27 @@ function formatMonthLabel(iso) {
   return names[m - 1] + ' ' + y;
 }
 
+// Planned amounts for one month on the Budget page, from the engine (base plan incl. committed
+// scenarios). Returns null if the month is outside the plan, in which case the page falls back
+// to the typed budgets as before.
+function _budgetPlanFor(month) {
+  try {
+    const end = month > currentCalendarMonth() ? month : currentCalendarMonth();
+    const p = runProjection({ horizonEnd: end, scenarios: [] });
+    const i = p.isos.indexOf(month);
+    if (i < 0) return null;
+    const { fold } = planFoldFor(p, i, i + 1);
+    const f = key => (fold[key] ? fold[key][0] : 0) || 0;
+    const base = (p.reviseBase && p.reviseBase.categoryBase) || {};
+    const sch = e => emiScheduleFor(e, p.months);
+    return {
+      cat: key => Math.max(0, (base[key] ? base[key][i] : 0) + f('category:' + key)),
+      emiActive: e => { const s = sch(e); return !!(s && i >= s.startIdx && i <= s.endIdx); },
+      emi: e => { const s = sch(e); return Math.max(0, (s && i >= s.startIdx && i <= s.endIdx ? s.amounts[i] : 0) + (e.id ? f('emi:' + e.id) : 0)); }
+    };
+  } catch (e) { return null; }
+}
+
 function renderBudgetActuals() {
   if (!_budgetActualsMonth) _budgetActualsMonth = currentCalendarMonth();
   const month = _budgetActualsMonth;
@@ -6303,8 +6406,14 @@ function renderBudgetActuals() {
     }
   });
 
+  // Planned amounts come from the engine, the same source as Projection, Dashboard and Net Worth
+  // (v2026.11.11.10): category budgets with the yearly step-up and any committed Change my plan
+  // revision, committed scenarios' recurring costs in their own category, EMIs from the shared
+  // schedule. Previews are not applied here: Budget and Journal follow the actual plan.
+  const _bp = _budgetPlanFor(month);
+  const plannedCat = c => _bp ? _bp.cat(c.key) : (state[c.key] || 0);
   // Build category rows (only categories with a non-zero budget, OR with non-zero actuals)
-  const cats = getExpenseCats().filter(c => (state[c.key] || 0) > 0 || actualsByCat[c.key] > 0);
+  const cats = getExpenseCats().filter(c => plannedCat(c) > 0 || actualsByCat[c.key] > 0);
 
   // ---- Render expense-split pie chart (this month, by category + EMIs combined) ----
   // The pie shows all spending sources side-by-side so the user sees where money went.
@@ -6377,18 +6486,19 @@ function renderBudgetActuals() {
   if (cats.length > 0) {
     html += '<div class="budget-section-head">Discretionary categories</div>';
     cats.forEach(c => {
-      html += renderBudgetRow(c.label, c.color || '#7fb069', actualsByCat[c.key] || 0, state[c.key] || 0, false, 'cat:' + c.key);
+      html += renderBudgetRow(c.label, c.color || '#7fb069', actualsByCat[c.key] || 0, plannedCat(c), false, 'cat:' + c.key);
     });
 
     // Master totals row
     let totalActual = 0, totalBudget = 0;
-    cats.forEach(c => { totalActual += actualsByCat[c.key] || 0; totalBudget += state[c.key] || 0; });
+    cats.forEach(c => { totalActual += actualsByCat[c.key] || 0; totalBudget += plannedCat(c); });
     html += renderBudgetRow('All discretionary · total', 'var(--accent)', totalActual, totalBudget, true, 'all-disc');
   }
 
   // EMIs section — proper budget tubes (scheduled amount vs actual paid this month)
   if ((state.emis || []).length > 0) {
     const activeEmis = (state.emis || []).filter(e => {
+      if (_bp) return _bp.emiActive(e);
       if (!e.startMonth) return false;
       const endIso = _emiEndIso(e);
       if (!endIso) return false;
@@ -6402,8 +6512,9 @@ function renderBudgetActuals() {
         const endText = endIso ? ' · until ' + formatMonthLabel(endIso) : '';
         const actual = e.id ? (emiActuals[e.id] || 0) : 0;
         totalEmiActual += actual;
-        totalEmiScheduled += e.amount;
-        html += renderBudgetRow((e.name || 'EMI') + endText, '#c08c5a', actual, e.amount, false, 'emi:' + (e.id || ''));
+        const sched = _bp ? _bp.emi(e) : e.amount;
+        totalEmiScheduled += sched;
+        html += renderBudgetRow((e.name || 'EMI') + endText, '#c08c5a', actual, sched, false, 'emi:' + (e.id || ''));
       });
       // Totals row
       if (activeEmis.length > 1) {
@@ -8517,18 +8628,8 @@ function renderBudget() {
   // 0 from March rather than staying 42,405 with a separate -42,405 row further down. revFold holds
   // the engine's own delta per row (sliced to the window); revNames the scenario names for the marker.
   // The delta is added as-is, so every column still sums to the engine's totals.
-  const revFold = {}, revNames = {};
-  (p.scenarioBreakdowns || []).forEach(sb => {
-    sb.rows.forEach(r => {
-      if (!r.revTarget) return;
-      const slice = r.values.slice(sliceFrom, sliceTo);
-      if (r.kind !== 'contribution') {
-        const acc = revFold[r.revTarget] || (revFold[r.revTarget] = new Array(slice.length).fill(0));
-        for (let i = 0; i < slice.length; i++) acc[i] += slice[i] || 0;
-      }
-      (revNames[r.revTarget] = revNames[r.revTarget] || new Set()).add(sb.scenarioName);
-    });
-  });
+  // Shared with the Budget page (planFoldFor): revisions and committed recurring costs.
+  const { fold: revFold, names: revNames } = planFoldFor(p, sliceFrom, sliceTo);
   const revNote = key => revNames[key] ? Array.from(revNames[key]).join(' + ') : null;
   // Marker for a row changed by a previewed revision. Placed BEFORE the label so the EMI grouping,
   // which matches labels ending in "(EMI)", still finds the row.
@@ -8560,11 +8661,13 @@ function renderBudget() {
   const scenarioIncomeRows = [];
   const scenarioExpenseRows = [];
   (p.scenarioBreakdowns || []).forEach(sb => {
+    const _sc = (state.scenarios || []).find(x => x.id === sb.scenarioId);
     sb.rows.forEach(r => {
-      if (r.revTarget) return;   // shown inside the row it changes (revFold, above)
+      if (_foldKeyForRow(_sc, r)) return;   // shown inside the row it changes (revFold, above)
       const slice = r.values.slice(sliceFrom, sliceTo);
       const labelled = `${escapeHtml(sb.scenarioName)} · ${escapeHtml(r.label)}`;
-      const item = { label: labelled, values: slice, scenario: true };
+      // A committed scenario is the plan, so its rows are drawn like any other row.
+      const item = { label: labelled, values: slice, scenario: !(_sc && _sc.committed) };
       if (r.kind === 'contribution') {
         // Contribution revisions move money to investments, not out of the household: showing
         // them as an expense row would not reconcile with the expense total.
@@ -8871,8 +8974,11 @@ function renderBudget() {
   }
   // Expense categories — grown per month per engine, overlaid with journal actuals
   getExpenseCats().forEach(c => {
-    if (!(state[c.key] > 0)) return;
     const _rf = revFold['category:' + c.key];
+    // A committed scenario's own category has no typed budget; it shows while it plans something
+    // in this window (or has logged entries, which the overlay displays).
+    const _hasLogged = (state.transactions || []).some(t => t && t.type === 'expense' && t.category === c.key && t.date && isos.indexOf(t.date.slice(0, 7)) >= 0);
+    if (!(state[c.key] > 0) && !(_rf && _rf.some(v => v)) && !_hasLogged) return;
     const slice = (p.expCategorySeries[c.key] || []).slice(sliceFrom, sliceTo).map((v, i) => v + (_rf ? (_rf[i] || 0) : 0));
     const ov = overlayCategoryRow(c.key, slice);
     expenseRows.push({ label: c.label, overlay: ov, revNote: revNote('category:' + c.key) });
@@ -10024,7 +10130,7 @@ function _rvTargetOptions(selected) {
 // series a revision is applied to, so "current value" here is what the delta is measured from.
 let _rvBaseSnap = null;
 function _rvRefreshBase() {
-  const p = runProjection({ scenarios: [] });
+  const p = runProjection({ scenarios: [], excludeScenarioIds: (typeof _scEditingId !== 'undefined' && _scEditingId) ? [_scEditingId] : [] });
   _rvBaseSnap = { isos: p.isos, ctx: p.reviseBase };
 }
 // What the projection has for `targetVal` in month `from`, BEFORE this row: the base plan, or an
@@ -10631,11 +10737,17 @@ function bindScenarioFieldHandlers(sc) {
       const amtEl = row.querySelector('[data-rv-field="newAmount"]');
       // Desktop: clicking into a box that still shows its default selects it, so typing replaces it.
       // Deferred so it runs after the calculator promotion (number -> text), which drops any selection.
-      amtEl.addEventListener('focus', () => setTimeout(() => {
+      // The mouse button is released after focus; that release places the caret and would undo
+      // a selection made on focus, so the first mouseup after focusing re-selects and is cancelled.
+      const selDefault = () => {
         if (document.activeElement === amtEl && _rvIsDefault(amtEl) && !document.body.classList.contains('numpad-open')) {
           try { amtEl.select(); } catch (e) {}
         }
-      }, 0));
+      };
+      let justFocused = false;
+      amtEl.addEventListener('focus', () => { justFocused = true; setTimeout(selDefault, 0); });
+      amtEl.addEventListener('mouseup', (e) => { if (justFocused) { justFocused = false; if (_rvIsDefault(amtEl)) { e.preventDefault(); selDefault(); } } });
+      amtEl.addEventListener('blur', () => { justFocused = false; });
       // Typing makes the amount the user's own; it is never overwritten after that.
       const onAmt = () => _rvRefreshRows(null);
       amtEl.addEventListener('input', onAmt); amtEl.addEventListener('change', onAmt);
@@ -10884,182 +10996,80 @@ function _syncModalOpenBodyClass() {
 
 // Commit a scenario's effects to the base plan where they cleanly map.
 // Builds a list of pending mutations, asks user, then applies on confirm.
+// Things a committed scenario needs outside the engine so the Budget and Journal can use them:
+//  - its own expense category, if it has recurring costs (planned from the scenario, budget 0)
+//  - a real EMI for a purchase loan (the scenario stops charging its own EMI row meanwhile)
+// Re-run after a committed scenario is edited, so they track its inputs.
+function _syncCommittedArtifacts(sc) {
+  if (!sc || !sc.committed) return;
+  // Recurring costs? Ask the engine for this scenario on its own (not yet counted as committed).
+  const probe = runProjection({ scenarios: [Object.assign({}, sc, { committed: false })], excludeScenarioIds: [sc.id] });
+  const hasRecurring = (probe.scenarioBreakdowns || []).some(b => b.scenarioId === sc.id && b.rows.some(r => r.recurring && r.kind === 'expense' && r.values.some(v => v)));
+  const name = sc.name || ((SCENARIO_TEMPLATES.find(t => t.type === sc.type) || {}).label) || 'Scenario';
+  if (!Array.isArray(state.customCategories)) state.customCategories = [];
+  let cat = state.customCategories.find(c => c && c.fromScenario === sc.id);
+  if (hasRecurring) {
+    if (!cat) {
+      const key = 'exScn' + Date.now().toString(36);
+      const color = CUSTOM_CAT_COLORS[state.customCategories.length % CUSTOM_CAT_COLORS.length];
+      cat = { key, label: name, color, fromScenario: sc.id };
+      state.customCategories.push(cat);
+      state[key] = 0;   // planned from the scenario, not from a typed budget
+    } else cat.label = name;
+  }
+  if (!Array.isArray(state.emis)) state.emis = [];
+  const p = sc.params || {};
+  const idx = state.emis.findIndex(e => e && e.fromScenario === sc.id);
+  const wantEmi = sc.type === 'house' && p.month && _dcEmi(p) > 0 && Number(p.loanYears) > 0;
+  if (wantEmi) {
+    const emi = { id: 'emi_scn_' + sc.id, name: name + ' · EMI', amount: _dcEmi(p), startMonth: p.month, months: Number(p.loanYears) * 12, events: [], fromScenario: sc.id };
+    if (idx >= 0) state.emis[idx] = Object.assign({}, state.emis[idx], emi); else state.emis.push(emi);
+  } else if (idx >= 0) state.emis.splice(idx, 1);
+}
+// Undo the above when a scenario leaves the base plan. Journal entries are never touched: a
+// category with logged entries stays (budget 0); the EMI leaves the plan, payments stay logged.
+function _removeCommittedArtifacts(sc) {
+  if (!sc) return;
+  state.emis = (state.emis || []).filter(e => !(e && e.fromScenario === sc.id));
+  const cat = (state.customCategories || []).find(c => c && c.fromScenario === sc.id);
+  if (cat) {
+    const used = (state.transactions || []).some(t => t && t.category === cat.key);
+    if (!used) { state.customCategories = state.customCategories.filter(c => c !== cat); delete state[cat.key]; }
+  }
+}
+function _refreshAfterPlanChange() {
+  if (typeof renderAll === 'function') renderAll();
+  if (typeof renderDecisions === 'function' && document.getElementById('decisions') && document.getElementById('decisions').classList.contains('active')) renderDecisions();
+}
+function _dropFromPreview(id) {
+  if ((state._previewScenarioIds || []).includes(id)) {
+    state._previewScenarioIds = state._previewScenarioIds.filter(x => x !== id);
+    if (state._previewScenarioIds.length === 0) state._previewMode = false;
+    if (typeof updatePreviewBanner === 'function') updatePreviewBanner();
+  }
+}
 function commitScenarioToBase(scId) {
   const sc = (state.scenarios || []).find(s => s.id === scId);
-  if (!sc) return;
-  if (sc.type === 'revise') {
-    // Committing removes the scenario afterwards, and dated category changes have no home in
-    // the base plan, so committing would silently drop them. Refuse rather than lose data.
-    alert('"Change my plan" scenarios can\'t be committed yet. Keep it as a scenario.\n\nTo make a change permanent: edit the amount in Edit balances (for an EMI or investment from a later month, use its Close / timeline → Step up / down).');
-    return;
-  }
-  const p = sc.params || {};
-
-  const pending = {
-    expenseOneOffs: [],
-    incomeOneOffs: [],
-    emis: [],
-    incomeOverrides: []
-  };
-  const committed = [];
-  const skipped = [];
-
-  if (sc.type === 'house') {
-    if (p.month && Number(p.cost) > 0) {
-      const cost = Number(p.cost);
-      let down;
-      if ((p.downMode || 'pct') === 'amt') {
-        down = Number(p.downAmount) || 0;
-      } else {
-        down = cost * ((Number(p.downPct) || 0) / 100);
-      }
-      down = Math.min(Math.max(0, down), cost);
-      const loanAmt = cost - down;
-      const kindLabel = sc.name || ({ house:'House', land:'Land', car:'Car', other:'Purchase' }[p.purchaseKind] || 'Purchase');
-      if (down > 0) {
-        pending.expenseOneOffs.push({ month: p.month, amount: down, note: kindLabel + ' · down payment', repeat: false });
-        committed.push(`Down payment ${fmtMoney(down, true)} as one-off expense (${p.month})`);
-      }
-      if (loanAmt > 0 && Number(p.loanYears) > 0) {
-        const emi = computeEMI(loanAmt, Number(p.loanRate) || 0, Number(p.loanYears));
-        pending.emis.push({ name: kindLabel + ' · EMI', amount: Math.round(emi), startMonth: p.month, months: Number(p.loanYears) * 12 });
-        committed.push(`EMI ${fmtMoney(Math.round(emi), true)}/mo for ${Number(p.loanYears) * 12} months`);
-      }
-    } else {
-      skipped.push('Purchase parameters incomplete — nothing to commit.');
-    }
-  } else if (sc.type === 'sabbatical') {
-    if (p.startMonth && Number(p.months) > 0) {
-      const months = generateHorizonMonths(state.horizonStart, state.horizonEnd);
-      const startIdx = months.findIndex(m => m.iso === p.startMonth);
-      if (startIdx < 0) {
-        skipped.push(`Start month ${p.startMonth} is outside your horizon — cannot commit.`);
-      } else {
-        const endIdx = Math.min(months.length - 1, startIdx + Number(p.months) - 1);
-        let count = 0;
-        for (let i = startIdx; i <= endIdx; i++) {
-          const iso = months[i].iso;
-          if (p.partnerWorks && state.mode === 'partner') {
-            pending.incomeOverrides.push({ month: iso, person: 'p1', amount: 0 });
-          } else {
-            pending.incomeOverrides.push({ month: iso, person: 'p1', amount: 0 });
-            if (state.mode === 'partner') {
-              pending.incomeOverrides.push({ month: iso, person: 'p2', amount: 0 });
-            }
-          }
-          count++;
-        }
-        committed.push(`Income overrides for ${count} months (${months[startIdx].iso} → ${months[endIdx].iso}) — ${p.partnerWorks ? "partner-only" : "zero"} income.`);
-      }
-    } else {
-      skipped.push('Sabbatical parameters incomplete — nothing to commit.');
-    }
-  } else if (sc.type === 'kid') {
-    if (p.startMonth && Number(p.lumpSum) > 0) {
-      pending.expenseOneOffs.push({ month: p.startMonth, amount: Number(p.lumpSum), note: (sc.name || 'Child') + ' · upfront cost', repeat: false });
-      committed.push(`Upfront cost ${fmtMoney(Number(p.lumpSum), true)} as one-off expense (${p.startMonth})`);
-    }
-    if (Array.isArray(p.ageBands) && p.ageBands.length) {
-      skipped.push(`Age-based monthly costs can't auto-commit (they change as the child grows). They remain modeled in the projection/scenario; to bake into actuals, raise an expense category manually via Edit balances.`);
-    } else if (Number(p.monthlyCost) > 0) {
-      skipped.push(`Recurring monthly cost ${fmtMoney(p.monthlyCost, true)} cannot auto-commit. Add it via Edit balances → Expenses (raise a category like Family).`);
-    }
-  } else if (sc.type === 'retirement') {
-    if (p.startMonth) {
-      const months = generateHorizonMonths(state.horizonStart, state.horizonEnd);
-      const startIdx = months.findIndex(m => m.iso === p.startMonth);
-      if (startIdx < 0) {
-        skipped.push(`Retirement month ${p.startMonth} is outside your horizon — cannot commit income changes.`);
-      } else {
-        let count = 0;
-        for (let i = startIdx; i < months.length; i++) {
-          const iso = months[i].iso;
-          pending.incomeOverrides.push({ month: iso, person: 'p1', amount: 0 });
-          if (state.mode === 'partner') pending.incomeOverrides.push({ month: iso, person: 'p2', amount: 0 });
-          count++;
-        }
-        committed.push(`Income → ₹0 for ${count} months from ${p.startMonth}.`);
-      }
-      if (Number(p.expenseReductionPct) > 0) {
-        skipped.push(`Expense reduction of ${p.expenseReductionPct}% cannot auto-commit. Lower expenses manually via Edit balances.`);
-      }
-      skipped.push('SIP contributions stop in scenario, but cannot auto-commit. Set monthly contributions to 0 via Edit balances → Investments.');
-    } else {
-      skipped.push('Retirement parameters incomplete.');
-    }
-  } else if (sc.type === 'custom') {
-    if (Array.isArray(p.incomeOneOffs)) {
-      p.incomeOneOffs.filter(o => o.month && Number(o.amount)).forEach(o => {
-        pending.incomeOneOffs.push({
-          month: o.month, amount: Number(o.amount), note: o.note || (sc.name || 'Custom'),
-          frequency: o.frequency || 'once',
-          endMonth: o.endMonth || '',
-          repeat: (o.frequency === 'yearly'),  // legacy field for any code still reading it
-        });
-        const freqLabel = o.frequency === 'monthly' ? '/mo' : (o.frequency === 'yearly' ? '/yr' : '');
-        committed.push(`Income ${fmtMoney(Number(o.amount), true)}${freqLabel} from ${o.month}` + (o.endMonth ? ` to ${o.endMonth}` : ''));
-      });
-    }
-    if (Array.isArray(p.expenseOneOffs)) {
-      p.expenseOneOffs.filter(o => o.month && Number(o.amount)).forEach(o => {
-        pending.expenseOneOffs.push({
-          month: o.month, amount: Number(o.amount), note: o.note || (sc.name || 'Custom'),
-          frequency: o.frequency || 'once',
-          endMonth: o.endMonth || '',
-          repeat: (o.frequency === 'yearly'),
-        });
-        const freqLabel = o.frequency === 'monthly' ? '/mo' : (o.frequency === 'yearly' ? '/yr' : '');
-        committed.push(`Expense ${fmtMoney(Number(o.amount), true)}${freqLabel} from ${o.month}` + (o.endMonth ? ` to ${o.endMonth}` : ''));
-      });
-    }
-    if (p.monthlyExpenseStart && Number(p.monthlyExpenseAmount) > 0) {
-      skipped.push(`Recurring expense ${fmtMoney(p.monthlyExpenseAmount, true)}/mo from ${p.monthlyExpenseStart} cannot auto-commit. Add it as an EMI (Edit balances → EMIs) or raise a monthly category.`);
-    }
-  }
-
-  // Compose confirmation message
-  let msg = `Commit "${sc.name || sc.type}" to your base plan?\n\n`;
-  if (committed.length) {
-    msg += 'WILL COMMIT:\n  • ' + committed.join('\n  • ') + '\n\n';
-  } else {
-    msg += '(nothing cleanly committable from this scenario)\n\n';
-  }
-  if (skipped.length) {
-    msg += 'CANNOT COMMIT (manual entry needed):\n  • ' + skipped.join('\n  • ') + '\n\n';
-  }
-  msg += 'After committing, the scenario will be removed from your list. Continue?';
-
-  if (!confirm(msg)) return;
-
-  // Apply mutations
-  if (pending.expenseOneOffs.length) {
-    state.expenseOneOffs = state.expenseOneOffs || [];
-    pending.expenseOneOffs.forEach(o => state.expenseOneOffs.push(o));
-  }
-  if (pending.incomeOneOffs.length) {
-    state.incomeOneOffs = state.incomeOneOffs || [];
-    pending.incomeOneOffs.forEach(o => state.incomeOneOffs.push(o));
-  }
-  if (pending.emis.length) {
-    state.emis = state.emis || [];
-    pending.emis.forEach(e => state.emis.push(e));
-  }
-  if (pending.incomeOverrides.length) {
-    state.incomeOverrides = state.incomeOverrides || [];
-    pending.incomeOverrides.forEach(o => state.incomeOverrides.push(o));
-  }
-
-  // Remove the scenario
-  state.scenarios = (state.scenarios || []).filter(s => s.id !== scId);
-  // Drop from preview if active
-  if ((state._previewScenarioIds || []).includes(scId)) {
-    state._previewScenarioIds = state._previewScenarioIds.filter(x => x !== scId);
-    if (state._previewScenarioIds.length === 0) state._previewMode = false;
-    updatePreviewBanner();
-  }
+  if (!sc || sc.committed) return;
+  const name = sc.name || sc.type;
+  if (!confirm('Add "' + name + '" to your base plan?\n\nIt will apply on every page from its own dates: Projection, Dashboard, Net Worth, Decisions, Budget and Journal. ' +
+               'Recurring costs get their own category you can log against; a purchase loan becomes an EMI.\n\nIt stays in this list marked "In base plan", and you can remove it from the base at any time.')) return;
+  sc.committed = true;
+  sc.committedAt = new Date().toISOString();
+  _syncCommittedArtifacts(sc);
+  _dropFromPreview(sc.id);
   scheduleSave();
-  renderAll();
-  renderScenarios();
+  _refreshAfterPlanChange();
+}
+function uncommitScenario(scId) {
+  const sc = (state.scenarios || []).find(s => s.id === scId);
+  if (!sc || !sc.committed) return;
+  if (!confirm('Remove "' + (sc.name || sc.type) + '" from your base plan?\n\nIt goes back to being a what-if in this list. Anything already logged in the Journal stays.')) return;
+  sc.committed = false;
+  delete sc.committedAt;
+  _removeCommittedArtifacts(sc);
+  scheduleSave();
+  _refreshAfterPlanChange();
 }
 
 /* ============================================================================
@@ -11107,8 +11117,152 @@ const DECISION_KINDS = {
   car:   { label:'Car',      icon:'🚗', note:'A car is consumption. It loses value the whole time you are paying for it, so the net-worth cost below is the real price, not an investment.' },
   house: { label:'House',    icon:'🏠', note:'A house is partly an asset — the EMI buys equity as well as shelter, so the net-worth cost understates what you get back.' },
   land:  { label:'Land',     icon:'🌳', note:'Land is an asset, but an illiquid one that produces no income while you hold it.' },
-  other: { label:'Purchase', icon:'🏷️', note:'' }
+  other: { label:'Purchase', icon:'🏷️', note:'' },
+  invest: { label:'Invest more', icon:'📈', note:'' }
 };
+
+// ---- "Invest more": how much SIP can you sustain? (v2026.11.11.10) ----------------------
+// The candidate SIP is tested as a Change my plan contribution revision (target 'invest'), so
+// it is priced exactly as a SIP is everywhere else, including the grow-contributions setting.
+// Two tests over the DC_INVEST_WINDOW months from the start, at the chosen appetite:
+//   left over : surplus (lumps added back) minus ALL SIP contributions >= minBuffer
+//   cover     : cash in the savings chain >= floorMonths x ordinary monthly outflow
+// Money already in investments is NOT counted as cover here: moving cash into a SIP leaves
+// "liquid money" unchanged, so counting it would call any SIP affordable. Lumps (delivery, a
+// down payment) hit the cash chain, so the cover test also covers big planned payments.
+// Each probe runs the engine only to the end of the window; verified identical to a full run
+// inside the window and ~10x faster.
+const DC_INVEST_WINDOW = 60;
+const DC_INVEST_STEP = 500;
+function _dcInvestRules(A) {
+  return '₹' + A.minBuffer.toLocaleString('en-IN') + ' still free each month after all SIPs · ' + A.floorMonths + ' months of expenses kept in cash (investments not counted) · checked for 5 years';
+}
+function _dcInvestInstrument(p) {
+  return (state.investments || []).find(v => v && v.id !== 'savings' && v.id === p.instrumentId) || null;
+}
+function _dcInvestProbe(p, A, startIso, amount, backdrop) {
+  const endIso = shiftMonth(startIso, DC_INVEST_WINDOW - 1);
+  const scen = (backdrop || _dcBackdrop()).slice();
+  if (amount != null) scen.push({ id:'__dcinv__', type:'revise', name:'SIP being tested', enabled:true,
+    params:{ changes:[{ target:'invest', id:p.instrumentId, from:startIso, newAmount:amount }] } });
+  const proj = runProjection({ horizonEnd: endIso, scenarios: scen });
+  const i0 = proj.isos.indexOf(startIso);
+  if (i0 < 0) return null;
+  let chain = null;
+  try { if (typeof projectSavingsChain === 'function') chain = projectSavingsChain(proj); } catch (e) { chain = null; }
+  const lumps = _dcOneOffSeries(proj);
+  const keys = Object.keys(proj.contribPerMonth || {});
+  const inv = _dcInvestInstrument(p);
+  const k = inv ? (inv.id + '_' + inv.name) : null;
+  const w = { buffer:{ slack:Infinity }, cover:{ slack:Infinity } };
+  for (let i = i0; i < proj.isos.length; i++) {
+    const lump = lumps[i] || 0;
+    let contrib = 0; keys.forEach(kk => { contrib += (proj.contribPerMonth[kk][i] || 0); });
+    const left = (proj.surplus[i] || 0) + lump - contrib;
+    const outflow = Math.max(0, (proj.totalExpense[i] || 0) - lump);
+    const cash = (chain && isFinite(chain[i])) ? chain[i] : (proj.cashSeries[i] || 0);
+    const floor = A.floorMonths * outflow;
+    if (left - A.minBuffer < w.buffer.slack) w.buffer = { slack:left - A.minBuffer, iso:proj.isos[i], label:proj.labels[i], left, contrib, need:A.minBuffer };
+    if (cash - floor < w.cover.slack) w.cover = { slack:cash - floor, iso:proj.isos[i], label:proj.labels[i], cash, floor, outflow };
+  }
+  return { ok: w.buffer.slack >= 0 && w.cover.slack >= 0, worst:w, sipAtStart: k && proj.contribPerMonth[k] ? (proj.contribPerMonth[k][i0] || 0) : 0, income: proj.totalIncome[i0] || 0, label: proj.labels[i0] };
+}
+// Largest SIP (step DC_INVEST_STEP) that passes both tests, by bisection: more SIP never adds cash.
+function _dcInvestCapacity(p, appetiteKey, startIso, backdrop) {
+  const A = DECISION_APPETITES[appetiteKey] || DECISION_APPETITES.comfortable;
+  const inv = _dcInvestInstrument(p);
+  if (!inv) return { error:'That investment no longer exists. Edit the question and pick another.' };
+  const cur = _dcInvestProbe(p, A, startIso, null, backdrop);
+  if (!cur) return null;
+  const at0 = _dcInvestProbe(p, A, startIso, 0, backdrop);
+  if (at0.sipAtStart === 0 && cur.sipAtStart === 0) {
+    const probe = _dcInvestProbe(p, A, startIso, 1000, backdrop);
+    if (probe.sipAtStart === 0) return { error:'This investment is closed or not running in ' + cur.label + ', so a SIP cannot go into it then.' };
+  }
+  const base = { current: cur.sipAtStart, currentOk: cur.ok, currentWorst: cur.worst, label: cur.label, A };
+  if (!at0.ok) return Object.assign(base, { max:0, none:true, limit:at0.worst });
+  let lo = 0, hi = Math.max(20000, Math.ceil(at0.income / DC_INVEST_STEP) * DC_INVEST_STEP);
+  const atHi = _dcInvestProbe(p, A, startIso, hi, backdrop);
+  if (atHi.ok) return Object.assign(base, { max:hi, capped:true, limit:atHi.worst });
+  let fail = atHi;
+  while (hi - lo > DC_INVEST_STEP) {
+    const mid = Math.floor((lo + hi) / 2 / DC_INVEST_STEP) * DC_INVEST_STEP;
+    if (mid <= lo) break;
+    const r = _dcInvestProbe(p, A, startIso, mid, backdrop);
+    if (r.ok) lo = mid; else { hi = mid; fail = r; }
+  }
+  return Object.assign(base, { max:lo, limit:fail.worst });
+}
+// Which test stops it going higher, in words.
+function _dcInvestLimitText(w, A) {
+  const b = w.buffer, c = w.cover;
+  const useB = b.slack < 0 && (c.slack >= 0 || b.slack <= c.slack);
+  if (useB) return `<strong>Money left over</strong> in ${b.label}: only ${_dcM(b.left)} would be free after all SIPs, and this level keeps ${_dcM(A.minBuffer)} free.`;
+  return `<strong>Cash cover</strong> in ${c.label}: cash would be ${_dcM(c.cash)}, below the ${_dcM(c.floor)} needed (${A.floorMonths} months of ${_dcM(c.outflow)} outflow).`;
+}
+function _dcBuildInvestDetail(d) {
+  const p = d.params || {};
+  const inv = _dcInvestInstrument(p);
+  const appetite = d.appetite || 'comfortable';
+  const A = DECISION_APPETITES[appetite];
+  const res = _dcInvestCapacity(p, appetite, p.month);
+  if (!res) return `<div class="card"><div class="card-head">Outside your horizon</div><div style="padding:12px 0;font-size:13px;color:var(--ink-muted);">${escapeHtml(p.month || 'That month')} falls outside the projection window.</div></div>`;
+  if (res.error) return `<div class="card"><div class="card-head">Can't work this out</div><div style="padding:12px 0;font-size:13px;color:var(--red);">${escapeHtml(res.error)}</div></div>`;
+  const all = {};
+  Object.keys(DECISION_APPETITES).forEach(k => { all[k] = (k === appetite) ? res : _dcInvestCapacity(p, k, p.month); });
+  const diff = res.max - res.current;
+  const head = res.none
+    ? `<div style="font-size:15px;line-height:1.5;color:var(--red);"><strong>No SIP passes at ${A.name}</strong>: even with ${escapeHtml(inv.name)} at ₹0 from ${res.label}, the plan fails a test.</div>`
+    : `<div style="font-size:22px;font-family:'Fraunces',serif;line-height:1.3;">Up to <strong>${_dcM(res.max)}</strong>/mo${res.capped ? '+' : ''} into ${escapeHtml(inv.name)} from ${res.label}</div>
+       <div style="font-size:13px;color:var(--ink-dim);margin-top:4px;">Planned now: ${_dcM(res.current)}/mo · ${diff >= 0 ? `room for <strong style="color:var(--accent-bright);">${_dcM(diff)} more</strong>` : `<strong style="color:var(--red);">${_dcM(-diff)} less</strong> than planned would be needed to pass`}</div>`;
+  const chips = Object.keys(DECISION_APPETITES).map(k => {
+    const r = all[k]; const v = r && !r.error ? (r.none ? '₹0' : _dcM(r.max) + (r.capped ? '+' : '')) : '—';
+    return `<div style="flex:1;min-width:120px;border:1px solid var(--line);border-radius:10px;padding:9px 11px;${k === appetite ? 'box-shadow:0 0 0 2px var(--accent-glow);' : ''}">
+      <div style="font-size:11px;color:var(--ink-muted);">${DECISION_APPETITES[k].name}</div><div style="font-weight:600;font-size:14px;">${v}/mo</div></div>`;
+  }).join('');
+  const limit = res.capped ? 'Nothing in the tests binds up to this level.' : _dcInvestLimitText(res.limit, A);
+  // Capacity if started later: same month in each of the next years (selected appetite).
+  const tl = [];
+  for (let y = 0; y < 5; y++) {
+    const iso = shiftMonth(p.month, 12 * y);
+    const r = (y === 0) ? res : _dcInvestCapacity(p, appetite, iso);
+    if (!r || r.error) break;
+    tl.push({ iso, label: r.label, max: r.none ? 0 : r.max, capped: r.capped, current: r.current });
+  }
+  const assumptions = _dcBackdrop();
+  const grow = state.growContributions !== false;
+  const canMake = !res.none && res.max > 0;
+  return `<div class="card"><div class="card-head">How much can go into ${escapeHtml(inv.name)}?</div>
+    ${head}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 6px;">${chips}</div>
+    <div style="font-size:12.5px;color:var(--ink-dim);line-height:1.6;margin:10px 0;">${res.none ? _dcInvestLimitText(res.limit, A) : 'What stops it going higher: ' + limit}</div>
+    ${tl.length > 1 ? `<div style="margin-top:12px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">If you start later (${A.name})</div>
+      <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+        <thead><tr style="color:var(--ink-muted);font-size:11px;text-align:left;"><th style="padding:5px 8px 5px 0;">Start</th><th style="padding:5px 8px;">Max SIP</th><th style="padding:5px 8px;">Planned then</th></tr></thead>
+        <tbody>${tl.map(r => `<tr style="border-top:1px solid var(--line);"><td style="padding:6px 8px 6px 0;">${r.label}</td><td style="padding:6px 8px;font-weight:600;">${_dcM(r.max)}${r.capped ? '+' : ''}</td><td style="padding:6px 8px;color:var(--ink-muted);">${_dcM(r.current)}</td></tr>`).join('')}</tbody>
+      </table></div></div>` : ''}
+    <div style="font-size:11.5px;color:var(--ink-muted);line-height:1.6;margin-top:12px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;">
+      Tested against your logged numbers with ${assumptions.length} assumption${assumptions.length === 1 ? '' : 's'} switched on, for the 5 years from the start month.
+      The SIP ${grow ? 'steps up each year with your other contributions (grow contributions is on)' : 'stays flat (grow contributions is off)'}. Money already invested is not counted as cash cover.
+    </div>
+    ${canMake ? `<div style="margin-top:12px;"><button class="btn" data-dcinv-make="${d.id}">Make this a scenario: ${escapeHtml(inv.name)} ${_dcM(res.max)} from ${res.label}</button></div>` : ''}
+  </div>`;
+}
+function _dcInvestMakeScenario(d) {
+  const p = d.params || {};
+  const inv = _dcInvestInstrument(p);
+  const res = inv ? _dcInvestCapacity(p, d.appetite || 'comfortable', p.month) : null;
+  if (!res || res.error || res.none || !(res.max > 0)) return;
+  if (!Array.isArray(state.scenarios)) state.scenarios = [];
+  // Created switched OFF so it does not silently become an assumption in every other decision.
+  const sc = { id:'sc_' + Math.random().toString(36).slice(2, 9), type:'revise', enabled:false,
+    name: inv.name + ' SIP ' + fmtMoney(res.max, true) + ' from ' + p.month,
+    params:{ changes:[{ target:'invest', id:inv.id, from:p.month, newAmount:res.max }] } };
+  state.scenarios.push(sc);
+  scheduleSave();
+  if (typeof renderScenarios === 'function') renderScenarios();
+  alert('Added "' + sc.name + '" to Scenarios, switched off.\n\nPreview it there to see it across the app, or switch it on to use it as an assumption here.');
+}
 
 const DC_CONSTRAINTS = ['emiVsIncome','emiVsSurplus','buffer','liquidity'];
 const DC_LABEL = {
@@ -11119,7 +11273,9 @@ const DC_LABEL = {
 };
 
 function _dcBackdrop() {
-  return (state.scenarios || []).filter(s => s.enabled !== false);
+  // Committed scenarios are already in the base plan (the engine applies them); only what-ifs
+  // that are switched on are assumptions here.
+  return (state.scenarios || []).filter(s => s.enabled !== false && !s.committed);
 }
 
 function _dcDown(p) {
@@ -11383,6 +11539,10 @@ function _dcMs(n) { return fmtMoney(Math.round(n), true); }
 
 function decisionSummary(d) {
   const p = d.params || {};
+  if (p.purchaseKind === 'invest') {
+    const inv = _dcInvestInstrument(p);
+    return '📈 ' + (inv ? inv.name : 'investment removed') + ' · from ' + (p.month || '?');
+  }
   const k = DECISION_KINDS[p.purchaseKind] || DECISION_KINDS.other;
   return k.icon + ' ' + _dcMs(Number(p.cost) || 0) + ' · ' + _dcMs(_dcDown(p)) + ' down · '
        + (Number(p.loanYears) || 0) + 'yr @ ' + (((Number(p.loanRate) || 0) * 100).toFixed(2)) + '% · EMI ' + _dcMs(_dcEmi(p));
@@ -11393,6 +11553,10 @@ function _dcDefaults(kind) {
   if (kind === 'car')   return { month:iso, purchaseKind:'car',   cost:1400000,  downMode:'amt', downPct:20, downAmount:400000, loanYears:5,  loanRate:0.09 };
   if (kind === 'land')  return { month:iso, purchaseKind:'land',  cost:5000000,  downMode:'pct', downPct:30, downAmount:0,      loanYears:10, loanRate:0.09 };
   if (kind === 'other') return { month:iso, purchaseKind:'other', cost:1000000,  downMode:'pct', downPct:20, downAmount:0,      loanYears:5,  loanRate:0.09 };
+  if (kind === 'invest') {
+    const first = (state.investments || []).find(v => v && v.id !== 'savings');
+    return { month: shiftMonth(currentCalendarMonth(), 1), purchaseKind:'invest', instrumentId: first ? first.id : '' };
+  }
   return                       { month:iso, purchaseKind:'house', cost:10000000, downMode:'pct', downPct:20, downAmount:0,      loanYears:20, loanRate:0.085 };
 }
 
@@ -11410,6 +11574,25 @@ function openDecisionEditor(id) {
 function _dcPaintEditor() {
   const p = _dcDraft.params, kind = p.purchaseKind || 'car', amtMode = (p.downMode || 'pct') === 'amt';
   document.getElementById('dcEditTitle').textContent = _dcEditingId ? 'Edit decision' : 'Frame the decision';
+  const kindButtons = `<div class="field"><label>What are you deciding on?</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${Object.keys(DECISION_KINDS).map(k => `<button type="button" class="btn ${k===kind?'':'ghost'}" data-dck="${k}" style="font-size:12px;padding:6px 12px;">${DECISION_KINDS[k].icon} ${DECISION_KINDS[k].label}</button>`).join('')}
+      </div></div>`;
+  const appetiteField = (rulesFn) => `<div class="field"><label>How much risk will you carry?</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${Object.keys(DECISION_APPETITES).map(k => `<button type="button" class="btn ${k===_dcDraft.appetite?'':'ghost'}" data-dca="${k}" style="font-size:12px;padding:6px 12px;">${DECISION_APPETITES[k].name}</button>`).join('')}
+      </div>
+      <div style="font-size:11px;color:var(--ink-muted);margin-top:6px;line-height:1.55;">${rulesFn(DECISION_APPETITES[_dcDraft.appetite])}</div>
+    </div>`;
+  if (kind === 'invest') {
+    const seen = new Set();
+    const invs = (state.investments || []).filter(v => v && v.id !== 'savings' && !seen.has(v.id) && seen.add(v.id));
+    document.getElementById('dcEditFields').innerHTML = kindButtons + `
+    <div class="field"><label>Name it (optional)</label><input type="text" data-dcf="name" value="${escapeHtml(_dcDraft.name||'')}" placeholder="e.g. Raise MF SIP" /></div>
+    <div class="field"><label>Which investment?</label><select data-dcp="instrumentId">${invs.map(v => `<option value="${escapeHtml(v.id)}" ${v.id === p.instrumentId ? 'selected' : ''}>${escapeHtml(v.name || v.id)} · ${_dcM(v.monthlyContribution || 0)}/mo now</option>`).join('')}</select></div>
+    <div class="field"><label>Start the new SIP from</label><input type="month" data-dcp="month" value="${p.month||''}" /></div>
+    ${appetiteField(_dcInvestRules)}`;
+  } else
   document.getElementById('dcEditFields').innerHTML = `
     <div class="field"><label>What are you deciding on?</label>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -11469,6 +11652,15 @@ function renderDecisions() {
   listEl.innerHTML = state.decisions.map(d => {
     const p = d.params || {}, k = DECISION_KINDS[p.purchaseKind] || DECISION_KINDS.other;
     let badge;
+    if (p.purchaseKind === 'invest') {
+      try {
+        const r = _dcInvestCapacity(p, d.appetite || 'comfortable', p.month);
+        badge = !r ? { t:'Outside horizon', c:'var(--ink-muted)' }
+              : r.error ? { t:'Check inputs', c:'var(--red)' }
+              : r.none ? { t:'No room', c:'var(--red)' }
+              : { t:'Up to ' + _dcMs(r.max) + (r.capped ? '+' : ''), c:'var(--accent-bright)' };
+      } catch (e) { badge = { t:'—', c:'var(--ink-muted)' }; }
+    } else
     try {
       const r = evaluateDecisionAt(d, d.appetite || 'comfortable', p.month);
       badge = !r ? { t:'Outside horizon', c:'var(--ink-muted)' }
@@ -11540,9 +11732,11 @@ function _dcRenderScenToggles() {
   }
   host.innerHTML = all.map(sc => {
     const t = SCENARIO_TEMPLATES.find(x => x.type === sc.type) || { icon:'•', color:'#888', label:sc.type };
-    const on = sc.enabled !== false;
+    const on = sc.enabled !== false || !!sc.committed;
     return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);">
-      <div class="toggle ${on?'on':''}" data-dcscen="${sc.id}" style="width:auto;padding:0;border:none;background:transparent;flex-shrink:0;cursor:pointer;"><div class="switch" style="margin:0;"></div></div>
+      ${sc.committed
+        ? `<span style="font-size:9.5px;padding:2px 7px;border-radius:10px;background:var(--accent);color:var(--bg);flex-shrink:0;white-space:nowrap;" title="Part of your base plan: always applied. Remove it from the base on the Scenarios page to exclude it.">In base</span>`
+        : `<div class="toggle ${on?'on':''}" data-dcscen="${sc.id}" style="width:auto;padding:0;border:none;background:transparent;flex-shrink:0;cursor:pointer;"><div class="switch" style="margin:0;"></div></div>`}
       <div style="flex:1;min-width:0;opacity:${on?1:0.5};">
         <div style="font-size:12.5px;font-weight:600;">${t.icon} ${escapeHtml(sc.name || t.label)}</div>
         <div style="font-size:11px;color:var(--ink-muted);">${escapeHtml(scenarioSummary(sc))}</div>
@@ -11572,6 +11766,27 @@ function _dcMeasureScenarios() {
   if (!d) { host.innerHTML = `<div style="font-size:12px;color:var(--ink-muted);">Add a decision first — impact is measured against one.</div>`; return; }
   host.innerHTML = `<div style="font-size:12px;color:var(--ink-muted);font-style:italic;">Measuring…</div>`;
 
+  if (d.params && d.params.purchaseKind === 'invest') {
+    setTimeout(() => {
+      const app = d.appetite || 'comfortable', from = d.params.month;
+      const on = _dcBackdrop();
+      const withAll = _dcInvestCapacity(d.params, app, from, on);
+      const fmt = r => !r || r.error ? '—' : (r.none ? '₹0' : _dcM(r.max) + (r.capped ? '+' : ''));
+      const rows = on.map(sc => {
+        const r = _dcInvestCapacity(d.params, app, from, on.filter(x => x !== sc));
+        const delta = (r && !r.error && withAll && !withAll.error) ? (r.none ? 0 : r.max) - (withAll.none ? 0 : withAll.max) : null;
+        return { name: sc.name || sc.type, without: fmt(r), delta };
+      });
+      host.innerHTML = `<div style="border:1px solid var(--line);border-radius:8px;padding:11px 12px;">
+        <div style="font-size:12px;font-weight:600;margin-bottom:3px;">Cost of each assumption, for “${escapeHtml(d.name || 'this decision')}”</div>
+        <div style="font-size:11px;color:var(--ink-muted);margin-bottom:9px;">With everything on, the most that works is <strong>${fmt(withAll)}/mo</strong>.</div>
+        ${rows.map(r => `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:12px;border-top:1px solid var(--line);">
+          <span>${escapeHtml(r.name)}</span>
+          <span style="color:var(--ink-muted);">without it: ${r.without}/mo · ${r.delta == null ? '—' : r.delta === 0 ? 'no effect' : (r.delta > 0 ? 'costs ' + _dcM(r.delta) + '/mo of SIP' : 'adds ' + _dcM(-r.delta) + '/mo')}</span></div>`).join('')}
+      </div>`;
+    }, 20);
+    return;
+  }
   setTimeout(() => {
     const app = d.appetite || 'comfortable';
     const from = d.params.month;
@@ -11608,7 +11823,8 @@ function _dcMeasureScenarios() {
    means seeing them together rather than one at a time. */
 function _dcRenderCompare() {
   const host = document.getElementById('dcCompare');
-  const ds = state.decisions || [];
+  // Purchases only: an SIP-capacity question has no cost, EMI or earliest month to line up.
+  const ds = (state.decisions || []).filter(d => d.params && d.params.purchaseKind !== 'invest');
   if (ds.length < 2) { host.innerHTML = ''; return; }
   const rows = ds.map(d => {
     const app = d.appetite || 'comfortable';
@@ -11701,6 +11917,7 @@ function _dcTestBlock(k, w, A, at) {
 }
 
 function _dcBuildDetail(d) {
+  if (d.params && d.params.purchaseKind === 'invest') return _dcBuildInvestDetail(d);
   const p = d.params || {};
   const kind = DECISION_KINDS[p.purchaseKind] || DECISION_KINDS.other;
   const appetite = d.appetite || 'comfortable';
@@ -11809,6 +12026,13 @@ function initDecisionsUI() {
   });
   const measure = document.getElementById('dcMeasure');
   if (measure) measure.addEventListener('click', _dcMeasureScenarios);
+  const detailHost = document.getElementById('dcDetail');
+  if (detailHost) detailHost.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-dcinv-make]');
+    if (!b) return;
+    const d = (state.decisions || []).find(x => x.id === b.dataset.dcinvMake);
+    if (d) _dcInvestMakeScenario(d);
+  });
 
   // A scenario saved from the shared editor must refresh this page too, otherwise the
   // assumption list and every verdict silently go stale.
@@ -11859,19 +12083,22 @@ function renderScenarios() {
       const tmpl = SCENARIO_TEMPLATES.find(t => t.type === sc.type) || { icon:'?', color:'#888', label:sc.type };
       const summary = scenarioSummary(sc);
       const enabled = sc.enabled !== false;
-      const inPreview = !!(state._previewMode && (state._previewScenarioIds || []).includes(sc.id));
-      return `<div class="rc" data-sc-id="${sc.id}" style="border-left:3px solid ${tmpl.color};opacity:${enabled?1:0.55};${inPreview?'box-shadow:0 0 0 2px var(--accent-glow);':''}">
+      const inBase = !!sc.committed;
+      const inPreview = !inBase && !!(state._previewMode && (state._previewScenarioIds || []).includes(sc.id));
+      return `<div class="rc" data-sc-id="${sc.id}" style="border-left:3px solid ${tmpl.color};opacity:${(enabled||inBase)?1:0.55};${inPreview?'box-shadow:0 0 0 2px var(--accent-glow);':''}">
         <div style="display:flex;align-items:flex-start;gap:8px;">
           <div style="font-size:20px;">${tmpl.icon}</div>
           <div style="flex:1;min-width:0;">
-            <div class="rc-title" style="margin-bottom:2px;">${escapeHtml(sc.name||tmpl.label)}${inPreview?' <span style="font-size:10px;color:var(--gold);font-style:italic;letter-spacing:0.05em;">· in preview</span>':''}</div>
+            <div class="rc-title" style="margin-bottom:2px;">${escapeHtml(sc.name||tmpl.label)}${inBase?' <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:var(--accent);color:var(--bg);letter-spacing:0.04em;vertical-align:middle;">In base plan</span>':''}${inPreview?' <span style="font-size:10px;color:var(--gold);font-style:italic;letter-spacing:0.05em;">· in preview</span>':''}</div>
             <div class="rc-desc" style="font-size:11px;">${escapeHtml(summary)}</div>
           </div>
-          <div class="toggle ${enabled?'on':''}" data-sc-enable="${sc.id}" style="flex-shrink:0;width:auto;padding:0;border:none;background:transparent;"><div class="switch" style="margin:0;"></div></div>
+          ${inBase ? '' : `<div class="toggle ${enabled?'on':''}" data-sc-enable="${sc.id}" style="flex-shrink:0;width:auto;padding:0;border:none;background:transparent;"><div class="switch" style="margin:0;"></div></div>`}
         </div>
         <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
-          <button class="btn" data-sc-preview="${sc.id}" style="font-size:11px;padding:5px 10px;${inPreview?'background:var(--gold);color:var(--bg);':''}" ${enabled?'':'disabled'}>${inPreview?'In preview ✓':'Preview across app'}</button>
-          <button class="btn ghost" data-sc-commit="${sc.id}" style="font-size:11px;padding:5px 10px;">Commit to base</button>
+          ${inBase
+            ? `<button class="btn ghost" data-sc-uncommit="${sc.id}" style="font-size:11px;padding:5px 10px;">Remove from base</button>`
+            : `<button class="btn" data-sc-preview="${sc.id}" style="font-size:11px;padding:5px 10px;${inPreview?'background:var(--gold);color:var(--bg);':''}" ${enabled?'':'disabled'}>${inPreview?'In preview ✓':'Preview across app'}</button>
+          <button class="btn ghost" data-sc-commit="${sc.id}" style="font-size:11px;padding:5px 10px;">Commit to base</button>`}
           <button class="btn ghost" data-sc-edit="${sc.id}" style="font-size:11px;padding:5px 10px;">Edit</button>
           <button class="btn ghost" data-sc-del="${sc.id}" style="font-size:11px;padding:5px 10px;color:var(--red);">Delete</button>
         </div>
@@ -11901,7 +12128,11 @@ function renderScenarios() {
         const id = btn.dataset.scDel;
         const sc = state.scenarios.find(s => s.id === id);
         if (!sc) return;
-        if (!confirm('Delete scenario "' + (sc.name || sc.type) + '"?')) return;
+        if (!confirm(sc.committed
+          ? 'Delete "' + (sc.name || sc.type) + '"?\n\nIt is part of your base plan, so this also removes it from every page. Anything already logged in the Journal stays.'
+          : 'Delete scenario "' + (sc.name || sc.type) + '"?')) return;
+        const wasCommitted = !!sc.committed;
+        if (wasCommitted) _removeCommittedArtifacts(sc);
         // Remove from preview set if present
         if ((state._previewScenarioIds || []).includes(id)) {
           state._previewScenarioIds = state._previewScenarioIds.filter(x => x !== id);
@@ -11910,8 +12141,11 @@ function renderScenarios() {
         }
         state.scenarios = state.scenarios.filter(s => s.id !== id);
         scheduleSave();
-        renderScenarios();
+        if (wasCommitted) _refreshAfterPlanChange(); else renderScenarios();
       });
+    });
+    listEl.querySelectorAll('[data-sc-uncommit]').forEach(btn => {
+      btn.addEventListener('click', () => uncommitScenario(btn.dataset.scUncommit));
     });
     listEl.querySelectorAll('[data-sc-preview]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -12051,7 +12285,8 @@ function wireScenariosUI() {
     }
     scheduleSave();
     closeScModal('scEditModal');
-    renderScenarios();
+    if (target && target.committed) { _syncCommittedArtifacts(target); _refreshAfterPlanChange(); }
+    else renderScenarios();
   });
   // Close handlers (any [data-sc-modal-close] inside either modal)
   document.querySelectorAll('[data-sc-modal-close]').forEach(el => {
