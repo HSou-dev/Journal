@@ -2385,7 +2385,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.11.23.01';
+const APP_VERSION = '2026.11.23.02';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -11124,18 +11124,22 @@ const DECISION_KINDS = {
 // ---- "Invest more": how much SIP can you sustain? (v2026.11.11.10) ----------------------
 // The candidate SIP is tested as a Change my plan contribution revision (target 'invest'), so
 // it is priced exactly as a SIP is everywhere else, including the grow-contributions setting.
-// Two tests over the DC_INVEST_WINDOW months from the start, at the chosen appetite:
-//   left over : surplus (lumps added back) minus ALL SIP contributions >= minBuffer
-//   cover     : cash in the savings chain >= floorMonths x ordinary monthly outflow
-// Money already in investments is NOT counted as cover here: moving cash into a SIP leaves
-// "liquid money" unchanged, so counting it would call any SIP affordable. Lumps (delivery, a
-// down payment) hit the cash chain, so the cover test also covers big planned payments.
+// Two tests over the DC_INVEST_WINDOW months from the start, at the chosen appetite, using the
+// SAME definitions as the purchase decisions (v2026.11.23.02):
+//   left over : _dcLeftOverAt (surplus, lumps added back, minus ALL SIPs) >= minBuffer
+//   cover     : _dcLiquidSeries (Savings + investments marked liquid) >= floorMonths x outflow
+// A SIP into an instrument NOT marked liquid moves cash out of cover, so the cover test limits
+// it; into a liquid one it does not, which is right by the user's own definition. Lumps
+// (delivery, a down payment) hit the cash chain, so cover also checks big planned payments.
 // Each probe runs the engine only to the end of the window; verified identical to a full run
 // inside the window and ~10x faster.
 const DC_INVEST_WINDOW = 60;
 const DC_INVEST_STEP = 500;
 function _dcInvestRules(A) {
-  return '₹' + A.minBuffer.toLocaleString('en-IN') + ' still free each month after all SIPs · ' + A.floorMonths + ' months of expenses kept in cash (investments not counted) · checked for 5 years';
+  return '₹' + A.minBuffer.toLocaleString('en-IN') + ' still free each month after all SIPs · ' + A.floorMonths + ' months of expenses covered by savings plus investments marked liquid · checked for 5 years';
+}
+function _dcLiquidNames() {
+  return (state.investments || []).filter(v => v && v.id !== 'savings' && v.liquid).map(v => v.name || v.id);
 }
 function _dcInvestInstrument(p) {
   return (state.investments || []).find(v => v && v.id !== 'savings' && v.id === p.instrumentId) || null;
@@ -11148,22 +11152,19 @@ function _dcInvestProbe(p, A, startIso, amount, backdrop) {
   const proj = runProjection({ horizonEnd: endIso, scenarios: scen });
   const i0 = proj.isos.indexOf(startIso);
   if (i0 < 0) return null;
-  let chain = null;
-  try { if (typeof projectSavingsChain === 'function') chain = projectSavingsChain(proj); } catch (e) { chain = null; }
   const lumps = _dcOneOffSeries(proj);
-  const keys = Object.keys(proj.contribPerMonth || {});
+  const liquid = _dcLiquidSeries(proj), liqInv = _dcLiquidInvSeries(proj);
   const inv = _dcInvestInstrument(p);
   const k = inv ? (inv.id + '_' + inv.name) : null;
   const w = { buffer:{ slack:Infinity }, cover:{ slack:Infinity } };
   for (let i = i0; i < proj.isos.length; i++) {
     const lump = lumps[i] || 0;
-    let contrib = 0; keys.forEach(kk => { contrib += (proj.contribPerMonth[kk][i] || 0); });
-    const left = (proj.surplus[i] || 0) + lump - contrib;
+    const left = _dcLeftOverAt(proj, i, lumps);
     const outflow = Math.max(0, (proj.totalExpense[i] || 0) - lump);
-    const cash = (chain && isFinite(chain[i])) ? chain[i] : (proj.cashSeries[i] || 0);
+    const cash = liquid[i] || 0;
     const floor = A.floorMonths * outflow;
-    if (left - A.minBuffer < w.buffer.slack) w.buffer = { slack:left - A.minBuffer, iso:proj.isos[i], label:proj.labels[i], left, contrib, need:A.minBuffer };
-    if (cash - floor < w.cover.slack) w.cover = { slack:cash - floor, iso:proj.isos[i], label:proj.labels[i], cash, floor, outflow };
+    if (left - A.minBuffer < w.buffer.slack) w.buffer = { slack:left - A.minBuffer, iso:proj.isos[i], label:proj.labels[i], left, contrib:_dcContribAt(proj, i), need:A.minBuffer };
+    if (cash - floor < w.cover.slack) w.cover = { slack:cash - floor, iso:proj.isos[i], label:proj.labels[i], cash, cashOnly:cash - (liqInv[i] || 0), liquidInv:liqInv[i] || 0, floor, outflow, lump };
   }
   return { ok: w.buffer.slack >= 0 && w.cover.slack >= 0, worst:w, sipAtStart: k && proj.contribPerMonth[k] ? (proj.contribPerMonth[k][i0] || 0) : 0, income: proj.totalIncome[i0] || 0, label: proj.labels[i0] };
 }
@@ -11198,7 +11199,9 @@ function _dcInvestLimitText(w, A) {
   const b = w.buffer, c = w.cover;
   const useB = b.slack < 0 && (c.slack >= 0 || b.slack <= c.slack);
   if (useB) return `<strong>Money left over</strong> in ${b.label}: only ${_dcM(b.left)} would be free after all SIPs, and this level keeps ${_dcM(A.minBuffer)} free.`;
-  return `<strong>Cash cover</strong> in ${c.label}: cash would be ${_dcM(c.cash)}, below the ${_dcM(c.floor)} needed (${A.floorMonths} months of ${_dcM(c.outflow)} outflow).`;
+  const parts = c.liquidInv > 0 ? ` (savings ${_dcM(c.cashOnly)} + liquid investments ${_dcM(c.liquidInv)})` : '';
+  const lumpNote = c.lump > 0 ? ` That month includes ${_dcM(c.lump)} of one-off costs.` : '';
+  return `<strong>Cash cover</strong> in ${c.label}: ${_dcM(c.cash)}${parts}, below the ${_dcM(c.floor)} needed (${A.floorMonths} months of ${_dcM(c.outflow)} outflow).${lumpNote}`;
 }
 function _dcBuildInvestDetail(d) {
   const p = d.params || {};
@@ -11211,8 +11214,21 @@ function _dcBuildInvestDetail(d) {
   const all = {};
   Object.keys(DECISION_APPETITES).forEach(k => { all[k] = (k === appetite) ? res : _dcInvestCapacity(p, k, p.month); });
   const diff = res.max - res.current;
+  // When even ₹0 fails, say why and find the earliest start (next 24 months) where it works.
+  let noneHelp = '';
+  if (res.none) {
+    let first = null;
+    for (let m = 1; m <= 24 && !first; m++) {
+      const iso = shiftMonth(p.month, m);
+      const r = _dcInvestCapacity(p, appetite, iso);
+      if (r && !r.error && !r.none) first = { label: r.label, max: r.max, capped: r.capped };
+    }
+    noneHelp = `<div style="font-size:13px;color:var(--ink-dim);margin-top:6px;line-height:1.6;">${_dcInvestLimitText(res.limit, A)}</div>` +
+      (first ? `<div style="font-size:13px;margin-top:6px;">Earliest start that works at ${A.name}: <strong>${first.label}</strong>, up to <strong>${_dcM(first.max)}${first.capped ? '+' : ''}/mo</strong>.</div>`
+             : `<div style="font-size:13px;margin-top:6px;">No start in the next 24 months passes at ${A.name}.</div>`);
+  }
   const head = res.none
-    ? `<div style="font-size:15px;line-height:1.5;color:var(--red);"><strong>No SIP passes at ${A.name}</strong>: even with ${escapeHtml(inv.name)} at ₹0 from ${res.label}, the plan fails a test.</div>`
+    ? `<div style="font-size:15px;line-height:1.5;color:var(--red);"><strong>No SIP passes at ${A.name} from ${res.label}</strong>: even with ${escapeHtml(inv.name)} at ₹0, the plan fails a test that month, so the SIP is not the cause.</div>${noneHelp}`
     : `<div style="font-size:22px;font-family:'Fraunces',serif;line-height:1.3;">Up to <strong>${_dcM(res.max)}</strong>/mo${res.capped ? '+' : ''} into ${escapeHtml(inv.name)} from ${res.label}</div>
        <div style="font-size:13px;color:var(--ink-dim);margin-top:4px;">Planned now: ${_dcM(res.current)}/mo · ${diff >= 0 ? `room for <strong style="color:var(--accent-bright);">${_dcM(diff)} more</strong>` : `<strong style="color:var(--red);">${_dcM(-diff)} less</strong> than planned would be needed to pass`}</div>`;
   const chips = Object.keys(DECISION_APPETITES).map(k => {
@@ -11221,13 +11237,34 @@ function _dcBuildInvestDetail(d) {
       <div style="font-size:11px;color:var(--ink-muted);">${DECISION_APPETITES[k].name}</div><div style="font-weight:600;font-size:14px;">${v}/mo</div></div>`;
   }).join('');
   const limit = res.capped ? 'Nothing in the tests binds up to this level.' : _dcInvestLimitText(res.limit, A);
-  // Capacity if started later: same month in each of the next years (selected appetite).
+  // Capacity if started later: month by month for the first year (where answers move most),
+  // then yearly to year 4 (selected appetite).
   const tl = [];
-  for (let y = 0; y < 5; y++) {
-    const iso = shiftMonth(p.month, 12 * y);
-    const r = (y === 0) ? res : _dcInvestCapacity(p, appetite, iso);
-    if (!r || r.error) break;
-    tl.push({ iso, label: r.label, max: r.none ? 0 : r.max, capped: r.capped, current: r.current });
+  [0,1,2,3,4,5,6,7,8,9,10,11,12,24,36,48].forEach(m => {
+    const iso = shiftMonth(p.month, m);
+    const r = (m === 0) ? res : _dcInvestCapacity(p, appetite, iso);
+    if (!r || r.error) return;
+    tl.push({ iso, label: r.label, max: r.none ? 0 : r.max, capped: r.capped, current: r.current, none: !!r.none });
+  });
+  // The user's own figure, checked at every appetite.
+  const custom = Number(p.customAmount) > 0 ? Math.round(Number(p.customAmount)) : 0;
+  let customBlock = '';
+  if (custom) {
+    const rows = Object.keys(DECISION_APPETITES).map(k => {
+      const AA = DECISION_APPETITES[k];
+      const r = _dcInvestProbe(p, AA, p.month, custom);
+      if (!r) return '';
+      const why = r.ok
+        ? `passes · tightest: ${r.worst.buffer.slack <= r.worst.cover.slack ? 'money left over in ' + r.worst.buffer.label + ', ' + _dcM(r.worst.buffer.slack) + ' to spare' : 'cash cover in ' + r.worst.cover.label + ', ' + _dcM(r.worst.cover.slack) + ' to spare'}`
+        : _dcInvestLimitText(r.worst, AA);
+      return `<div style="padding:7px 0;border-top:1px solid var(--line);font-size:12.5px;line-height:1.55;">
+        <span style="font-weight:600;color:${r.ok ? 'var(--accent-bright)' : 'var(--red)'};">${AA.name}: ${r.ok ? '✓ works' : '✗ fails'}</span>
+        <span style="color:var(--ink-muted);"> · max ${all[k] && !all[k].error ? (all[k].none ? '₹0' : _dcM(all[k].max)) : '—'}</span><br/>
+        <span style="color:var(--ink-dim);">${why}</span></div>`;
+    }).join('');
+    customBlock = `<div style="margin-top:14px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Your figure: ${_dcM(custom)}/mo into ${escapeHtml(inv.name)} from ${res.label}</div>${rows}
+      <div style="margin-top:8px;"><button class="btn ghost" data-dcinv-make="${d.id}" data-dcinv-amt="${custom}" style="font-size:12px;">Make this a scenario: ${_dcM(custom)} from ${res.label}</button></div></div>`;
   }
   const assumptions = _dcBackdrop();
   const grow = state.growContributions !== false;
@@ -11235,23 +11272,27 @@ function _dcBuildInvestDetail(d) {
   return `<div class="card"><div class="card-head">How much can go into ${escapeHtml(inv.name)}?</div>
     ${head}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 6px;">${chips}</div>
-    <div style="font-size:12.5px;color:var(--ink-dim);line-height:1.6;margin:10px 0;">${res.none ? _dcInvestLimitText(res.limit, A) : 'What stops it going higher: ' + limit}</div>
+    ${res.none ? '' : `<div style="font-size:12.5px;color:var(--ink-dim);line-height:1.6;margin:10px 0;">What stops it going higher: ${limit}</div>`}
+    ${customBlock}
     ${tl.length > 1 ? `<div style="margin-top:12px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">If you start later (${A.name})</div>
       <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12.5px;">
         <thead><tr style="color:var(--ink-muted);font-size:11px;text-align:left;"><th style="padding:5px 8px 5px 0;">Start</th><th style="padding:5px 8px;">Max SIP</th><th style="padding:5px 8px;">Planned then</th></tr></thead>
-        <tbody>${tl.map(r => `<tr style="border-top:1px solid var(--line);"><td style="padding:6px 8px 6px 0;">${r.label}</td><td style="padding:6px 8px;font-weight:600;">${_dcM(r.max)}${r.capped ? '+' : ''}</td><td style="padding:6px 8px;color:var(--ink-muted);">${_dcM(r.current)}</td></tr>`).join('')}</tbody>
+        <tbody>${tl.map(r => `<tr style="border-top:1px solid var(--line);"><td style="padding:6px 8px 6px 0;">${r.label}</td><td style="padding:6px 8px;font-weight:600;${r.none ? 'color:var(--red);' : ''}">${r.none ? 'none' : _dcM(r.max) + (r.capped ? '+' : '')}</td><td style="padding:6px 8px;color:var(--ink-muted);">${_dcM(r.current)}</td></tr>`).join('')}</tbody>
       </table></div></div>` : ''}
     <div style="font-size:11.5px;color:var(--ink-muted);line-height:1.6;margin-top:12px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;">
       Tested against your logged numbers with ${assumptions.length} assumption${assumptions.length === 1 ? '' : 's'} switched on, for the 5 years from the start month.
-      The SIP ${grow ? 'steps up each year with your other contributions (grow contributions is on)' : 'stays flat (grow contributions is off)'}. Money already invested is not counted as cash cover.
+      The SIP ${grow ? 'steps up each year with your other contributions (grow contributions is on)' : 'stays flat (grow contributions is off)'}.
+      Cash cover counts your Savings account plus investments you've marked liquid${_dcLiquidNames().length ? ' (' + escapeHtml(_dcLiquidNames().join(', ')) + ')' : ' (none marked)'}; ${escapeHtml(inv.name)} is ${inv.liquid ? 'marked liquid, so money moved into it still counts' : 'not marked liquid, so money moved into it stops counting'}. The same rules judge car and house decisions.
     </div>
     ${canMake ? `<div style="margin-top:12px;"><button class="btn" data-dcinv-make="${d.id}">Make this a scenario: ${escapeHtml(inv.name)} ${_dcM(res.max)} from ${res.label}</button></div>` : ''}
   </div>`;
 }
-function _dcInvestMakeScenario(d) {
+function _dcInvestMakeScenario(d, amount) {
   const p = d.params || {};
   const inv = _dcInvestInstrument(p);
-  const res = inv ? _dcInvestCapacity(p, d.appetite || 'comfortable', p.month) : null;
+  let res = null;
+  if (amount > 0) res = inv ? { max: Math.round(amount) } : null;
+  else res = inv ? _dcInvestCapacity(p, d.appetite || 'comfortable', p.month) : null;
   if (!res || res.error || res.none || !(res.max > 0)) return;
   if (!Array.isArray(state.scenarios)) state.scenarios = [];
   // Created switched OFF so it does not silently become an assumption in every other decision.
@@ -11323,6 +11364,20 @@ function _dcOneOffSeries(proj) {
    already uses: cash plus any investment flagged liquid. Using cash alone would hold
    decisions to a stricter bar than the rest of the app reports, so the same purchase
    could look affordable on the Dashboard and blocked here. */
+// THE "money left over" for every decision (car, house, SIP): that month's surplus with one-off
+// lumps added back, minus ALL SIP contributions. Before v2026.11.23.02 the purchase tests left
+// SIPs out, although their own explanation said "after investments".
+function _dcContribAt(proj, i) {
+  let c = 0;
+  Object.keys(proj.contribPerMonth || {}).forEach(k => { c += (proj.contribPerMonth[k][i] || 0); });
+  return c;
+}
+function _dcLeftOverAt(proj, i, lumps) {
+  return (proj.surplus[i] || 0) + ((lumps && lumps[i]) || 0) - _dcContribAt(proj, i);
+}
+// THE "cash cover" for every decision is _dcLiquidSeries: the Savings chain plus investments the
+// user has marked liquid. One definition; the SIP decision no longer keeps its own.
+
 function _dcLiquidSeries(proj) {
   const n = proj.isos.length;
   const out = new Array(n).fill(0);
@@ -11417,7 +11472,7 @@ function evaluateDecisionAt(dec, appetiteKey, monthIso) {
   for (let i = idx; i <= endIdx; i++) {
     const lump    = oneOffs[i] || 0;
     const income  = withD.totalIncome[i] || 0;
-    const surplus = (withD.surplus[i] || 0) + lump;     // recurring surplus, net of this EMI
+    const surplus = _dcLeftOverAt(withD, i, oneOffs);   // recurring, net of this EMI and of all SIPs
     const preEmi  = surplus + emi;                      // spare cash before servicing it
     const outflow = Math.max(0, (withD.totalExpense[i] || 0) - lump);
     const floor   = A.floorMonths * outflow;
@@ -11541,7 +11596,7 @@ function decisionSummary(d) {
   const p = d.params || {};
   if (p.purchaseKind === 'invest') {
     const inv = _dcInvestInstrument(p);
-    return '📈 ' + (inv ? inv.name : 'investment removed') + ' · from ' + (p.month || '?');
+    return '📈 ' + (inv ? inv.name : 'investment removed') + ' · from ' + (p.month || '?') + (Number(p.customAmount) > 0 ? ' · checking ' + _dcMs(Number(p.customAmount)) : '');
   }
   const k = DECISION_KINDS[p.purchaseKind] || DECISION_KINDS.other;
   return k.icon + ' ' + _dcMs(Number(p.cost) || 0) + ' · ' + _dcMs(_dcDown(p)) + ' down · '
@@ -11591,6 +11646,7 @@ function _dcPaintEditor() {
     <div class="field"><label>Name it (optional)</label><input type="text" data-dcf="name" value="${escapeHtml(_dcDraft.name||'')}" placeholder="e.g. Raise MF SIP" /></div>
     <div class="field"><label>Which investment?</label><select data-dcp="instrumentId">${invs.map(v => `<option value="${escapeHtml(v.id)}" ${v.id === p.instrumentId ? 'selected' : ''}>${escapeHtml(v.name || v.id)} · ${_dcM(v.monthlyContribution || 0)}/mo now</option>`).join('')}</select></div>
     <div class="field"><label>Start the new SIP from</label><input type="month" data-dcp="month" value="${p.month||''}" /></div>
+    <div class="field"><label>Your own SIP to check <span class="opt">optional — total monthly amount into this investment</span></label><input type="number" data-dcp="customAmount" data-plain-number="1" min="0" step="500" value="${Number(p.customAmount) > 0 ? Number(p.customAmount) : ''}" placeholder="e.g. 50000" /></div>
     ${appetiteField(_dcInvestRules)}`;
   } else
   document.getElementById('dcEditFields').innerHTML = `
@@ -12031,7 +12087,7 @@ function initDecisionsUI() {
     const b = e.target.closest('[data-dcinv-make]');
     if (!b) return;
     const d = (state.decisions || []).find(x => x.id === b.dataset.dcinvMake);
-    if (d) _dcInvestMakeScenario(d);
+    if (d) _dcInvestMakeScenario(d, Number(b.dataset.dcinvAmt) || 0);
   });
 
   // A scenario saved from the shared editor must refresh this page too, otherwise the
