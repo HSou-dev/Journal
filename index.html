@@ -2385,7 +2385,7 @@ let wizardWired = false;
 // (e.g. on the same GitHub Pages site or in the repo's gh-pages branch). The file
 // must contain {"version":"x.y.z"}. If the fetched version differs from APP_VERSION,
 // the user will see an update banner with a one-tap refresh that busts the browser cache.
-const APP_VERSION = '2026.11.23.02';
+const APP_VERSION = '2026.11.27.01';
 const AUTO_UPDATE_URL = 'version.json';   // resolved relative to the page's URL
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // re-check every 5 min while open
 
@@ -3742,23 +3742,22 @@ function computeScenarioEffects(scenarios, monthsMeta, n, salaryGrowth, expenseG
             assetDelta[i] += assetRow[i];
           }
           scRows.push({ label: 'Value owned', kind: 'asset', values: assetRow });
-
-          // Outstanding loan, amortised month by month. Stored negative to match the sign
-          // convention of liabSeries, which net worth adds rather than subtracts.
-          if (loanAmt > 0 && loanYears > 0) {
-            const emi = computeEMI(loanAmt, loanRate, loanYears);
-            const r = loanRate / 12;
-            const endIdx = Math.min(n - 1, idx + loanYears * 12 - 1);
-            const debtRow = new Array(n).fill(0);
-            let bal = loanAmt;
-            for (let i = idx; i <= endIdx; i++) {
-              const interest = bal * r;
-              bal = Math.max(0, bal + interest - emi);
-              debtRow[i] = -bal;
-              liabDelta[i] += -bal;
-            }
-            scRows.push({ label: 'Loan outstanding', kind: 'liability', values: debtRow });
+        }
+        // What you still OWE (v2026.11.27.01): for every purchase with a loan, asset or not
+        // (a car loan is owed just like a land loan). Debt at a month's end = every EMI still to
+        // pay after that month's EMI, from the loan's own term, so a loan running past the end
+        // of the projection window is still counted in full. Stored negative, like liabSeries.
+        // A committed loan is a real EMI and is counted with the other EMIs instead.
+        if (loanAmt > 0 && loanYears > 0 && !_emiMaterialised) {
+          const emi = computeEMI(loanAmt, loanRate, loanYears);
+          const term = loanYears * 12;
+          const debtRow = new Array(n).fill(0);
+          for (let i = idx; i < n && i < idx + term; i++) {
+            const left = term - 1 - (i - idx);
+            debtRow[i] = -emi * left;
+            liabDelta[i] += -emi * left;
           }
+          scRows.push({ label: 'Loan: EMIs still to pay', kind: 'liability', values: debtRow, loanEmi: emi });
         }
       }
     } else if (sc.type === 'sabbatical') {
@@ -4276,14 +4275,24 @@ function addAccountRow(data={}) {
   // For liabilities, internal balance is negative but UI shows the absolute amount as "amount owed"
   const type = data.type || 'asset';
   const displayBalance = type === 'liability' ? Math.abs(data.openingBalance || 0) : (data.openingBalance || 0);
+  // A card in credit (positive balance) used to be shown as "Amount owed" and saved back as a
+  // debt. The side is now explicit.
+  const liabSide = (type === 'liability' && (Number(data.openingBalance) || 0) > 0) ? 'credit' : 'owed';
   const accId = data.id || 'acc_' + Math.random().toString(36).slice(2,8);
   row.setAttribute('data-acc-id', accId);
-  row.innerHTML = `<div class="field"><label>Account name</label><input type="text" data-field="name" placeholder="e.g. HDFC Salary" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Type</label><select data-field="type"><option value="asset" ${type==='asset'?'selected':''}>Asset</option><option value="liability" ${type==='liability'?'selected':''}>Liability</option></select></div><div class="field"><label data-field-label>${type==='liability'?'Amount owed':'Current balance'}</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="balance" min="0" step="any" value="${displayBalance||0}" /></div></div><button class="del-btn" title="Remove">×</button>`;
+  row.innerHTML = `<div class="field"><label>Account name</label><input type="text" data-field="name" placeholder="e.g. HDFC Salary" value="${escapeHtml(data.name||'')}" /></div><div class="field"><label>Type</label><select data-field="type"><option value="asset" ${type==='asset'?'selected':''}>Asset</option><option value="liability" ${type==='liability'?'selected':''}>Liability</option></select></div><div class="field"><label data-field-label>${type==='liability'?(liabSide==='credit'?'Amount in your favour':'Amount owed'):'Current balance'}</label><div class="inline-prefix" data-prefix="${currencySymbol()}"><input type="number" data-field="balance" min="0" step="any" value="${displayBalance||0}" /></div></div><div class="field" data-liab-side-wrap style="${type==='liability'?'':'display:none;'}"><label>Card status</label><select data-field="liabSide"><option value="owed" ${liabSide==='owed'?'selected':''}>You owe this</option><option value="credit" ${liabSide==='credit'?'selected':''}>In credit (owed to you)</option></select></div><button class="del-btn" title="Remove">×</button>`;
   // Update label when type changes
-  row.querySelector('select[data-field="type"]').addEventListener('change', (e) => {
+  const _syncAccLabels = () => {
+    const t = row.querySelector('select[data-field="type"]').value;
+    const sideSel = row.querySelector('select[data-field="liabSide"]');
+    const wrap = row.querySelector('[data-liab-side-wrap]');
+    if (wrap) wrap.style.display = t === 'liability' ? '' : 'none';
     const lbl = row.querySelector('label[data-field-label]') || row.querySelector('.field:nth-child(3) label');
-    if (lbl) lbl.textContent = e.target.value === 'liability' ? 'Amount owed' : 'Current balance';
-  });
+    if (lbl) lbl.textContent = t === 'liability' ? ((sideSel && sideSel.value === 'credit') ? 'Amount in your favour' : 'Amount owed') : 'Current balance';
+  };
+  row.querySelector('select[data-field="type"]').addEventListener('change', _syncAccLabels);
+  const _sideSel = row.querySelector('select[data-field="liabSide"]');
+  if (_sideSel) _sideSel.addEventListener('change', _syncAccLabels);
   row.querySelector('.del-btn').addEventListener('click', () => {
     if (row.getAttribute('data-acc-id') === 'savings') {
       alert('The Savings account is linked to your Savings investment and cannot be removed here. Remove it from the Investments step instead.');
@@ -4504,7 +4513,8 @@ function readAccounts() {
     const type = (row.querySelector('[data-field="type"]')||{}).value || 'asset';
     const inputBal = Number((row.querySelector('[data-field="balance"]')||{}).value) || 0;
     // Liabilities store as negative internally
-    const openingBalance = type === 'liability' ? -Math.abs(inputBal) : Math.abs(inputBal);
+    const side = ((row.querySelector('[data-field="liabSide"]') || {}).value) || 'owed';
+    const openingBalance = type === 'liability' ? (side === 'credit' ? Math.abs(inputBal) : -Math.abs(inputBal)) : Math.abs(inputBal);
     const color = type === 'liability' ? '#e06060' : (accId === 'savings' ? 'var(--accent)' : '#7fb069');
     if (name) {
       result.push({ id: accId, name, type, openingBalance, color });
@@ -5886,16 +5896,53 @@ function runProjection(overrides={}) {
   const scAssetSeries = (scEffects.assetDelta || new Array(n).fill(0)).slice();
   const scLiabSeries  = (scEffects.liabDelta  || new Array(n).fill(0)).slice();
 
+  // Debt on the plan's own EMIs (v2026.11.27.01), same definition as a scenario loan: at a
+  // month's end, every EMI still to pay after that month's EMI. Uses the amounts actually
+  // charged (step-ups, pauses, a close, and any Change my plan revision of that EMI); EMIs
+  // beyond the projection window are counted at the last amount. A loan that has not started
+  // owes nothing yet. Stored negative. Net worth subtracts it: what you own minus what you owe.
+  const emiDebtByLoan = [];
+  const emiDebtSeries = new Array(n).fill(0);
+  {
+    const revDelta = {};
+    (scEffects.breakdowns || []).forEach(b => (b.rows || []).forEach(r => {
+      if (r.revTarget && r.revTarget.indexOf('emi:') === 0) {
+        const acc = revDelta[r.revTarget] || (revDelta[r.revTarget] = new Array(n).fill(0));
+        for (let i = 0; i < n; i++) acc[i] += r.values[i] || 0;
+      }
+    }));
+    const lastIso = months[n - 1] ? months[n - 1].iso : null;
+    const monthsBetween = (a, b) => { const [ay, am] = a.split('-').map(Number), [by, bm] = b.split('-').map(Number); return (by * 12 + bm) - (ay * 12 + am); };
+    (state.emis || []).forEach(e => {
+      const sch = emiScheduleFor(e, months);
+      if (!sch) return;
+      const d = e.id ? revDelta['emi:' + e.id] : null;
+      const amt = new Array(n).fill(0);
+      for (let i = sch.startIdx; i <= sch.endIdx; i++) amt[i] = Math.max(0, (sch.amounts[i] || 0) + (d ? d[i] : 0));
+      const endIso = _emiEndIso(e);
+      const beyond = (endIso && lastIso && endIso > lastIso && sch.endIdx === n - 1) ? monthsBetween(lastIso, endIso) : 0;
+      let tail = beyond * amt[n - 1];
+      const series = new Array(n).fill(0), left = new Array(n).fill(0);
+      let run = tail, cnt = beyond;
+      for (let i = sch.endIdx; i >= sch.startIdx; i--) {
+        series[i] = -run; left[i] = cnt;           // owed after paying month i
+        run += amt[i]; if (amt[i] > 0) cnt++;
+      }
+      for (let i = 0; i < n; i++) emiDebtSeries[i] += series[i];
+      emiDebtByLoan.push({ id: e.id, name: e.name || 'EMI', series, left, amount: amt });
+    });
+  }
+
   const netWorth = new Array(n).fill(0);
   for (let i = 0; i < n; i++) {
     investments.forEach(inv => { netWorth[i] += bal[inv.id + '_' + inv.name][i]; });
-    netWorth[i] += cashSeries[i] + liabSeries[i] + scAssetSeries[i] + scLiabSeries[i];
+    netWorth[i] += cashSeries[i] + liabSeries[i] + scAssetSeries[i] + scLiabSeries[i] + emiDebtSeries[i];
   }
 
   const cumSurplus = []; let cs = 0;
   for (const s of surplus) { cs += s; cumSurplus.push(cs); }
 
-  return { months, labels:months.map(m=>m.label), isos:months.map(m=>m.iso), totalIncome, totalExpense, surplus, cumSurplus, emiMonthly, investments, bal, netWorth, contribSeries, contribPerMonth, accounts, accountBal, cashSeries, liabSeries, cashRate, salaryMul, expGrowthMul, p1Series, p2Series, oneOffIncSeries, expCategorySeries, oneOffExpSeries, cashContribSeries, growContrib, redemptionInflow, invTimeline, scAssetSeries, scLiabSeries, scenarioBreakdowns: scEffects.breakdowns, reviseBase: reviseCtx };
+  return { months, labels:months.map(m=>m.label), isos:months.map(m=>m.iso), totalIncome, totalExpense, surplus, cumSurplus, emiMonthly, investments, bal, netWorth, contribSeries, contribPerMonth, accounts, accountBal, cashSeries, liabSeries, cashRate, salaryMul, expGrowthMul, p1Series, p2Series, oneOffIncSeries, expCategorySeries, oneOffExpSeries, cashContribSeries, growContrib, redemptionInflow, invTimeline, scAssetSeries, scLiabSeries, emiDebtSeries, emiDebtByLoan, scenarioBreakdowns: scEffects.breakdowns, reviseBase: reviseCtx };
 }
 
 // ---- PATCH: Fix runProjection for correct increment logic, cash balance, and opening balances ----
@@ -6050,7 +6097,8 @@ function runProjection(overrides={}) {
       result.netWorth[i] = 0;
       (result.investments || []).forEach(inv => { result.netWorth[i] += (result.bal[inv.id+'_'+inv.name] || [])[i] || 0; });
       result.netWorth[i] += fixedCash[i] + liabSeries[i]
-                          + ((result.scAssetSeries || [])[i] || 0) + ((result.scLiabSeries || [])[i] || 0);
+                          + ((result.scAssetSeries || [])[i] || 0) + ((result.scLiabSeries || [])[i] || 0)
+                          + ((result.emiDebtSeries || [])[i] || 0);
     }
 
     // ---- FIX 6: Actuals overlay ----
@@ -6193,7 +6241,8 @@ function runProjection(overrides={}) {
       result.netWorth[i] = 0;
       (result.investments || []).forEach(inv => { result.netWorth[i] += (result.bal[inv.id+'_'+inv.name] || [])[i] || 0; });
       result.netWorth[i] += fixedCash2[i] + (result.liabSeries[i] || 0)
-                          + ((result.scAssetSeries || [])[i] || 0) + ((result.scLiabSeries || [])[i] || 0);
+                          + ((result.scAssetSeries || [])[i] || 0) + ((result.scLiabSeries || [])[i] || 0)
+                          + ((result.emiDebtSeries || [])[i] || 0);
     }
     result.currentMonthIdx = result.isos.indexOf(nowYM);
   }
@@ -6807,8 +6856,8 @@ function renderDashboard() {
   const cashTotal = _dashCashChain ? (_dashCashChain[todayIdx] || 0)
     : (state.accounts || []).filter(a => a.type === 'asset').reduce((s,a) => s + (Number(a.openingBalance) || 0), 0);
   if (cashTotal > 0) compEntries.push({ name: 'Cash & Savings', color: '#C9A84C', value: cashTotal });
-  const liabTotal = (state.accounts || []).filter(a => a.type === 'liability')
-    .reduce((s,a) => s + Math.abs(Number(a.openingBalance) || 0), 0);
+  // Same definition as Net Worth's Debts (debtsAt): cards owed plus EMIs still to pay.
+  const liabTotal = debtsAt(p, todayIdx).total;
   const totalAssets = compEntries.reduce((s,e) => s + e.value, 0);
 
   // ── Monthly cash flow (this month) ──
@@ -7577,6 +7626,31 @@ function sharedCurrentMonthClose(p) {
    engine and then discarded on the way to the screen.
    One function, so a sixth variant cannot drift away again.
    ========================================================================== */
+// What you owe at month idx, itemised, from the same series net worth subtracts. Shared by the
+// Net Worth page and the Dashboard so their Debts figures cannot differ. A card in credit is
+// money owed TO you: it is not a debt, and is returned separately so totals still add up.
+function debtsAt(p, idx) {
+  const cardsOwed = [], cardsCredit = [];
+  (p.accounts || state.accounts || []).filter(a => a.type === 'liability').forEach(a => {
+    const bal = ((p.accountBal && p.accountBal[a.id]) || [])[idx];
+    const v = (bal != null) ? bal : (Number(a.openingBalance) || 0);
+    if (v < 0) cardsOwed.push({ name: a.name + ' (owed)', val: -v });
+    else if (v > 0) cardsCredit.push({ name: a.name + ' (in credit)', val: v });
+  });
+  const loans = [];
+  (p.emiDebtByLoan || []).forEach(l => {
+    const v = -((l.series || [])[idx] || 0);
+    if (v > 0.5) loans.push({ name: `${l.name} · ${l.left[idx]} EMI${l.left[idx] === 1 ? '' : 's'} left`, val: v });
+  });
+  (p.scenarioBreakdowns || []).forEach(b => (b.rows || []).forEach(r => {
+    if (r.kind !== 'liability') return;
+    const v = -((r.values || [])[idx] || 0);
+    if (v > 0.5) loans.push({ name: `${b.scenarioName} loan · ${r.loanEmi ? Math.round(v / r.loanEmi) : '?'} EMIs left`, val: v });
+  }));
+  const sum = a => a.reduce((t, x) => t + x.val, 0);
+  return { cardsOwed, cardsCredit, loans, total: sum(cardsOwed) + sum(loans), credit: sum(cardsCredit) };
+}
+
 function sharedNetWorthSeries(p) {
   const chain = (typeof projectSavingsChain === 'function') ? projectSavingsChain(p) : null;
   return p.isos.map((ym, i) => {
@@ -7584,8 +7658,9 @@ function sharedNetWorthSeries(p) {
     const cash = chain ? (chain[i] || 0) : ((p.cashSeries || [])[i] || 0);
     const liab = (p.liabSeries || [])[i] || 0;
     const scAsset = (p.scAssetSeries || [])[i] || 0;   // property owned via a scenario
-    const scLiab  = (p.scLiabSeries  || [])[i] || 0;   // loan still owed on it (negative)
-    return inv + cash + liab + scAsset + scLiab;
+    const scLiab  = (p.scLiabSeries  || [])[i] || 0;   // scenario loans: EMIs still to pay (negative)
+    const emiDebt = (p.emiDebtSeries || [])[i] || 0;   // the plan's own EMIs: EMIs still to pay (negative)
+    return inv + cash + liab + scAsset + scLiab + emiDebt;
   });
 }
 
@@ -9810,7 +9885,8 @@ function renderNetWorth() {
       _emiRemain += e.amount * (win.endIdx - from + 1);
     }
   });
-  const debtsAtDate = Math.abs(liabAtDate) + _emiRemain;
+  const _debts = debtsAt(p, idx);
+  const debtsAtDate = _debts.total;
   const kpiEl = document.getElementById('nwKpis');
   const kpiData = [
     { label:'Net Worth · '+valDate, val:nwAtDate, color:'gold' },
@@ -9828,19 +9904,18 @@ function renderNetWorth() {
   ];
   const _nwIlliquidParts = p.investments.filter(i => !i.liquid)
     .map(inv => ({ name: inv.name, val: p.bal[inv.id + '_' + inv.name][idx] || 0 }));
-  const _nwDebtParts = [
-    ...(state.accounts || []).filter(a => a.type === 'liability')
-      .map(a => ({ name: a.name + ' (outstanding)', val: Math.abs(Number(a.openingBalance) || 0) })),
-    ...(_emiRemain > 0 ? [{ name: 'EMI instalments still to pay', val: _emiRemain }] : [])
-  ];
+  const _nwDebtParts = [..._debts.cardsOwed, ..._debts.loans];
   const _nwScAsset = ((p.scAssetSeries || [])[idx] || 0);
-  const _nwScLiab = ((p.scLiabSeries || [])[idx] || 0);
+  // Parts of the headline, built from the same pieces sharedNetWorthSeries adds, so they sum to
+  // it exactly. Cash here is the month-end figure the headline uses; the Liquidity tile keeps the
+  // live savings balance for the current month, as before.
   const _nwTotalParts = [
-    { name: 'Liquidity', val: lqAtDate },
+    { name: 'Cash and savings (month-end)', val: cashAtDate },
+    { name: 'Investments marked liquid', val: lqInvAtDate },
     { name: 'Non-liquid assets', val: nonLiquidAtDate },
-    ...(_nwScAsset ? [{ name: 'Property bought in a scenario', val: _nwScAsset }] : []),
-    ...(_nwScLiab ? [{ name: 'Loan outstanding on that property', val: _nwScLiab }] : []),
-    { name: 'Debts', val: -debtsAtDate }
+    ...(_nwScAsset ? [{ name: 'Land / house bought in a scenario (current value)', val: _nwScAsset }] : []),
+    ...(_debts.credit > 0 ? [{ name: 'Cards in credit (owed to you)', val: _debts.credit }] : []),
+    { name: 'Debts (cards owed + EMIs still to pay)', val: -debtsAtDate }
   ];
   window._nwBreakdowns = {
     total:    { title: 'Net worth · ' + valDate, parts: _nwTotalParts, total: nwAtDate,
@@ -9850,7 +9925,7 @@ function renderNetWorth() {
     illiquid: { title: 'Non-liquid assets · ' + valDate, parts: _nwIlliquidParts, total: nonLiquidAtDate,
                 note: 'Instruments NOT marked liquid. Real, but not available at short notice.' },
     debts:    { title: 'Debts · ' + valDate, parts: _nwDebtParts, total: debtsAtDate,
-                note: 'Outstanding balances on liability accounts, plus every EMI instalment still scheduled. EMIs sit outside liability accounts, so these do not overlap.' }
+                note: 'Card balances you owe, plus every EMI still to pay on each loan after this month\'s EMI (your EMIs and any loan in an active scenario). A loan that has not started yet is not counted. A card in credit is owed to you, so it is not a debt.' }
   };
   const _nwKeys = ['total', 'liquid', 'illiquid', 'debts'];
   kpiEl.innerHTML = kpiData.map((k, i2) => `<div class="card kpi" data-nw-card="${_nwKeys[i2]}" style="cursor:pointer;" title="See what makes this up"><div class="card-head">${k.label}</div><div class="val ${k.color}">${fmtMoney(k.val, true)}</div><div style="font-size:10.5px;color:var(--ink-muted);margin-top:6px;">tap for the breakdown</div></div>`).join('');
@@ -14148,6 +14223,12 @@ document.addEventListener('keydown', (e) => {
     const dirSel = document.querySelector('#txAdjDirChips .tx-cat-chip.selected');
     const dir = dirSel ? dirSel.dataset.dir : 'add';
     const acc = (state.accounts || []).find(a => a.id === (accSel && accSel.value));
+    // On a card, "add" means owe more and "subtract" means owe less (refund / payment).
+    const liab = !!(acc && acc.type === 'liability');
+    const addChip = document.querySelector('#txAdjDirChips [data-dir="add"]');
+    const subChip = document.querySelector('#txAdjDirChips [data-dir="subtract"]');
+    if (addChip) addChip.textContent = liab ? '+ Owe more' : '+ Add to balance';
+    if (subChip) subChip.textContent = liab ? '− Owe less (refund / payment)' : '− Subtract from balance';
     const field = document.getElementById('txAdjHiddenField');
     if (!field) return;
     field.style.display = (acc && acc.type === 'liability' && dir === 'add') ? '' : 'none';
